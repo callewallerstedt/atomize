@@ -1,0 +1,889 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import katex from "katex";
+import { Highlight, themes } from "prism-react-renderer";
+import { loadSubjectData, upsertNodeContent, TopicGeneratedContent, TopicGeneratedLesson, StoredSubjectData } from "@/utils/storage";
+import WordPopover from "@/components/WordPopover";
+
+// Regex patterns moved inside component to avoid any global scope issues
+
+export default function NodePage() {
+
+  const params = useParams<{ slug: string; name: string }>();
+  const slug = params.slug;
+  const title = decodeURIComponent(params.name || "");
+  const [content, setContent] = useState<TopicGeneratedContent | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [lessonLoading, setLessonLoading] = useState<boolean>(false);
+  const [shorteningLesson, setShorteningLesson] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [popoverXY, setPopoverXY] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [popoverLoading, setPopoverLoading] = useState(false);
+  const [popoverError, setPopoverError] = useState<string | null>(null);
+  const [popoverContent, setPopoverContent] = useState<string>("");
+  const [userAnswers, setUserAnswers] = useState<{ [key: number]: string }>({});
+  const [quizResults, setQuizResults] = useState<{ [key: number]: { correct: boolean; explanation: string } } | null>(null);
+  const [checkingAnswers, setCheckingAnswers] = useState(false);
+  const [currentLessonIndex, setCurrentLessonIndex] = useState(0);
+  const [hoveredParagraph, setHoveredParagraph] = useState<string | null>(null);
+  const [simplifyingParagraph, setSimplifyingParagraph] = useState<string | null>(null);
+
+  const subjectData = useMemo(() => loadSubjectData(slug), [slug]);
+  const courseTopics = useMemo(() => {
+    const names: string[] = [];
+    // Prefer new topics meta if available
+    if (subjectData?.topics?.length) {
+      subjectData.topics.forEach((t: any) => names.push(String(t.name)));
+    } else {
+      // Legacy tree fallback
+      function collectNames(node: any, acc: string[]) {
+        if (!node) return;
+        if (Array.isArray(node)) {
+          node.forEach((n) => collectNames(n, acc));
+        } else {
+          if (node.name) acc.push(String(node.name));
+          if (node.subtopics) collectNames(node.subtopics, acc);
+        }
+      }
+      collectNames(subjectData?.tree?.topics || [], names);
+    }
+    return Array.from(new Set(names)).slice(0, 200);
+  }, [subjectData]);
+
+
+  function wrapTextNode(str: string, parentFull?: string) {
+    // Simplified word detection without regex
+    const words = [];
+    let currentWord = '';
+
+    for (let i = 0; i < str.length; i++) {
+      const char = str[i];
+      if (char === ' ' || char === '\t' || char === '\n') {
+        if (currentWord) {
+          words.push(currentWord);
+          currentWord = '';
+        }
+        words.push(char);
+      } else {
+        currentWord += char;
+      }
+    }
+    if (currentWord) words.push(currentWord);
+
+    return words.map((token, idx) => {
+      const trimmed = token.trim();
+      const isWord = trimmed && trimmed.length > 0 && !trimmed.includes('.') && !trimmed.includes(',') && !trimmed.includes('!') && !trimmed.includes('?') && !trimmed.includes(':') && !trimmed.includes(';');
+      if (!isWord) return token;
+      return (
+        <span
+          key={idx}
+          className="hoverable-word"
+          onClick={(e) => onWordClick(token, parentFull || str, e)}
+        >
+          {token}
+        </span>
+      );
+    });
+  }
+
+  function wrapChildren(children: any): any {
+    return (Array.isArray(children) ? children : [children]).map((child, i) => {
+      if (typeof child === "string") return <span key={i}>{wrapTextNode(child)}</span>;
+      if (child && typeof child === "object" && child.props && child.props.children) {
+        return { ...child, props: { ...child.props, children: wrapChildren(child.props.children) } };
+      }
+      return child;
+    });
+  }
+
+  async function onWordClick(word: string, parentText: string, e: React.MouseEvent) {
+    e.preventDefault();
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    setPopoverXY({ x: rect.left + window.scrollX, y: rect.bottom + window.scrollY });
+    setPopoverOpen(true);
+    setPopoverLoading(true);
+    setPopoverError(null);
+    setPopoverContent("");
+    try {
+      const idx = parentText.indexOf(word);
+      const localContext = idx >= 0 ? parentText.slice(Math.max(0, idx - 120), Math.min(parentText.length, idx + word.length + 120)) : parentText.slice(0, 240);
+      const res = await fetch("/api/quick-explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject: subjectData?.subject || slug, topic: title, word, localContext, courseTopics, languageName: subjectData?.course_language_name || "" }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
+      setPopoverContent(json.content || "");
+    } catch (err: any) {
+      setPopoverError(err?.message || "Failed to explain");
+    } finally {
+      setPopoverLoading(false);
+    }
+  }
+
+  async function simplifyParagraph(paragraphText: string) {
+    if (simplifyingParagraph) return;
+    // Mark THIS paragraph as simplifying (string id) so UI can react immediately
+    setSimplifyingParagraph(paragraphText);
+    try {
+      const res = await fetch("/api/simplify-paragraph", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: subjectData?.subject || slug,
+          topic: title,
+          paragraph: paragraphText,
+          lessonContent: content?.lessons?.[currentLessonIndex]?.body || "",
+          courseContext: subjectData?.course_context || "",
+        })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
+      return json.simplified || paragraphText;
+    } catch (err: any) {
+      console.error("Failed to simplify paragraph:", err);
+      return paragraphText; // Return original if simplification fails
+    } finally {
+      setSimplifyingParagraph(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!title) return;
+    const saved = subjectData?.nodes?.[title] as any;
+    if (saved) {
+      if (typeof saved === "string") {
+        setContent({ overview: saved, symbols: [], lessons: [] });
+      } else {
+        setContent(saved as TopicGeneratedContent);
+        // Don't auto-navigate to last lesson - let user choose which lesson to view
+      }
+    } else {
+      setContent(null);
+    }
+  }, [slug, title, subjectData]);
+
+
+  return (
+    <>
+    <div className="flex min-h-screen flex-col bg-[#0F1216]">
+      <div className="mx-auto w-full max-w-3xl px-6 py-8">
+        {error ? (
+          <div className="mb-4 rounded-xl border border-[#3A1E2C] bg-[#1B0F15] p-3 text-sm text-[#FFC0DA]">{error}</div>
+        ) : null}
+
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="flex flex-col items-center gap-5">
+              <div className="h-20 w-20 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
+              <div className="text-sm text-[#A7AFBE]">Generating content…</div>
+            </div>
+          </div>
+        ) : (lessonLoading || shorteningLesson) ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="flex flex-col items-center gap-5">
+              <div className="h-20 w-20 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
+              <div className="text-sm text-[#A7AFBE]">
+                {shorteningLesson ? "Shortening lesson content…" : "Generating lesson content…"}
+              </div>
+            </div>
+          </div>
+        ) : content && content.lessons && content.lessons.length > 0 ? (
+            <div className="space-y-6">
+              
+              <div className="rounded-2xl border border-[#222731] bg-[#0B0E12] p-5 text-[#E5E7EB]">
+              
+              <div className="flex items-center gap-2 mb-4">
+                <button
+                  onClick={async () => {
+                    if (shorteningLesson || lessonLoading) return;
+                    setShorteningLesson(true);
+                    try {
+                      const currentLessonIndex = content.lessons.length - 1;
+                      const currentLesson = content.lessons[currentLessonIndex];
+                      if (!currentLesson) {
+                        alert("No lesson content to shorten");
+                        return;
+                      }
+                      const res = await fetch("/api/shorten-lesson", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          lessonTitle: currentLesson.title,
+                          lessonBody: currentLesson.body,
+                          subject: subjectData?.subject || slug,
+                          topic: title,
+                        })
+                      });
+                      const json = await res.json().catch(() => ({}));
+                      if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
+                      const shortenedLesson = json.data || {};
+                      const next = { ...(content as TopicGeneratedContent) };
+                      next.lessons[currentLessonIndex] = {
+                        ...currentLesson,
+                        body: String(shortenedLesson.body || currentLesson.body),
+                      };
+                      setContent(next);
+                      upsertNodeContent(slug, title, next as any);
+                    } catch (err: any) {
+                      alert(err?.message || "Failed to shorten lesson");
+                    } finally {
+                      setShorteningLesson(false);
+                    }
+                  }}
+                  disabled={shorteningLesson || lessonLoading}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#2B3140] bg-[#0F141D] text-[#E5E7EB] hover:bg-[#151922] disabled:opacity-60 transition-colors"
+                  title="Shorten lesson (make it concise)"
+                >
+                  <span className="text-lg font-bold">-</span>
+                </button>
+                <button
+                  onClick={async () => {
+                    if (lessonLoading) return;
+                    setLessonLoading(true);
+                    try {
+                      const currentLessonIndex = content.lessons.length - 1;
+                      const topicMeta = (subjectData?.topics || []).find((t: any) => String(t.name) === title);
+                      const res = await fetch("/api/node-lesson", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          subject: subjectData?.subject || slug,
+                          topic: title,
+                          course_context: subjectData?.course_context || "",
+                          combinedText: subjectData?.combinedText || "",
+                          topicSummary: topicMeta?.summary || "",
+                          lessonsMeta: content?.lessonsMeta || [],
+                          lessonIndex: currentLessonIndex,
+                          previousLessons: content.lessons.slice(0, currentLessonIndex),
+                          generatedLessons: content.lessons.slice(0, currentLessonIndex).filter((l): l is TopicGeneratedLesson => l !== null).map((l, i) => ({ index: i, title: l.title, body: l.body })),
+                          otherLessonsMeta: (content?.lessonsMeta || []).slice(currentLessonIndex + 1).map((m, i) => ({ index: currentLessonIndex + 1 + i, type: m.type, title: m.title })),
+                          courseTopics,
+                          languageName: subjectData?.course_language_name || "",
+                        })
+                      });
+                      const json = await res.json().catch(() => ({}));
+                      if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
+                      const lesson = json.data || {};
+                      const next = { ...(content as TopicGeneratedContent) };
+                      next.lessons[currentLessonIndex] = {
+                        title: String(lesson.title || next.lessons[currentLessonIndex]?.title || content?.lessonsMeta?.[currentLessonIndex]?.title || `Lesson ${currentLessonIndex + 1}`),
+                        body: String(lesson.body || ""),
+                        quiz: Array.isArray(lesson.quiz) ? lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : next.lessons[currentLessonIndex]?.quiz || []
+                      };
+                      next.rawLessonJson = Array.isArray(next.rawLessonJson) ? [...next.rawLessonJson] : [];
+                      next.rawLessonJson[currentLessonIndex] = typeof json.raw === 'string' ? json.raw : JSON.stringify(lesson);
+                      setContent(next);
+                      upsertNodeContent(slug, title, next as any);
+
+                      // Reset quiz state for the regenerated lesson
+                      setUserAnswers({});
+                      setQuizResults(null);
+                    } catch (err: any) {
+                      alert(err?.message || "Failed to regenerate lesson");
+                    } finally {
+                      setLessonLoading(false);
+                    }
+                  }}
+                  disabled={lessonLoading}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#2B3140] bg-[#0F141D] text-[#E5E7EB] hover:bg-[#151922] disabled:opacity-60 transition-colors"
+                  title="Regenerate this lesson"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M4 4V9H4.58152M4.58152 9C5.47362 7.27477 7.06307 6 9 6C11.3869 6 13.6761 7.36491 14.9056 9.54555M4.58152 9H9M20 20V15H19.4185M19.4185 15C18.5264 16.7252 16.9369 18 15 18C12.6131 18 10.3239 16.6351 9.09443 14.4545M19.4185 15H15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-[#A7AFBE]">Lesson:</label>
+                  <select
+                    value={currentLessonIndex}
+                    onChange={(e) => {
+                      const selectedIndex = parseInt(e.target.value);
+                      // Switch to the selected lesson (generated or not)
+                      setCurrentLessonIndex(selectedIndex);
+                      setUserAnswers({});
+                      setQuizResults(null);
+                    }}
+                    className="rounded-lg border border-[#2B3140] bg-[#0F141D] px-3 py-1 text-sm text-[#E5E7EB] focus:border-[#00E5FF] focus:outline-none"
+                  >
+                    {content.lessonsMeta?.map((meta, index) => (
+                      <option key={index} value={index}>
+                        {content.lessons[index] ? "✓ " : "○ "}{meta.type}: {meta.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="lesson-content">
+                {content.lessons[currentLessonIndex]?.body ? (
+                  <>
+                    <div className="text-sm text-[#A7AFBE] mb-2">{content.lessonsMeta?.[currentLessonIndex]?.type}: {content.lessonsMeta?.[currentLessonIndex]?.title}</div>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm, remarkMath]}
+                      rehypePlugins={[rehypeKatex]}
+                      components={{
+                        p: ({ children }) => {
+                          let paragraphText = String(children);
+                          // Simple HTML tag removal without regex
+                          while (paragraphText.includes('<') && paragraphText.includes('>')) {
+                            const start = paragraphText.indexOf('<');
+                            const end = paragraphText.indexOf('>', start);
+                            if (end > start) {
+                              paragraphText = paragraphText.slice(0, start) + paragraphText.slice(end + 1);
+                            } else {
+                              break;
+                            }
+                          }
+                          const isSimplifying = simplifyingParagraph === paragraphText;
+
+                          return (
+                            <div
+                              className="relative group py-8 -my-6"
+                              onMouseEnter={() => setHoveredParagraph(paragraphText)}
+                              onMouseLeave={() => setHoveredParagraph(null)}
+                            >
+                              <div className="flex transition-all duration-500">
+                                <p
+                                  className={
+                                    isSimplifying
+                                      ? 'relative flex-1 transition-all duration-500 rounded-md px-2 py-1 shadow-[0_0_15px_rgba(0,229,255,0.4)]'
+                                      : 'relative flex-1 transition-all duration-500 rounded-md px-2 py-1'
+                                  }
+                                  style={isSimplifying ? {
+                                    background: 'linear-gradient(to right, rgba(0, 229, 255, 0.3) 0%, rgba(0, 229, 255, 0.3) 100%)'
+                                  } : {}}
+                                >
+                                  {wrapChildren(children)}
+                                </p>
+                              </div>
+                              <div
+                                className={
+                                  hoveredParagraph === paragraphText
+                                    ? 'paragraph-line absolute right-8 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-100 scale-y-100'
+                                    : 'paragraph-line absolute right-8 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-0 scale-y-0'
+                                }
+                                style={{ transformOrigin: 'top' }}
+                              />
+                              {!isSimplifying && (
+                                <div className="absolute right-0 top-1 flex items-start">
+                                  <button
+                                    tabIndex={-1}
+                                    onMouseEnter={(e) => { e.preventDefault(); setHoveredParagraph(paragraphText); }}
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onFocus={(e) => e.preventDefault()}
+                                onClick={async (e) => {
+                                  e.preventDefault();
+                                  const scrollY = window.scrollY;
+                                    setSimplifyingParagraph(paragraphText);
+                                    try {
+                                      const simplified = await simplifyParagraph(paragraphText);
+                                      if (simplified && simplified !== paragraphText) {
+                                        // Replace the paragraph in the lesson content
+                                        // Use a more robust replacement by finding similar text
+                                        const currentBody = content.lessons[currentLessonIndex]?.body || '';
+
+                                        // Simple whitespace normalization without regex
+                                        const normalizeWhitespace = (text: string) => {
+                                          let result = '';
+                                          let wasSpace = false;
+                                          for (let i = 0; i < text.length; i++) {
+                                            const char = text[i];
+                                            if (char === ' ' || char === '\t' || char === '\n') {
+                                              if (!wasSpace) {
+                                                result += ' ';
+                                                wasSpace = true;
+                                              }
+                                            } else {
+                                              result += char;
+                                              wasSpace = false;
+                                            }
+                                          }
+                                          return result.trim();
+                                        };
+
+                                        const normalizedOriginal = normalizeWhitespace(paragraphText);
+                                        const normalizedSimplified = normalizeWhitespace(simplified);
+
+                                        // Try to find and replace the paragraph in the markdown
+                                        let newBody = currentBody;
+                                        const paragraphs = currentBody.split('\n\n');
+
+                                        for (let i = 0; i < paragraphs.length; i++) {
+                                          const para = normalizeWhitespace(paragraphs[i]);
+                                          // Check if this paragraph contains our text
+                                          if (para.includes(normalizedOriginal.substring(0, 50))) {
+                                            paragraphs[i] = simplified;
+                                            newBody = paragraphs.join('\n\n');
+                                            break;
+                                          }
+                                        }
+
+                                        const next = { ...(content as TopicGeneratedContent) };
+                                        next.lessons = next.lessons ? [...next.lessons] : [];
+                                        const currentLesson = next.lessons[currentLessonIndex];
+                                        next.lessons[currentLessonIndex] = {
+                                          title: currentLesson?.title || content?.lessonsMeta?.[currentLessonIndex]?.title || `Lesson ${currentLessonIndex + 1}`,
+                                          body: newBody,
+                                          quiz: currentLesson?.quiz || []
+                                        };
+                                        setContent(next);
+                                        upsertNodeContent(slug, title, next as any);
+                                      }
+                                    } catch (err: any) {
+                                      console.error('Failed to simplify paragraph:', err);
+                                      alert('Failed to simplify paragraph: ' + err.message);
+                                    } finally {
+                                      setSimplifyingParagraph(null);
+                                    }
+                                    // Restore scroll position
+                                    setTimeout(() => window.scrollTo(0, scrollY), 0);
+                                  }}
+                                      disabled={isSimplifying}
+                                      className="transition-all duration-300 inline-flex h-7 w-7 items-center justify-center rounded-full shadow-lg cursor-pointer opacity-0 group-hover:opacity-100 bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white hover:shadow-xl hover:scale-110"
+                                      title="Simplify paragraph"
+                                    >
+                                      S
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        },
+                        li: ({ children }) => <li>{wrapChildren(children)}</li>,
+                        h1: ({ children }) => <h1>{wrapChildren(children)}</h1>,
+                        h2: ({ children }) => <h2>{wrapChildren(children)}</h2>,
+                        h3: ({ children }) => <h3>{wrapChildren(children)}</h3>,
+                        td: ({ children }) => <td>{wrapChildren(children)}</td>,
+                        th: ({ children }) => <th>{wrapChildren(children)}</th>,
+                        code: ({ children, ...props }) => {
+                          // Handle inline math expressions that might be in code blocks
+                          const content = String(children).trim();
+                          if (content.startsWith('$') && content.endsWith('$') && content.length > 2) {
+                            // This is likely an inline math expression that should be rendered as math
+                            return <span dangerouslySetInnerHTML={{
+                              __html: katex.renderToString(content.slice(1, -1), { displayMode: false, throwOnError: false })
+                            }} />;
+                          }
+                          return <code {...props}>{children}</code>;
+                        },
+                        pre: ({ children, ...props }) => {
+                          // Extract code content from React elements
+                          const extractTextContent = (element: any): string => {
+                            if (typeof element === 'string') return element;
+                            if (Array.isArray(element)) return element.map(extractTextContent).join('');
+                            if (element?.props?.children) return extractTextContent(element.props.children);
+                            return '';
+                          };
+
+                          const codeContent = extractTextContent(children);
+                          const lines = codeContent.split('\n');
+
+                          // Extract language from className (e.g., "language-javascript" -> "javascript")
+                          const className = (props as any).className || '';
+                          let language = '';
+                          if (className.startsWith('language-')) {
+                            language = className.substring(9); // Remove 'language-' prefix
+                          }
+
+
+                          return (
+                            <div className="relative bg-[#0F141D] border border-[#2B3140] rounded-lg overflow-hidden my-4">
+                              <div className="flex font-mono">
+                                
+                                <div className="bg-[#0A0E14] px-2 py-4 text-[10px] text-[#6B7280] select-none border-r border-[#2B3140] leading-[1.5] min-w-[2.5rem]">
+                                  {lines.map((_, index) => (
+                                    <div key={index} className="h-[21px] flex items-start justify-end pr-1">
+                                      {index + 1}
+                                    </div>
+                                  ))}
+                                </div>
+                                
+                                <div className="flex-1 py-4 pl-4 overflow-x-auto">
+                                  <Highlight
+                                    code={codeContent.trim()}
+                                    language={language || 'javascript'}
+                                    theme={themes.vsDark}
+                                  >
+                                    {({ className, style, tokens, getLineProps, getTokenProps }) => (
+                                      <pre
+                                        style={{
+                                          ...style,
+                                          margin: 0,
+                                          padding: 0,
+                                          background: 'transparent',
+                                          fontSize: '14px',
+                                          lineHeight: '1.5',
+                                          fontFamily: 'var(--font-mono)',
+                                        }}
+                                        className={className}
+                                      >
+                                        {tokens.map((line, i) => (
+                                          <div key={i} {...getLineProps({ line })}>
+                                            {line.map((token, key) => (
+                                              <span key={key} {...getTokenProps({ token })} />
+                                            ))}
+                                          </div>
+                                        ))}
+                                      </pre>
+                                    )}
+                                  </Highlight>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        },
+                      }}
+                    >
+                      {content.lessons[currentLessonIndex].body}
+                    </ReactMarkdown>
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-16 space-y-4">
+                    <div className="text-center">
+                      <div className="text-lg font-medium text-[#E5E7EB] mb-2">
+                        {content.lessonsMeta?.[currentLessonIndex]?.type}: {content.lessonsMeta?.[currentLessonIndex]?.title}
+                      </div>
+                      <div className="text-sm text-[#A7AFBE] mb-6">
+                        This lesson hasn't been generated yet.
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (lessonLoading) return;
+                          setLessonLoading(true);
+                          try {
+                            const topicMeta = (subjectData?.topics || []).find((t: any) => String(t.name) === title);
+                            const res = await fetch("/api/node-lesson", {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                subject: subjectData?.subject || slug,
+                                topic: title,
+                                course_context: subjectData?.course_context || "",
+                                combinedText: subjectData?.combinedText || "",
+                                topicSummary: topicMeta?.summary || "",
+                                lessonsMeta: content?.lessonsMeta || [],
+                                lessonIndex: currentLessonIndex,
+                                previousLessons: content.lessons.filter((l): l is TopicGeneratedLesson => l !== null),
+                                generatedLessons: content.lessons.filter((l): l is TopicGeneratedLesson => l !== null).map((l, i) => ({ index: i, title: l.title, body: l.body })),
+                                otherLessonsMeta: (content?.lessonsMeta || []).slice(currentLessonIndex + 1).map((m, i) => ({ index: currentLessonIndex + 1 + i, type: m.type, title: m.title })),
+                                courseTopics,
+                                languageName: subjectData?.course_language_name || "",
+                              })
+                            });
+                            const json = await res.json().catch(() => ({}));
+                            if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
+                            const lesson = json.data || {};
+                            const next = { ...(content as TopicGeneratedContent) };
+                            next.lessons = next.lessons ? [...next.lessons] : [];
+                            // Fill in any missing lessons
+                            while (next.lessons.length <= currentLessonIndex) {
+                              next.lessons.push(null);
+                            }
+                            next.lessons[currentLessonIndex] = {
+                              title: String(lesson.title || (content?.lessonsMeta?.[currentLessonIndex]?.title || `Lesson ${currentLessonIndex + 1}`)),
+                              body: String(lesson.body || ""),
+                              quiz: Array.isArray(lesson.quiz) ? lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : []
+                            };
+                            next.rawLessonJson = Array.isArray(next.rawLessonJson) ? [...next.rawLessonJson] : [];
+                            while (next.rawLessonJson.length <= currentLessonIndex) {
+                              next.rawLessonJson.push(null);
+                            }
+                            next.rawLessonJson[currentLessonIndex] = typeof json.raw === 'string' ? json.raw : JSON.stringify(lesson);
+                            setContent(next);
+                            upsertNodeContent(slug, title, next as any);
+                          } catch (err: any) {
+                            console.error('Failed to generate lesson:', err);
+                            setError(err?.message || 'Failed to generate lesson');
+                          } finally {
+                            setLessonLoading(false);
+                          }
+                        }}
+                        disabled={lessonLoading}
+                        className="inline-flex h-12 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-8 text-base font-medium text-white hover:opacity-95 disabled:opacity-60 transition-opacity"
+                      >
+                        {shorteningLesson ? "Shortening..." : lessonLoading ? "Generating..." : "Generate Lesson"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {content.lessons[currentLessonIndex]?.quiz && content.lessons[currentLessonIndex].quiz.length > 0 && (
+                  <div className="mt-6">
+                    <h3 className="text-sm font-semibold text-[#E5E7EB] mb-4">Quick Questions</h3>
+                    <div className="space-y-4">
+                      {content.lessons[currentLessonIndex].quiz.map((q, qi) => (
+                        <div key={qi} className="space-y-2">
+                          <div className="text-sm text-[#E5E7EB]">{q.question}</div>
+                          <div className="space-y-2">
+                            <input
+                              type="text"
+                              value={userAnswers[qi] || ""}
+                              onChange={(e) => setUserAnswers(prev => ({ ...prev, [qi]: e.target.value }))}
+                              className={
+                                quizResults?.[qi]
+                                  ? quizResults[qi].correct
+                                    ? 'w-full rounded-lg border border-green-500 bg-green-500 bg-opacity-10 text-green-100 px-3 py-2 text-sm transition-colors'
+                                    : 'w-full rounded-lg border border-red-500 bg-red-500 bg-opacity-10 text-red-100 px-3 py-2 text-sm transition-colors'
+                                  : 'w-full rounded-lg border border-[#2B3140] bg-[#0F141D] text-[#E5E7EB] focus:border-[#00E5FF] focus:outline-none px-3 py-2 text-sm transition-colors'
+                              }
+                              placeholder="Your answer..."
+                              disabled={checkingAnswers}
+                            />
+                            {quizResults?.[qi] && (
+                              <div className={
+                                quizResults[qi].correct
+                                  ? 'text-xs p-2 rounded bg-green-500 bg-opacity-20 text-green-200'
+                                  : 'text-xs p-2 rounded bg-red-500 bg-opacity-20 text-red-200'
+                              }>
+                                {quizResults[qi].explanation}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-6 flex justify-center">
+                      <button
+                        onClick={async () => {
+                          if (checkingAnswers) return;
+                          setCheckingAnswers(true);
+                          try {
+                            const currentLesson = content.lessons[currentLessonIndex];
+                            if (!currentLesson) {
+                              alert("No lesson content to check answers for");
+                              return;
+                            }
+                            const answers = currentLesson.quiz.map((q, qi) => ({
+                              question: q.question,
+                              userAnswer: userAnswers[qi] || ""
+                            }));
+
+                            const res = await fetch("/api/check-quiz", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                subject: subjectData?.subject || slug,
+                                topic: title,
+                                lessonContent: currentLesson.body,
+                                courseContext: subjectData?.course_context || "",
+                                answers
+                              })
+                            });
+
+                            const json = await res.json().catch(() => ({}));
+                            if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
+
+                            setQuizResults(json.results || {});
+                          } catch (err: any) {
+                            alert(err?.message || "Failed to check answers");
+                          } finally {
+                            setCheckingAnswers(false);
+                          }
+                        }}
+                        disabled={checkingAnswers || Object.keys(userAnswers).length === 0}
+                        className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60 transition-opacity"
+                      >
+                        {checkingAnswers ? "Checking..." : "Check Answers"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            
+            <div className="flex items-center justify-center mb-4">
+              <button
+                onClick={async () => {
+                  if (!content?.lessons?.[currentLessonIndex]?.body) return;
+
+                  try {
+                    const lesson = content.lessons[currentLessonIndex];
+                    const res = await fetch('/api/export-pdf', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        title: lesson.title,
+                        content: lesson.body,
+                        subject: subjectData?.subject || slug,
+                        topic: title,
+                      })
+                    });
+
+                    if (!res.ok) throw new Error('Failed to generate PDF');
+
+                    // Download the PDF
+                    const blob = await res.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    // Simple filename sanitization without regex
+                    let filename = lesson.title.toLowerCase();
+                    const invalidChars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
+                    for (const char of invalidChars) {
+                      filename = filename.split(char).join('_');
+                    }
+                    a.download = `${filename}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                  } catch (err: any) {
+                    alert('Failed to export PDF: ' + err.message);
+                  }
+                }}
+                className="inline-flex h-9 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 text-sm font-medium text-white hover:opacity-95 transition-opacity"
+                title="Export lesson to PDF"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="mr-2">
+                  <path d="M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <polyline points="14,2 14,8 20,8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <polyline points="10,9 9,9 8,9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Export PDF
+              </button>
+            </div>
+
+            
+            <div className="flex items-center justify-center gap-2">
+              <button
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#2B3140] text-white hover:bg-[#3A4150] disabled:opacity-60 transition-colors"
+                onClick={() => {
+                  // Go to previous lesson
+                  if (currentLessonIndex > 0) {
+                    setCurrentLessonIndex(currentLessonIndex - 1);
+                    setUserAnswers({});
+                    setQuizResults(null);
+                  }
+                }}
+                disabled={currentLessonIndex === 0}
+                title="Previous lesson"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              <button
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#2B3140] text-white hover:bg-[#3A4150] disabled:opacity-60 transition-colors"
+                onClick={() => {
+                  // Go to next lesson if available
+                  if (currentLessonIndex < (content?.lessonsMeta?.length || 0) - 1) {
+                    setCurrentLessonIndex(currentLessonIndex + 1);
+                    setUserAnswers({});
+                    setQuizResults(null);
+                  }
+                }}
+                disabled={currentLessonIndex >= (content?.lessonsMeta?.length || 0) - 1}
+                title="Next lesson"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 18L15 12L9 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="relative mx-auto mt-24 flex max-w-md flex-col items-center justify-center">
+            <div className="pointer-events-none absolute -inset-10 -z-10 rounded-full bg-[radial-gradient(circle_at_center,rgba(0,229,255,0.25),rgba(255,45,150,0.12)_60%,transparent_70%)] blur-2xl" />
+            <button
+              className="inline-flex h-12 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-10 text-base font-semibold text-white shadow-[0_0_30px_rgba(0,229,255,0.25)] hover:opacity-95"
+              onClick={async () => {
+                try {
+                  setLessonLoading(true);
+                  setError(null);
+
+                  // First, get the topic plan
+                  const planRes = await fetch("/api/node-plan", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      subject: subjectData?.subject || slug,
+                      topic: title,
+                      combinedText: subjectData?.combinedText || "",
+                      course_context: subjectData?.course_context || "",
+                      courseTopics,
+                      languageName: subjectData?.course_language_name || "",
+                    }),
+                  });
+                  const planJson = await planRes.json().catch(() => ({}));
+                  if (!planRes.ok || !planJson?.ok) throw new Error(planJson?.error || `Server error (${planRes.status})`);
+                  const planData = planJson.data || {};
+
+                  // Then, generate the first lesson
+                  const topicMeta = (subjectData?.topics || []).find((t: any) => String(t.name) === title);
+                  const lessonRes = await fetch("/api/node-lesson", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      subject: subjectData?.subject || slug,
+                      topic: title,
+                      course_context: subjectData?.course_context || "",
+                      combinedText: subjectData?.combinedText || "",
+                      topicSummary: topicMeta?.summary || "",
+                      lessonsMeta: Array.isArray(planData.lessonsMeta) ? planData.lessonsMeta.map((m: any) => ({ type: String(m.type||"Concept"), title: String(m.title||"Lesson") })) : [],
+                      lessonIndex: 0,
+                      previousLessons: [],
+                      generatedLessons: [],
+                      otherLessonsMeta: Array.isArray(planData.lessonsMeta) ? planData.lessonsMeta.slice(1).map((m: any, i: number) => ({ index: i+1, type: String(m.type||"Concept"), title: String(m.title||"Lesson") })) : [],
+                      courseTopics,
+                      languageName: subjectData?.course_language_name || "",
+                    }),
+                  });
+                  const lessonJson = await lessonRes.json().catch(() => ({}));
+                  if (!lessonRes.ok || !lessonJson?.ok) throw new Error(lessonJson?.error || `Server error (${lessonRes.status})`);
+                  const lessonData = lessonJson.data || {};
+
+                  // Combine plan and first lesson
+                  const normalized: TopicGeneratedContent = {
+                    overview: String(planData.overview_child || ""),
+                    symbols: Array.isArray(planData.symbols) ? planData.symbols.map((s: any) => ({ symbol: String(s.symbol||""), meaning: String(s.meaning||""), units: s.units ? String(s.units) : undefined })) : [],
+                    lessonsMeta: Array.isArray(planData.lessonsMeta) ? planData.lessonsMeta.map((m: any) => ({ type: String(m.type||"Concept"), title: String(m.title||"Lesson") })) : [],
+                    lessons: [{
+                      title: String(lessonData.title || (Array.isArray(planData.lessonsMeta) ? planData.lessonsMeta[0]?.title || "Lesson 1" : "Lesson 1")),
+                      body: String(lessonData.body || ""),
+                      quiz: Array.isArray(lessonData.quiz) ? lessonData.quiz.map((q: any) => ({ question: String(q.question || "") })) : []
+                    }],
+                    rawLessonJson: [typeof lessonJson.raw === 'string' ? lessonJson.raw : JSON.stringify(lessonData)],
+                  };
+
+                  setContent(normalized);
+                  upsertNodeContent(slug, title, normalized as any);
+                } catch (err: any) {
+                  setError(err?.message || "Failed to start topic");
+                } finally {
+                  setLessonLoading(false);
+                }
+              }}
+            >
+              Start
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+    <WordPopover
+      open={popoverOpen}
+      x={popoverXY.x}
+      y={popoverXY.y}
+      loading={popoverLoading}
+      error={popoverError}
+      content={popoverContent}
+      onClose={() => setPopoverOpen(false)}
+    />
+    </>
+  );
+}
+
+

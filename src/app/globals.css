@@ -1,26 +1,187 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0F1216;
+  --foreground: #E5E7EB;
+  --accent-cyan: #00E5FF;
+  --accent-pink: #FF2D96;
+  --accent-grad: linear-gradient(90deg, var(--accent-cyan), var(--accent-pink));
 }
+/* Accent helpers */
+.bg-accent { background-image: var(--accent-grad); }
+.border-accent { border-color: var(--accent-cyan) !important; }
+.hover-border-accent:hover { border-color: var(--accent-cyan) !important; }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-rajdhani: var(--font-rajdhani);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* Force dark theme */
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+.hoverable-word {
+  position: relative;
+  cursor: pointer;
+}
+.hoverable-word::after {
+  content: "";
+  position: absolute;
+  left: -1ch;
+  right: -1ch;
+  bottom: -2px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-pink));
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 1ch, #000 calc(100% - 1ch), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 1ch, #000 calc(100% - 1ch), transparent 100%);
+}
+.hoverable-word:hover::after {
+  opacity: 1;
+}
+
+/* Markdown/lesson typography without relying on the typography plugin */
+.lesson-content {
+  color: #E5E7EB;
+}
+.lesson-content h1 {
+  font-size: 1.375rem; /* ~22px */
+  line-height: 1.25;
+  font-weight: 700;
+  margin-top: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+.lesson-content h2 {
+  font-size: 1.125rem; /* ~18px */
+  line-height: 1.35;
+  font-weight: 700;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+.lesson-content h3 {
+  font-size: 1rem;
+  line-height: 1.35;
+  font-weight: 600;
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.lesson-content p {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.8;
+}
+.lesson-content ul,
+.lesson-content ol {
+  padding-left: 1.25rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  list-style-position: outside;
+}
+.lesson-content li {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+  list-style: inherit;
+}
+.lesson-content ul { list-style-type: disc; }
+.lesson-content ol { list-style-type: decimal; }
+.lesson-content strong {
+  font-weight: 600;
+  color: #ffffff;
+}
+.lesson-content hr {
+  border: 0;
+  border-top: 1px solid #222731;
+  margin: 1rem 0;
+}
+.lesson-content blockquote {
+  border-left: 3px solid #2B3140;
+  padding-left: 0.75rem;
+  color: #A7AFBE;
+  margin: 0.75rem 0;
+}
+.lesson-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+}
+.lesson-content th,
+.lesson-content td {
+  border-top: 1px solid #1E2532;
+  padding: 0.5rem;
+  text-align: left;
+}
+.lesson-content .katex-display {
+  margin: 1rem 0;
+}
+.lesson-content .katex {
+  font-size: 1.05rem;
+}
+
+/* Code blocks and inline code */
+.lesson-content pre {
+  background-color: #0F141D;
+  border: 1px solid #222731;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+.lesson-content code {
+  background-color: #0F141D;
+  border: 1px solid #222731;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.375rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* Rajdhani Semibold for all text elements */
+body {
+  font-family: var(--font-rajdhani), var(--font-geist-sans), sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+}
+
+/* Apply to all text elements */
+p, span, div, button, a, label, li, td, th, h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-rajdhani), var(--font-geist-sans), sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+}
+
+/* Ensure code blocks maintain monospace font */
+.lesson-content code,
+pre,
+code {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+  font-weight: 400 !important;
+  letter-spacing: 0 !important;
+}
+
+/* Ensure input fields and textareas maintain proper font */
+input,
+textarea,
+select {
+  font-family: var(--font-geist-sans), sans-serif !important;
+  font-weight: 400 !important;
+  letter-spacing: 0 !important;
+}
+
+/* Paragraph simplification line with fade effect */
+.paragraph-line {
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 229, 255, 0) 0%,
+    rgba(0, 229, 255, 0.6) 10%,
+    rgba(255, 45, 150, 0.6) 90%,
+    rgba(255, 45, 150, 0) 100%
+  );
 }
