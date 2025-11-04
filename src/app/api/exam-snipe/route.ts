@@ -29,13 +29,51 @@ export async function POST(req: NextRequest) {
 
         // Check if we got any text
         if (!data.text || data.text.trim().length === 0) {
-          console.warn(`No text extracted from ${file.name} - might be image-based PDF`);
-          // Try to include some metadata instead
-          const text = `PDF: ${file.name} (${data.numpages} pages, ${data.info?.Title || 'Unknown title'})`;
-          examTexts.push({
-            name: file.name,
-            text: text
-          });
+          console.warn(`No text extracted from ${file.name} - trying OCR...`);
+
+          // Try OCR for image-based PDFs
+          try {
+            const { createWorker } = await import('tesseract.js');
+            const { pdf2pic } = await import('pdf2pic');
+
+            // Convert first page to image
+            const convert = pdf2pic.fromBuffer(buffer, {
+              density: 200,
+              saveFilename: "page",
+              savePath: "/tmp",
+              format: "png",
+              width: 2000,
+              height: 2000
+            });
+
+            const page = await convert(1); // Convert page 1
+            if (page.base64) {
+              // Create OCR worker
+              const worker = await createWorker('eng');
+              const { data: ocrData } = await worker.recognize(`data:image/png;base64,${page.base64}`);
+              await worker.terminate();
+
+              if (ocrData.text && ocrData.text.trim().length > 0) {
+                console.log(`OCR extracted ${ocrData.text.length} characters from ${file.name}`);
+                examTexts.push({
+                  name: file.name,
+                  text: ocrData.text
+                });
+              } else {
+                throw new Error('OCR found no text');
+              }
+            } else {
+              throw new Error('Failed to convert PDF to image');
+            }
+          } catch (ocrErr) {
+            console.error(`OCR failed for ${file.name}:`, ocrErr);
+            // Fallback to metadata
+            const text = `PDF: ${file.name} (${data.numpages} pages, ${data.info?.Title || 'Unknown title'}) - Image-based PDF, no text extracted`;
+            examTexts.push({
+              name: file.name,
+              text: text
+            });
+          }
         } else {
           examTexts.push({
             name: file.name,
