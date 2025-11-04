@@ -239,12 +239,57 @@ export default function ExamSnipePage() {
                   
                   {/* Streaming AI output */}
                   {streamingText && (
-                    <div className="mt-6 w-full max-w-2xl mx-auto">
-                      <div className="rounded-xl border border-[#2B3140] bg-[#1A1F2E] p-4 max-h-64 overflow-y-auto">
-                        <div className="text-xs font-semibold text-[#A7AFBE] mb-2">🤖 AI is thinking...</div>
-                        <div className="text-sm text-[#E5E7EB] font-mono whitespace-pre-wrap">
-                          {streamingText}
-                          <span className="inline-block w-2 h-4 bg-[#00E5FF] animate-pulse ml-1"></span>
+                    <div className="mt-6 w-full max-w-4xl mx-auto">
+                      <div className="text-xs font-semibold text-[#A7AFBE] mb-3 text-center">🤖 AI is analyzing...</div>
+                      <div className="relative rounded-xl bg-[#0B0E12] p-6 overflow-hidden">
+                        {/* Neon gradient glow border */}
+                        <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#00E5FF] via-[#FF2D96] to-[#00E5FF] opacity-30 blur-sm"></div>
+                        <div className="absolute inset-[2px] rounded-xl bg-[#0B0E12]"></div>
+                        
+                        {/* Scrolling text container */}
+                        <div className="relative h-32 overflow-hidden">
+                          <div className="absolute inset-0 flex flex-col justify-center items-center">
+                            {(() => {
+                              const lines = streamingText.split('\n').filter(l => l.trim());
+                              const currentIndex = Math.max(0, lines.length - 1);
+                              const prevLine = lines[currentIndex - 1] || '';
+                              const currentLine = lines[currentIndex] || '';
+                              const nextLine = ''; // No next line since we're showing the latest
+                              
+                              return (
+                                <>
+                                  {/* Previous line (blurred, smaller) */}
+                                  {prevLine && (
+                                    <div className="text-xs text-[#6B7280] font-mono blur-[2px] opacity-40 mb-2 whitespace-nowrap overflow-hidden text-ellipsis max-w-full px-4">
+                                      {prevLine.length > 100 ? prevLine.substring(0, 100) + '...' : prevLine}
+                                    </div>
+                                  )}
+                                  
+                                  {/* Current line (clear, gradient text) */}
+                                  <div className="text-base font-mono whitespace-nowrap overflow-hidden text-ellipsis max-w-full px-4 mb-2">
+                                    <span className="bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] bg-clip-text text-transparent font-semibold">
+                                      {currentLine.length > 120 ? currentLine.substring(0, 120) + '...' : currentLine}
+                                      <span className="inline-block w-2 h-4 bg-[#00E5FF] animate-pulse ml-2"></span>
+                                    </span>
+                                  </div>
+                                  
+                                  {/* Next line (blurred, smaller) - placeholder for symmetry */}
+                                  <div className="text-xs text-[#6B7280] font-mono blur-[2px] opacity-40 whitespace-nowrap overflow-hidden text-ellipsis max-w-full px-4">
+                                    {nextLine || '...'}
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </div>
+                          
+                          {/* Gradient fade on edges */}
+                          <div className="absolute left-0 top-0 bottom-0 w-20 bg-gradient-to-r from-[#0B0E12] to-transparent pointer-events-none"></div>
+                          <div className="absolute right-0 top-0 bottom-0 w-20 bg-gradient-to-l from-[#0B0E12] to-transparent pointer-events-none"></div>
+                        </div>
+                        
+                        {/* Scanning line effect */}
+                        <div className="absolute inset-0 pointer-events-none">
+                          <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[#00E5FF] to-transparent animate-pulse"></div>
                         </div>
                       </div>
                     </div>
