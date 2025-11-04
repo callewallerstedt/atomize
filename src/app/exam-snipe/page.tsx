@@ -79,17 +79,20 @@ export default function ExamSnipePage() {
               
               try {
                 const parsed = JSON.parse(data);
+                console.log('Received stream data:', parsed);
                 if (parsed.type === 'text') {
                   fullText += parsed.content;
                   setStreamingText(fullText);
+                  console.log('Streaming text updated:', fullText.length, 'chars');
                 } else if (parsed.type === 'done') {
+                  console.log('Analysis complete:', parsed.data);
                   setExamResults(parsed.data);
                 } else if (parsed.type === 'error') {
                   throw new Error(parsed.error || 'Analysis failed');
                 }
               } catch (e) {
                 // Skip invalid JSON
-                console.error('JSON parse error:', e);
+                console.error('JSON parse error:', e, 'for data:', data);
               }
             }
           }

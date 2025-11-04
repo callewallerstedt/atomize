@@ -95,7 +95,7 @@ Return JSON in this EXACT format:
 }
 
 The concepts array MUST be sorted by pointsPerHour descending.`,
-      model: "gpt-5-preview",
+      model: "gpt-4o",
       tools: [{ type: "file_search" }],
     });
 

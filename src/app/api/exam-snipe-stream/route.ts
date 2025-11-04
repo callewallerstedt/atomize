@@ -108,7 +108,7 @@ Return JSON in this EXACT format:
 }
 
 The concepts array MUST be sorted by pointsPerHour descending.`,
-          model: "gpt-5-preview",
+          model: "gpt-4o",
           tools: [{ type: "file_search" }],
         });
         
@@ -134,17 +134,20 @@ The concepts array MUST be sorted by pointsPerHour descending.`,
         });
 
         // Stream the text as it comes in
+        console.log('Starting to stream assistant response...');
         for await (const event of run) {
           if (event.event === 'thread.message.delta') {
             const delta = event.data.delta;
             if (delta.content && delta.content[0] && delta.content[0].type === 'text') {
               const text = delta.content[0].text?.value || '';
+              console.log('Streaming text chunk:', text.substring(0, 50));
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`)
               );
             }
           }
         }
+        console.log('Finished streaming, getting final message...');
 
         // Get final message
         const messages = await openai.beta.threads.messages.list(thread.id);
