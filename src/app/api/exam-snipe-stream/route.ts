@@ -152,7 +152,7 @@ The concepts array MUST be sorted by pointsPerHour descending.`
             }
           ],
           stream: true,
-          max_tokens: 4000,
+          max_completion_tokens: 4000,
           temperature: 0.3
         });
 

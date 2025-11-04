@@ -139,7 +139,7 @@ The concepts array MUST be sorted by pointsPerHour descending.`
           content: `Analyze these ${examFiles.length} exam PDF(s) and return a JSON list of concepts ranked by Points/Hour.\n\n${combinedText}`
         }
       ],
-      max_tokens: 4000,
+      max_completion_tokens: 4000,
       temperature: 0.3
     });
 
