@@ -8,18 +8,22 @@ export async function POST(req: NextRequest) {
   
   const stream = new ReadableStream({
     async start(controller) {
+      let assistantId: string | null = null;
+      const uploadedFileIds: string[] = [];
+      
       try {
         const formData = await req.formData();
         const examFiles = formData.getAll('exams') as File[];
 
         if (examFiles.length === 0) {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'No files provided' })}\n\n`)
+          );
           controller.close();
           return;
         }
 
         // Upload PDFs to OpenAI
-        const uploadedFileIds: string[] = [];
-        
         for (const file of examFiles) {
           try {
             const uploadedFile = await openai.files.create({
@@ -33,6 +37,9 @@ export async function POST(req: NextRequest) {
         }
 
         if (uploadedFileIds.length === 0) {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Failed to upload files' })}\n\n`)
+          );
           controller.close();
           return;
         }
@@ -104,6 +111,8 @@ The concepts array MUST be sorted by pointsPerHour descending.`,
           model: "gpt-5-preview",
           tools: [{ type: "file_search" }],
         });
+        
+        assistantId = assistant.id;
 
         // Create thread with files
         const thread = await openai.beta.threads.create({
@@ -177,21 +186,40 @@ The concepts array MUST be sorted by pointsPerHour descending.`,
         }
 
         // Clean up
-        try {
-          await openai.beta.assistants.delete(assistant.id);
-        } catch {}
+        if (assistantId) {
+          try {
+            await openai.beta.assistants.delete(assistantId);
+          } catch (err) {
+            console.error('Failed to delete assistant:', err);
+          }
+        }
         for (const fileId of uploadedFileIds) {
           try {
             await openai.files.delete(fileId);
-          } catch {}
+          } catch (err) {
+            console.error('Failed to delete file:', err);
+          }
         }
 
         controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         controller.close();
       } catch (error: any) {
         console.error('Streaming error:', error);
+        
+        // Clean up on error
+        if (assistantId) {
+          try {
+            await openai.beta.assistants.delete(assistantId);
+          } catch {}
+        }
+        for (const fileId of uploadedFileIds) {
+          try {
+            await openai.files.delete(fileId);
+          } catch {}
+        }
+        
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`)
+          encoder.encode(`data: ${JSON.stringify({ type: 'error', error: error.message || 'Analysis failed' })}\n\n`)
         );
         controller.close();
       }

@@ -16,16 +16,19 @@ export default function ExamSnipePage() {
   async function handleExamSnipe() {
     if (examFiles.length === 0) return;
     
+    let progressInterval: NodeJS.Timeout | null = null;
+    let inchInterval: NodeJS.Timeout | null = null;
+    
     try {
       setExamAnalyzing(true);
       setProgress(0);
       setStreamingText("");
       
       // Start progress bar animation - reach 95% in 35 seconds
-      const progressInterval = setInterval(() => {
+      progressInterval = setInterval(() => {
         setProgress(prev => {
           if (prev >= 95) {
-            clearInterval(progressInterval);
+            if (progressInterval) clearInterval(progressInterval);
             return 95;
           }
           return prev + (95 / 350); // 95% over 35 seconds (350 steps of 100ms)
@@ -33,11 +36,11 @@ export default function ExamSnipePage() {
       }, 100);
       
       // After 35 seconds, inch up slowly
-      setTimeout(() => {
-        const inchInterval = setInterval(() => {
+      const inchTimeout = setTimeout(() => {
+        inchInterval = setInterval(() => {
           setProgress(prev => {
             if (prev >= 99) {
-              clearInterval(inchInterval);
+              if (inchInterval) clearInterval(inchInterval);
               return 99;
             }
             return prev + 1; // Inch up by 1% every 3 seconds
@@ -81,19 +84,30 @@ export default function ExamSnipePage() {
                   setStreamingText(fullText);
                 } else if (parsed.type === 'done') {
                   setExamResults(parsed.data);
+                } else if (parsed.type === 'error') {
+                  throw new Error(parsed.error || 'Analysis failed');
                 }
               } catch (e) {
                 // Skip invalid JSON
+                console.error('JSON parse error:', e);
               }
             }
           }
         }
       }
       
-      clearInterval(progressInterval);
+      // Clean up intervals
+      if (progressInterval) clearInterval(progressInterval);
+      if (inchInterval) clearInterval(inchInterval);
+      clearTimeout(inchTimeout);
       setProgress(100);
     } catch (err: any) {
+      console.error('Exam analysis error:', err);
       alert(err?.message || 'Failed to analyze exams');
+      
+      // Clean up intervals on error
+      if (progressInterval) clearInterval(progressInterval);
+      if (inchInterval) clearInterval(inchInterval);
     } finally {
       setExamAnalyzing(false);
     }
