@@ -88,12 +88,6 @@ export default function Home() {
         <h1 className="text-xl font-semibold text-white">Your subjects</h1>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => router.push('/exam-snipe')}
-            className="inline-flex h-10 items-center rounded-full border border-[#FF2D96] bg-[#FF2D96]/10 px-4 text-sm font-medium text-[#FF2D96] hover:bg-[#FF2D96]/20 transition-colors"
-          >
-            🎯 Exam Snipe
-          </button>
-          <button
             onClick={() => router.push('/readassist')}
             className="inline-flex h-10 items-center rounded-full border border-[#00E5FF] bg-[#00E5FF]/10 px-4 text-sm font-medium text-[#00E5FF] hover:bg-[#00E5FF]/20 transition-colors"
           >

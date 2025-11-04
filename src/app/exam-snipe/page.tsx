@@ -118,91 +118,56 @@ export default function ExamSnipePage() {
 
   return (
     <div className="min-h-screen bg-[#0F1216] text-white">
-      {/* Header */}
-      <div className="border-b border-[#222731] bg-[#0B0E12] px-6 py-4">
-        <div className="mx-auto max-w-6xl flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => router.push('/')}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#1A1F2E] text-[#A7AFBE] hover:bg-[#2B3140] transition-colors"
-              aria-label="Back to home"
-            >
-              ←
-            </button>
-            <h1 className="text-xl font-semibold">🎯 Exam Snipe</h1>
-          </div>
-          {examResults && (
-            <button
-              onClick={() => {
-                setExamResults(null);
-                setExamFiles([]);
-              }}
-              className="rounded-lg bg-[#1A1F2E] px-4 py-2 text-sm text-[#E5E7EB] hover:bg-[#2B3140] transition-colors"
-            >
-              Analyze New Exams
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="mx-auto max-w-6xl px-6 py-10">
+      <div className="mx-auto max-w-4xl px-6 py-20">
         {!examResults ? (
           <>
             {!examAnalyzing ? (
-              <>
-                <div className="mb-8 text-center">
-                  <h2 className="text-2xl font-bold text-white mb-2">Find the Highest-Value Concepts</h2>
-                  <p className="text-[#A7AFBE]">Upload old exams to discover which topics give you the most points per hour of study</p>
-                </div>
-
-                <div className="mb-6">
-                  <div 
-                    className="rounded-xl border-2 border-dashed border-[#222731] bg-[#0B0E12] p-12 text-center hover:border-[#FF2D96]/50 transition-colors cursor-pointer"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      accept=".pdf"
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files || []);
-                        setExamFiles(files);
-                      }}
-                      className="hidden"
-                    />
-                    <div className="mx-auto h-16 w-16 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] flex items-center justify-center mb-4">
-                      <svg className="h-8 w-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                      </svg>
+              <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8">
+                <div 
+                  className="w-full max-w-2xl rounded-2xl border-2 border-dashed border-[#3A4454] bg-transparent p-20 text-center hover:border-[#00E5FF]/50 transition-colors cursor-pointer"
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const files = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
+                    setExamFiles(files);
+                  }}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept=".pdf"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      setExamFiles(files);
+                    }}
+                    className="hidden"
+                  />
+                  {examFiles.length === 0 ? (
+                    <div className="text-[#A7AFBE] text-lg">
+                      Click here or drop all the old exams
                     </div>
-                    <div className="text-lg font-semibold text-white mb-2">Click to upload old exams</div>
-                    <div className="text-sm text-[#A7AFBE]">PDF files only • Multiple files supported</div>
-                  </div>
-                  
-                  {examFiles.length > 0 && (
-                    <div className="mt-4 space-y-2">
-                      <div className="text-sm font-semibold text-[#00E5FF]">{examFiles.length} file(s) selected:</div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="text-[#00E5FF] font-semibold text-lg mb-4">{examFiles.length} file(s) selected</div>
                       {examFiles.map((f, i) => (
-                        <div key={i} className="flex items-center gap-2 text-sm text-[#E5E7EB] bg-[#1A1F2E] rounded-lg px-4 py-2">
-                          <span>📄</span>
-                          <span>{f.name}</span>
+                        <div key={i} className="text-[#E5E7EB] text-sm">
+                          {f.name}
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
 
-                <div className="flex justify-center">
-                  <button
-                    onClick={handleExamSnipe}
-                    disabled={examFiles.length === 0}
-                    className="inline-flex h-12 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-8 text-base font-medium text-white hover:opacity-95 disabled:opacity-60 transition-opacity"
-                  >
-                    Analyze Exams
-                  </button>
-                </div>
-              </>
+                <button
+                  onClick={handleExamSnipe}
+                  disabled={examFiles.length === 0}
+                  className="relative inline-flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white font-semibold text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                >
+                  Analyze
+                </button>
+              </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-32 space-y-6">
                 <div className="relative w-24 h-24">
@@ -239,15 +204,15 @@ export default function ExamSnipePage() {
                   
                   {/* Streaming AI output */}
                   {streamingText && (
-                    <div className="mt-6 w-full max-w-4xl mx-auto">
-                      <div className="text-xs font-semibold text-[#A7AFBE] mb-3 text-center">🤖 AI is analyzing...</div>
-                      <div className="relative rounded-xl bg-[#0B0E12] p-6 overflow-hidden">
+                    <div className="mt-6 w-full max-w-2xl mx-auto">
+                      <div className="text-xs font-semibold text-[#A7AFBE] mb-2 text-center">🤖 AI is analyzing...</div>
+                      <div className="relative rounded-lg bg-[#0B0E12] p-4 overflow-hidden">
                         {/* Neon gradient glow border */}
-                        <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#00E5FF] via-[#FF2D96] to-[#00E5FF] opacity-30 blur-sm"></div>
-                        <div className="absolute inset-[2px] rounded-xl bg-[#0B0E12]"></div>
+                        <div className="absolute inset-0 rounded-lg bg-gradient-to-r from-[#00E5FF] via-[#FF2D96] to-[#00E5FF] opacity-30 blur-sm"></div>
+                        <div className="absolute inset-[2px] rounded-lg bg-[#0B0E12]"></div>
                         
                         {/* Scrolling text container */}
-                        <div className="relative h-32 overflow-hidden">
+                        <div className="relative h-20 overflow-hidden">
                           <div className="absolute inset-0 flex flex-col justify-center items-center">
                             {(() => {
                               const lines = streamingText.split('\n').filter(l => l.trim());
@@ -260,21 +225,21 @@ export default function ExamSnipePage() {
                                 <>
                                   {/* Previous line (blurred, smaller) */}
                                   {prevLine && (
-                                    <div className="text-xs text-[#6B7280] font-mono blur-[2px] opacity-40 mb-2 whitespace-nowrap overflow-hidden text-ellipsis max-w-full px-4">
-                                      {prevLine.length > 100 ? prevLine.substring(0, 100) + '...' : prevLine}
+                                    <div className="text-[10px] text-[#6B7280] font-mono blur-[2px] opacity-40 mb-1 whitespace-nowrap overflow-hidden text-ellipsis max-w-full px-3">
+                                      {prevLine.length > 80 ? prevLine.substring(0, 80) + '...' : prevLine}
                                     </div>
                                   )}
                                   
                                   {/* Current line (clear, gradient text) */}
-                                  <div className="text-base font-mono whitespace-nowrap overflow-hidden text-ellipsis max-w-full px-4 mb-2">
+                                  <div className="text-sm font-mono whitespace-nowrap overflow-hidden text-ellipsis max-w-full px-3 mb-1">
                                     <span className="bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] bg-clip-text text-transparent font-semibold">
-                                      {currentLine.length > 120 ? currentLine.substring(0, 120) + '...' : currentLine}
-                                      <span className="inline-block w-2 h-4 bg-[#00E5FF] animate-pulse ml-2"></span>
+                                      {currentLine.length > 100 ? currentLine.substring(0, 100) + '...' : currentLine}
+                                      <span className="inline-block w-1.5 h-3 bg-[#00E5FF] animate-pulse ml-1"></span>
                                     </span>
                                   </div>
                                   
                                   {/* Next line (blurred, smaller) - placeholder for symmetry */}
-                                  <div className="text-xs text-[#6B7280] font-mono blur-[2px] opacity-40 whitespace-nowrap overflow-hidden text-ellipsis max-w-full px-4">
+                                  <div className="text-[10px] text-[#6B7280] font-mono blur-[2px] opacity-40 whitespace-nowrap overflow-hidden text-ellipsis max-w-full px-3">
                                     {nextLine || '...'}
                                   </div>
                                 </>
@@ -283,13 +248,8 @@ export default function ExamSnipePage() {
                           </div>
                           
                           {/* Gradient fade on edges */}
-                          <div className="absolute left-0 top-0 bottom-0 w-20 bg-gradient-to-r from-[#0B0E12] to-transparent pointer-events-none"></div>
-                          <div className="absolute right-0 top-0 bottom-0 w-20 bg-gradient-to-l from-[#0B0E12] to-transparent pointer-events-none"></div>
-                        </div>
-                        
-                        {/* Scanning line effect */}
-                        <div className="absolute inset-0 pointer-events-none">
-                          <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[#00E5FF] to-transparent animate-pulse"></div>
+                          <div className="absolute left-0 top-0 bottom-0 w-16 bg-gradient-to-r from-[#0B0E12] to-transparent pointer-events-none"></div>
+                          <div className="absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-[#0B0E12] to-transparent pointer-events-none"></div>
                         </div>
                       </div>
                     </div>
@@ -302,7 +262,18 @@ export default function ExamSnipePage() {
           <>
             {/* Summary Header */}
             <div className="mb-6 rounded-xl border border-[#222731] bg-[#0B0E12] p-6">
-              <h2 className="text-xl font-bold text-white mb-3">📊 Analysis Results</h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-xl font-bold text-white">📊 Analysis Results</h2>
+                <button
+                  onClick={() => {
+                    setExamResults(null);
+                    setExamFiles([]);
+                  }}
+                  className="rounded-lg bg-[#1A1F2E] px-4 py-2 text-sm text-[#E5E7EB] hover:bg-[#2B3140] transition-colors"
+                >
+                  Analyze New Exams
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
                   <div className="text-xs text-[#A7AFBE] mb-1">Exams Analyzed</div>

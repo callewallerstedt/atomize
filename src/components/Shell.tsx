@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import SettingsModal from "@/components/SettingsModal";
 
 type Subject = { name: string; slug: string };
@@ -20,6 +20,7 @@ function getSubjects(): Subject[] {
 export default function Shell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(false);
   const pathname = usePathname();
+  const router = useRouter();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -83,17 +84,31 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               </span>
             ))}
           </nav>
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#222731] text-[#E5E7EB] hover:bg-[#151922]"
-            aria-label="Settings"
-            title="Settings"
-          >
-            {/* Gear icon */}
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 8a4 4 0 100 8 4 4 0 000-8zm9 4a7.96 7.96 0 00-.53-2.83l2.11-1.63-2-3.46-2.49 1A8.04 8.04 0 0014.83 3l-.38-2.65h-4.9L9.17 3A8.04 8.04 0 006.91 5.08l-2.49-1-2 3.46 2.11 1.63A7.96 7.96 0 004 12c0 .98.18 1.92.53 2.83L2.42 16.46l2 3.46 2.49-1A8.04 8.04 0 009.17 21l.38 2.65h4.9L14.83 21a8.04 8.04 0 002.26-2.08l2.49 1 2-3.46-2.11-1.63c.35-.91.53-1.85.53-2.83z" stroke="#E5E7EB" strokeWidth="1.2"/>
-            </svg>
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.push('/')}
+              className="inline-flex h-9 items-center rounded-lg bg-[#1A1F2E] px-3 text-sm font-medium text-[#E5E7EB] hover:bg-[#2B3140] transition-colors"
+            >
+              Home
+            </button>
+            <button
+              onClick={() => router.push('/exam-snipe')}
+              className="inline-flex h-9 items-center rounded-lg bg-[#1A1F2E] px-3 text-sm font-medium text-[#E5E7EB] hover:bg-[#2B3140] transition-colors"
+            >
+              Exam Snipe
+            </button>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#222731] text-[#E5E7EB] hover:bg-[#151922]"
+              aria-label="Settings"
+              title="Settings"
+            >
+              {/* Gear icon */}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 8a4 4 0 100 8 4 4 0 000-8zm9 4a7.96 7.96 0 00-.53-2.83l2.11-1.63-2-3.46-2.49 1A8.04 8.04 0 0014.83 3l-.38-2.65h-4.9L9.17 3A8.04 8.04 0 006.91 5.08l-2.49-1-2 3.46 2.11 1.63A7.96 7.96 0 004 12c0 .98.18 1.92.53 2.83L2.42 16.46l2 3.46 2.49-1A8.04 8.04 0 009.17 21l.38 2.65h4.9L14.83 21a8.04 8.04 0 002.26-2.08l2.49 1 2-3.46-2.11-1.63c.35-.91.53-1.85.53-2.83z" stroke="#E5E7EB" strokeWidth="1.2"/>
+              </svg>
+            </button>
+          </div>
         </header>
         <main className="flex-1">{children}</main>
       </div>
