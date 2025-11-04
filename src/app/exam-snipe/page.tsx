@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 export default function ExamSnipePage() {
@@ -12,6 +12,14 @@ export default function ExamSnipePage() {
   const [progress, setProgress] = useState(0);
   const [streamingText, setStreamingText] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const streamContainerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when streaming text updates
+  useEffect(() => {
+    if (streamContainerRef.current) {
+      streamContainerRef.current.scrollTop = streamContainerRef.current.scrollHeight;
+    }
+  }, [streamingText]);
 
   async function handleExamSnipe() {
     if (examFiles.length === 0) return;
@@ -48,15 +56,27 @@ export default function ExamSnipePage() {
         }, 3000);
       }, 35000);
       
+      console.log('=== FRONTEND: SENDING FILES ===');
+      console.log(`Sending ${examFiles.length} files:`);
+      examFiles.forEach((file, i) => {
+        console.log(`  File ${i + 1}: ${file.name} (${file.size} bytes, ${file.type})`);
+      });
+
       const formData = new FormData();
       examFiles.forEach((file) => formData.append('exams', file));
-      
+
+      console.log('Sending request to /api/exam-snipe-stream...');
       const res = await fetch('/api/exam-snipe-stream', {
         method: 'POST',
         body: formData,
       });
-      
+
+      console.log(`Response status: ${res.status}`);
+      console.log(`Response ok: ${res.ok}`);
+
       if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Response error text:', errorText);
         throw new Error('Failed to analyze exams');
       }
 
@@ -79,15 +99,19 @@ export default function ExamSnipePage() {
               
               try {
                 const parsed = JSON.parse(data);
-                console.log('Received stream data:', parsed);
+                console.log('=== FRONTEND RECEIVED ===');
+                console.log('Type:', parsed.type);
                 if (parsed.type === 'text') {
+                  console.log('Content:', parsed.content);
                   fullText += parsed.content;
                   setStreamingText(fullText);
                   console.log('Streaming text updated:', fullText.length, 'chars');
                 } else if (parsed.type === 'done') {
-                  console.log('Analysis complete:', parsed.data);
+                  console.log('Analysis complete! Data keys:', Object.keys(parsed.data || {}));
+                  console.log('Concepts found:', parsed.data?.concepts?.length || 0);
                   setExamResults(parsed.data);
                 } else if (parsed.type === 'error') {
+                  console.error('AI returned error:', parsed.error);
                   throw new Error(parsed.error || 'Analysis failed');
                 }
               } catch (e) {
@@ -129,9 +153,6 @@ export default function ExamSnipePage() {
                     Upload your old exams and let AI analyze them to find the highest-value concepts to study.
                     Discover which topics appear most frequently and give you the best return on study time.
                   </p>
-                  <div className="mt-6 text-sm text-[#6B7280]">
-                    Perfect if you just started studying a couple days before your exams.
-                  </div>
                 </div>
 
                 <div
@@ -223,9 +244,9 @@ export default function ExamSnipePage() {
                         <div className="absolute inset-[2px] rounded-lg bg-[#0B0E12]"></div>
                         
                         {/* Scrolling text container */}
-                        <div className="relative h-32 overflow-y-auto overflow-x-hidden">
+                        <div ref={streamContainerRef} className="relative h-32 overflow-y-auto overflow-x-hidden">
                           <div className="p-3">
-                            <div className="text-sm font-mono text-[#E5E7EB] whitespace-pre-wrap break-words leading-relaxed">
+                            <div className="text-sm font-mono text-[#00E5FF] whitespace-pre-wrap break-words leading-relaxed">
                               {streamingText}
                               <span className="inline-block w-1.5 h-3 bg-[#00E5FF] animate-pulse ml-1"></span>
                             </div>

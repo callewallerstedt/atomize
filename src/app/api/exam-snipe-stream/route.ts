@@ -6,81 +6,116 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
 export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
 
+  console.log('=== EXAM SNIPE API CALLED ===');
+  console.log('Headers:', Object.fromEntries(req.headers.entries()));
+
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const formData = await req.formData();
-        const examFiles = formData.getAll('exams') as File[];
+        // Accept either JSON with pre-extracted text, or FormData with files
+        const contentType = req.headers.get('content-type') || '';
+        let examTexts: { name: string; text: string }[] = [];
 
-        if (examFiles.length === 0) {
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'No files provided' })}\n\n`)
-          );
-          controller.close();
-          return;
-        }
-
-    // Extract text from all PDFs
-    const examTexts: { name: string; text: string }[] = [];
-
-    for (const file of examFiles) {
-      try {
-        console.log(`Extracting text from ${file.name}...`);
-
-        // Convert file to buffer
-        const bytes = await file.arrayBuffer();
-        const buffer = Buffer.from(bytes);
-
-        // Import pdf-parse dynamically
-        const pdfParse = (await import('pdf-parse')).default;
-        const data = await pdfParse(buffer);
-
-        console.log(`PDF ${file.name} - Pages: ${data.numpages}, Text length: ${data.text?.length || 0}`);
-        console.log(`PDF ${file.name} - First 200 chars:`, data.text?.substring(0, 200) || 'NO TEXT');
-
-        // Check if we got any text
-        if (!data.text || data.text.trim().length === 0) {
-          console.warn(`No text extracted from ${file.name}`);
-          // Just add the file with empty text - let AI handle it
-          examTexts.push({
-            name: file.name,
-            text: `PDF: ${file.name} - No text could be extracted from this PDF.`
-          });
+        if (contentType.includes('application/json')) {
+          const json = await req.json().catch(() => ({}));
+          const arr = Array.isArray(json?.examsText) ? json.examsText : [];
+          examTexts = arr.map((x: any) => ({ name: String(x?.name || 'exam'), text: String(x?.text || '') }));
+          console.log(`Received JSON examsText entries: ${examTexts.length}`);
         } else {
-          examTexts.push({
-            name: file.name,
-            text: data.text
+          console.log('Processing FormData...');
+          const formData = await req.formData();
+          console.log('FormData keys:', Array.from(formData.keys()));
+
+          const examFiles = formData.getAll('exams') as File[];
+          console.log(`Received ${examFiles.length} files:`);
+          examFiles.forEach((file, i) => {
+            console.log(`  File ${i + 1}: ${file.name} (${file.size} bytes, ${file.type})`);
           });
-          console.log(`Extracted ${data.text.length} characters from ${file.name}`);
+
+          if (examFiles.length === 0) {
+            console.log('ERROR: No files provided');
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'No files provided' })}\n\n`)
+            );
+            controller.close();
+            return;
+          }
+
+          // Extract on server only if files were sent (fallback path)
+          console.log(`Processing ${examFiles.length} PDF files...`);
+
+          for (const file of examFiles) {
+            console.log(`Starting to process ${file.name}...`);
+            try {
+              const bytes = await file.arrayBuffer();
+              const uint8 = new Uint8Array(bytes);
+              console.log(`Converted ${file.name} to Uint8Array, size: ${uint8.length} bytes`);
+
+              // Use pdfjs-dist only (multiple import fallbacks) with disableWorker
+              const tryPdfJsExtract = async (): Promise<string> => {
+                const tryImports = [
+                  () => import('pdfjs-dist' as any),
+                  () => import('pdfjs-dist/build/pdf.mjs' as any),
+                  () => import('pdfjs-dist/legacy/build/pdf.mjs' as any),
+                ];
+                let lastErr: any = null;
+                for (const loader of tryImports) {
+                  try {
+                    const lib: any = await loader();
+                    const getDocument = lib.getDocument || lib?.default?.getDocument;
+                    if (!getDocument) throw new Error('getDocument not available');
+                    const loadingTask = getDocument({ data: uint8, disableWorker: true });
+                    const pdf = await loadingTask.promise;
+                    let fullText = '';
+                    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                      const page = await pdf.getPage(pageNum);
+                      const textContent = await page.getTextContent();
+                      const pageText = (textContent.items || [])
+                        .map((item: any) => (item && typeof item.str === 'string' ? item.str : ''))
+                        .join(' ');
+                      fullText += pageText + '\n';
+                    }
+                    return fullText;
+                  } catch (err) {
+                    lastErr = err;
+                    continue;
+                  }
+                }
+                throw lastErr || new Error('Failed to import/use pdfjs-dist');
+              };
+
+              console.log(`Attempting pdfjs-dist text extraction on ${file.name}...`);
+              const text = await tryPdfJsExtract();
+              console.log(`pdfjs-dist extracted ${text.length} chars from ${file.name}`);
+              examTexts.push({ name: file.name, text: text && text.trim().length ? text : `PDF: ${file.name} - Text extraction failed (no readable text).` });
+            } catch (err: any) {
+              console.error(`Server extraction failed for ${file.name}:`, err?.message);
+              examTexts.push({ name: file.name, text: `PDF: ${file.name} - Text extraction failed: ${err?.message || 'unknown error'}` });
+            }
+          }
         }
-      } catch (err) {
-        console.error(`Failed to extract text from ${file.name}:`, err);
-        // Still add the file with an error note
-        examTexts.push({
-          name: file.name,
-          text: `Error extracting text from ${file.name}: ${err.message}`
-        });
-      }
-    }
 
-    if (examTexts.length === 0) {
-      controller.enqueue(
-        encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Failed to process any PDF files.' })}\n\n`)
-      );
-      controller.close();
-      return;
-    }
+    // if examTexts came from JSON, we skip server extraction above
 
+    console.log(`Finished processing ${examTexts.length} files (text entries), got ${examTexts.length} results`);
+
+    console.log(`Proceeding with ${examTexts.length} processed files`);
+
+        const numExams = examTexts.length;
         // Combine all exam texts with labels
         const combinedText = examTexts.map((exam, index) =>
           `=== EXAM ${index + 1}: ${exam.name} ===\n${exam.text}\n\n`
         ).join('');
 
         console.log(`Total combined text length: ${combinedText.length} characters`);
+        console.log('=== COMBINED TEXT BEING SENT TO AI ===');
+        console.log(combinedText.substring(0, 1000)); // First 1000 chars
+        console.log('=== END COMBINED TEXT ===');
 
         // Create streaming chat completion
+        console.log('Creating OpenAI streaming completion...');
         const completion = await openai.chat.completions.create({
-          model: 'gpt-5-mini',
+          model: 'gpt-4o',
           messages: [
             {
               role: 'system',
@@ -148,28 +183,38 @@ The concepts array MUST be sorted by pointsPerHour descending.`
             },
             {
               role: 'user',
-              content: `Analyze these ${examFiles.length} exam PDF(s) and return a JSON list of concepts ranked by Points/Hour.\n\n${combinedText}`
+              content: `Analyze these ${numExams} exam PDF(s) and return a JSON list of concepts ranked by Points/Hour.\n\n${combinedText}`
             }
           ],
           stream: true,
-          max_completion_tokens: 4000,
+          max_tokens: 4000,
           temperature: 0.3
         });
 
         // Stream the response
         console.log('Starting to stream chat completion...');
         let fullResponse = '';
+        let chunkCount = 0;
 
         for await (const chunk of completion) {
+          chunkCount++;
           const content = chunk.choices[0]?.delta?.content;
           if (content) {
-            console.log('Streaming text chunk:', content.substring(0, 50));
+            console.log(`Chunk ${chunkCount}: "${content}"`);
             fullResponse += content;
             controller.enqueue(
               encoder.encode(`data: ${JSON.stringify({ type: 'text', content })}\n\n`)
             );
+          } else {
+            console.log(`Chunk ${chunkCount}: (no content)`);
           }
         }
+
+        console.log(`Streaming completed. Total chunks: ${chunkCount}`);
+        console.log(`Full AI response length: ${fullResponse.length}`);
+        console.log('=== FULL AI RESPONSE ===');
+        console.log(fullResponse);
+        console.log('=== END AI RESPONSE ===');
 
         console.log('Finished streaming, parsing response...');
 
@@ -194,7 +239,7 @@ The concepts array MUST be sorted by pointsPerHour descending.`
           encoder.encode(`data: ${JSON.stringify({
             type: 'done',
             data: {
-              totalExams: examFiles.length,
+              totalExams: numExams,
               gradeInfo: analysisData?.gradeInfo || null,
               patternAnalysis: analysisData?.patternAnalysis || null,
               concepts: analysisData?.concepts || [],
