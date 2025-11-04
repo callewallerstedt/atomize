@@ -8,7 +8,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import katex from "katex";
 import { Highlight, themes } from "prism-react-renderer";
-import { loadSubjectData, upsertNodeContent, TopicGeneratedContent, TopicGeneratedLesson, StoredSubjectData } from "@/utils/storage";
+import { loadSubjectData, upsertNodeContent, TopicGeneratedContent, TopicGeneratedLesson, StoredSubjectData, markLessonReviewed, ReviewSchedule } from "@/utils/storage";
 import WordPopover from "@/components/WordPopover";
 
 // Regex patterns moved inside component to avoid any global scope issues
@@ -29,11 +29,14 @@ export default function NodePage() {
   const [popoverError, setPopoverError] = useState<string | null>(null);
   const [popoverContent, setPopoverContent] = useState<string>("");
   const [userAnswers, setUserAnswers] = useState<{ [key: number]: string }>({});
-  const [quizResults, setQuizResults] = useState<{ [key: number]: { correct: boolean; explanation: string } } | null>(null);
+  const [quizResults, setQuizResults] = useState<{ [key: number]: { correct: boolean; explanation: string; hint?: string; fullSolution?: string } } | null>(null);
   const [checkingAnswers, setCheckingAnswers] = useState(false);
   const [currentLessonIndex, setCurrentLessonIndex] = useState(0);
   const [hoveredParagraph, setHoveredParagraph] = useState<string | null>(null);
   const [simplifyingParagraph, setSimplifyingParagraph] = useState<string | null>(null);
+  const [showHints, setShowHints] = useState<{ [key: number]: boolean }>({});
+  const [showSolutions, setShowSolutions] = useState<{ [key: number]: boolean }>({});
+  const [reviewedThisSession, setReviewedThisSession] = useState<Set<number>>(new Set());
 
   const subjectData = useMemo(() => loadSubjectData(slug), [slug]);
   const courseTopics = useMemo(() => {
@@ -59,38 +62,8 @@ export default function NodePage() {
 
 
   function wrapTextNode(str: string, parentFull?: string) {
-    // Simplified word detection without regex
-    const words = [];
-    let currentWord = '';
-
-    for (let i = 0; i < str.length; i++) {
-      const char = str[i];
-      if (char === ' ' || char === '\t' || char === '\n') {
-        if (currentWord) {
-          words.push(currentWord);
-          currentWord = '';
-        }
-        words.push(char);
-      } else {
-        currentWord += char;
-      }
-    }
-    if (currentWord) words.push(currentWord);
-
-    return words.map((token, idx) => {
-      const trimmed = token.trim();
-      const isWord = trimmed && trimmed.length > 0 && !trimmed.includes('.') && !trimmed.includes(',') && !trimmed.includes('!') && !trimmed.includes('?') && !trimmed.includes(':') && !trimmed.includes(';');
-      if (!isWord) return token;
-      return (
-        <span
-          key={idx}
-          className="hoverable-word"
-          onClick={(e) => onWordClick(token, parentFull || str, e)}
-        >
-          {token}
-        </span>
-      );
-    });
+    // Just return the string as-is for now
+    return str;
   }
 
   function wrapChildren(children: any): any {
@@ -105,6 +78,7 @@ export default function NodePage() {
 
   async function onWordClick(word: string, parentText: string, e: React.MouseEvent) {
     e.preventDefault();
+    if (!e.target) return;
     const rect = (e.target as HTMLElement).getBoundingClientRect();
     setPopoverXY({ x: rect.left + window.scrollX, y: rect.bottom + window.scrollY });
     setPopoverOpen(true);
@@ -307,6 +281,7 @@ export default function NodePage() {
                   <select
                     value={currentLessonIndex}
                     onChange={(e) => {
+                      if (!e.target) return;
                       const selectedIndex = parseInt(e.target.value);
                       // Switch to the selected lesson (generated or not)
                       setCurrentLessonIndex(selectedIndex);
@@ -325,14 +300,22 @@ export default function NodePage() {
               </div>
 
               <div className="lesson-content">
+                {lessonLoading && (
+                  <div className="flex items-center justify-center py-8 mb-4 rounded-lg bg-[#1A1F2E] border border-[#2B3140]">
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-8 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
+                      <div className="text-sm text-[#A7AFBE]">Generating lesson…</div>
+                    </div>
+                  </div>
+                )}
                 {content.lessons[currentLessonIndex]?.body ? (
                   <>
                     <div className="text-sm text-[#A7AFBE] mb-2">{content.lessonsMeta?.[currentLessonIndex]?.type}: {content.lessonsMeta?.[currentLessonIndex]?.title}</div>
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm, remarkMath]}
-                      rehypePlugins={[rehypeKatex]}
+                      rehypePlugins={[[rehypeKatex, { output: 'html', throwOnError: false, errorColor: '#cc0000', strict: false }]]}
                       components={{
-                        p: ({ children }) => {
+                        p: ({ children, ...props }: any) => {
                           let paragraphText = String(children);
                           // Simple HTML tag removal without regex
                           while (paragraphText.includes('<') && paragraphText.includes('>')) {
@@ -348,7 +331,7 @@ export default function NodePage() {
 
                           return (
                             <div
-                              className="relative group py-8 -my-6"
+                              className="relative group py-1 mb-2"
                               onMouseEnter={() => setHoveredParagraph(paragraphText)}
                               onMouseLeave={() => setHoveredParagraph(null)}
                             >
@@ -356,8 +339,8 @@ export default function NodePage() {
                                 <p
                                   className={
                                     isSimplifying
-                                      ? 'relative flex-1 transition-all duration-500 rounded-md px-2 py-1 shadow-[0_0_15px_rgba(0,229,255,0.4)]'
-                                      : 'relative flex-1 transition-all duration-500 rounded-md px-2 py-1'
+                                      ? 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 shadow-[0_0_15px_rgba(0,229,255,0.4)] leading-normal'
+                                      : 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 leading-normal'
                                   }
                                   style={isSimplifying ? {
                                     background: 'linear-gradient(to right, rgba(0, 229, 255, 0.3) 0%, rgba(0, 229, 255, 0.3) 100%)'
@@ -369,13 +352,13 @@ export default function NodePage() {
                               <div
                                 className={
                                   hoveredParagraph === paragraphText
-                                    ? 'paragraph-line absolute right-8 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-100 scale-y-100'
-                                    : 'paragraph-line absolute right-8 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-0 scale-y-0'
+                                    ? 'paragraph-line absolute -right-12 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-100 scale-y-100'
+                                    : 'paragraph-line absolute -right-12 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-0 scale-y-0'
                                 }
                                 style={{ transformOrigin: 'top' }}
                               />
                               {!isSimplifying && (
-                                <div className="absolute right-0 top-1 flex items-start">
+                                <div className="absolute -right-20 top-1 flex items-start">
                                   <button
                                     tabIndex={-1}
                                     onMouseEnter={(e) => { e.preventDefault(); setHoveredParagraph(paragraphText); }}
@@ -457,16 +440,134 @@ export default function NodePage() {
                                   </div>
                                 )}
                               </div>
-                            </div>
                           );
                         },
-                        li: ({ children }) => <li>{wrapChildren(children)}</li>,
-                        h1: ({ children }) => <h1>{wrapChildren(children)}</h1>,
-                        h2: ({ children }) => <h2>{wrapChildren(children)}</h2>,
-                        h3: ({ children }) => <h3>{wrapChildren(children)}</h3>,
-                        td: ({ children }) => <td>{wrapChildren(children)}</td>,
-                        th: ({ children }) => <th>{wrapChildren(children)}</th>,
-                        code: ({ children, ...props }) => {
+                        li: ({ children }: any) => {
+                          let itemText = String(children);
+                          // Simple HTML tag removal without regex
+                          while (itemText.includes('<') && itemText.includes('>')) {
+                            const start = itemText.indexOf('<');
+                            const end = itemText.indexOf('>', start);
+                            if (end > start) {
+                              itemText = itemText.slice(0, start) + itemText.slice(end + 1);
+                            } else {
+                              break;
+                            }
+                          }
+                          const isSimplifying = simplifyingParagraph === itemText;
+
+                          return (
+                            <li
+                              className="relative group mb-0.5"
+                              onMouseEnter={() => setHoveredParagraph(itemText)}
+                              onMouseLeave={() => setHoveredParagraph(null)}
+                            >
+                              <div className="flex transition-all duration-500">
+                                <span
+                                  className={
+                                    isSimplifying
+                                      ? 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 shadow-[0_0_15px_rgba(0,229,255,0.4)] leading-normal'
+                                      : 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 leading-normal'
+                                  }
+                                  style={isSimplifying ? {
+                                    background: 'linear-gradient(to right, rgba(0, 229, 255, 0.3) 0%, rgba(0, 229, 255, 0.3) 100%)'
+                                  } : {}}
+                                >
+                                  {wrapChildren(children)}
+                                </span>
+                              </div>
+                              <div
+                                className={
+                                  hoveredParagraph === itemText
+                                    ? 'paragraph-line absolute -right-12 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-100 scale-y-100'
+                                    : 'paragraph-line absolute -right-12 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-0 scale-y-0'
+                                }
+                                style={{ transformOrigin: 'top' }}
+                              />
+                              {!isSimplifying && (
+                                <div className="absolute -right-20 top-1 flex items-start">
+                                  <button
+                                    tabIndex={-1}
+                                    onMouseEnter={(e) => { e.preventDefault(); setHoveredParagraph(itemText); }}
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onFocus={(e) => e.preventDefault()}
+                                    onClick={async (e) => {
+                                      e.preventDefault();
+                                      const scrollY = window.scrollY;
+                                      setSimplifyingParagraph(itemText);
+                                      try {
+                                        const simplified = await simplifyParagraph(itemText);
+                                        if (simplified && simplified !== itemText) {
+                                          const currentBody = content.lessons[currentLessonIndex]?.body || '';
+                                          const normalizeWhitespace = (text: string) => {
+                                            let result = '';
+                                            let wasSpace = false;
+                                            for (let i = 0; i < text.length; i++) {
+                                              const char = text[i];
+                                              if (char === ' ' || char === '\t' || char === '\n') {
+                                                if (!wasSpace) {
+                                                  result += ' ';
+                                                  wasSpace = true;
+                                                }
+                                              } else {
+                                                result += char;
+                                                wasSpace = false;
+                                              }
+                                            }
+                                            return result.trim();
+                                          };
+
+                                          const normalizedOriginal = normalizeWhitespace(itemText);
+                                          let newBody = currentBody;
+                                          const lines = currentBody.split('\n');
+
+                                          for (let i = 0; i < lines.length; i++) {
+                                            const line = normalizeWhitespace(lines[i]);
+                                            if (line.includes(normalizedOriginal.substring(0, 50))) {
+                                              lines[i] = lines[i].replace(itemText, simplified);
+                                              newBody = lines.join('\n');
+                                              break;
+                                            }
+                                          }
+
+                                          const next = { ...(content as TopicGeneratedContent) };
+                                          next.lessons = next.lessons ? [...next.lessons] : [];
+                                          const currentLesson = next.lessons[currentLessonIndex];
+                                          next.lessons[currentLessonIndex] = {
+                                            title: currentLesson?.title || content?.lessonsMeta?.[currentLessonIndex]?.title || `Lesson ${currentLessonIndex + 1}`,
+                                            body: newBody,
+                                            quiz: currentLesson?.quiz || []
+                                          };
+                                          setContent(next);
+                                          upsertNodeContent(slug, title, next as any);
+                                        }
+                                      } catch (err: any) {
+                                        console.error('Failed to simplify list item:', err);
+                                        alert('Failed to simplify list item: ' + err.message);
+                                      } finally {
+                                        setSimplifyingParagraph(null);
+                                      }
+                                      setTimeout(() => window.scrollTo(0, scrollY), 0);
+                                    }}
+                                    disabled={isSimplifying}
+                                    className="transition-all duration-300 inline-flex h-7 w-7 items-center justify-center rounded-full shadow-lg cursor-pointer opacity-0 group-hover:opacity-100 bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white hover:shadow-xl hover:scale-110"
+                                    title="Simplify list item"
+                                  >
+                                    S
+                                  </button>
+                                </div>
+                              )}
+                            </li>
+                          );
+                        },
+                        h1: ({ children }: any) => <h1 className="mt-4 mb-2 text-2xl font-bold">{wrapChildren(children)}</h1>,
+                        h2: ({ children }: any) => <h2 className="mt-3 mb-1.5 text-xl font-semibold">{wrapChildren(children)}</h2>,
+                        h3: ({ children }: any) => <h3 className="mt-2.5 mb-1 text-lg font-medium">{wrapChildren(children)}</h3>,
+                        ul: ({ children }: any) => <ul className="space-y-0.5 my-2">{children}</ul>,
+                        ol: ({ children }: any) => <ol className="space-y-0.5 my-2">{children}</ol>,
+                        td: ({ children }: any) => <td>{wrapChildren(children)}</td>,
+                        th: ({ children }: any) => <th>{wrapChildren(children)}</th>,
+                        code: ({ children, ...props }: any) => {
                           // Handle inline math expressions that might be in code blocks
                           const content = String(children).trim();
                           if (content.startsWith('$') && content.endsWith('$') && content.length > 2) {
@@ -475,9 +576,9 @@ export default function NodePage() {
                               __html: katex.renderToString(content.slice(1, -1), { displayMode: false, throwOnError: false })
                             }} />;
                           }
-                          return <code {...props}>{children}</code>;
+                          return <code>{children}</code>;
                         },
-                        pre: ({ children, ...props }) => {
+                        pre: ({ children, ...props }: any) => {
                           // Extract code content from React elements
                           const extractTextContent = (element: any): string => {
                             if (typeof element === 'string') return element;
@@ -498,10 +599,10 @@ export default function NodePage() {
 
 
                           return (
-                            <div className="relative bg-[#0F141D] border border-[#2B3140] rounded-lg overflow-hidden my-4">
-                              <div className="flex font-mono">
+                            <div className="relative bg-[#0F141D] border border-[#2B3140] rounded-lg overflow-hidden my-3">
+                              <div className="flex font-mono text-sm">
                                 
-                                <div className="bg-[#0A0E14] px-2 py-4 text-[10px] text-[#6B7280] select-none border-r border-[#2B3140] leading-[1.5] min-w-[2.5rem]">
+                                <div className="bg-[#0A0E14] px-2 py-3 text-[10px] text-[#6B7280] select-none border-r border-[#2B3140] leading-[1.5] min-w-[2.5rem]">
                                   {lines.map((_, index) => (
                                     <div key={index} className="h-[21px] flex items-start justify-end pr-1">
                                       {index + 1}
@@ -509,7 +610,7 @@ export default function NodePage() {
                                   ))}
                                 </div>
                                 
-                                <div className="flex-1 py-4 pl-4 overflow-x-auto">
+                                <div className="flex-1 py-3 pl-4 overflow-x-auto">
                                   <Highlight
                                     code={codeContent.trim()}
                                     language={language || 'javascript'}
@@ -545,7 +646,73 @@ export default function NodePage() {
                         },
                       }}
                     >
-                      {content.lessons[currentLessonIndex].body}
+                      {
+                        (() => {
+                          // Convert LaTeX bracket notation to dollar signs and fix common errors
+                          let processedBody = content.lessons[currentLessonIndex].body;
+                          
+                          // Debug: Log original body if it contains \t
+                          if (processedBody.includes('\\t')) {
+                            console.log('🔍 DEBUG: Found \\t in lesson body');
+                            console.log('Original body snippet:', processedBody.substring(0, 500));
+                            
+                            // Find all \t occurrences
+                            const matches = [];
+                            for (let i = 0; i < processedBody.length - 1; i++) {
+                              if (processedBody[i] === '\\' && processedBody[i + 1] === 't') {
+                                matches.push({
+                                  position: i,
+                                  context: processedBody.substring(Math.max(0, i - 20), Math.min(processedBody.length, i + 30))
+                                });
+                              }
+                            }
+                            console.log('\\t occurrences:', matches);
+                          }
+                          
+                          // Remove metadata header if present
+                          processedBody = processedBody
+                            .replace(/^Lesson Title:.*\n/m, '')
+                            .replace(/^Subject:.*\n/m, '')
+                            .replace(/^Topic:.*\n/m, '');
+                          
+                          processedBody = processedBody
+                            .replace(/\\\[/g, '$$')
+                            .replace(/\\\]/g, '$$')
+                            .replace(/\\\(/g, '$')
+                            .replace(/\\\)/g, '$')
+                            // Fix \t errors AGGRESSIVELY - these should be \text{} not tab characters
+                            // The issue is \t\text{ creates nested \text - we need to fix this
+                            .replace(/\\t\\text\{/g, '\\text{')  // Fix nested \t\text{
+                            .replace(/\\t([A-Za-z])/g, '\\text{$1')
+                            .replace(/\\t\(/g, '\\text{(')
+                            .replace(/\\t\s/g, '\\text{ ')
+                            .replace(/\\t\}/g, '\\text{}')
+                            .replace(/\\t\\/g, '\\text{\\')  // Fix \t\ patterns
+                            // Fix common LaTeX errors - Greek letters
+                            .replace(/\bbeta(?![a-zA-Z\\])/g, '\\beta')
+                            .replace(/\balpha(?![a-zA-Z\\])/g, '\\alpha')
+                            .replace(/\btheta(?![a-zA-Z\\])/g, '\\theta')
+                            .replace(/\bheta(?![a-zA-Z\\])/g, '\\theta')  // Fix heta -> theta
+                            .replace(/\bgamma(?![a-zA-Z\\])/g, '\\gamma')
+                            .replace(/\bdelta(?![a-zA-Z\\])/g, '\\delta')
+                            .replace(/\bsigma(?![a-zA-Z\\])/g, '\\sigma')
+                            .replace(/\bmu(?![a-zA-Z\\])/g, '\\mu')
+                            .replace(/\bpi(?![a-zA-Z\\])/g, '\\pi')
+                            .replace(/\beta(?![a-zA-Z\\])/g, '\\eta')
+                            .replace(/\beta(?![a-zA-Z\\])/g, '\\eta')  // Fix eta -> \eta
+                            .replace(/ext\{/g, '\\text{')
+                            // Fix fraction spacing issues - add spaces around fractions
+                            .replace(/(\w)\\frac/g, '$1 \\frac')
+                            .replace(/\}(\w)/g, '} $1');
+                          
+                          // Debug: Log processed result if we made changes
+                          if (processedBody !== content.lessons[currentLessonIndex].body) {
+                            console.log('✅ Processed body (first 500 chars):', processedBody.substring(0, 500));
+                          }
+                          
+                          return processedBody;
+                        })()
+                      }
                     </ReactMarkdown>
                   </>
                 ) : (
@@ -619,33 +786,71 @@ export default function NodePage() {
                 )}
                 {content.lessons[currentLessonIndex]?.quiz && content.lessons[currentLessonIndex].quiz.length > 0 && (
                   <div className="mt-6">
-                    <h3 className="text-sm font-semibold text-[#E5E7EB] mb-4">Quick Questions</h3>
-                    <div className="space-y-4">
+                    <h3 className="text-sm font-semibold text-[#E5E7EB] mb-4">Practice Problems</h3>
+                    <div className="space-y-6">
                       {content.lessons[currentLessonIndex].quiz.map((q, qi) => (
-                        <div key={qi} className="space-y-2">
-                          <div className="text-sm text-[#E5E7EB]">{q.question}</div>
+                        <div key={qi} className="space-y-3 p-4 rounded-lg bg-[#1A1F2E] border border-[#2B3140]">
+                          <div className="text-sm font-medium text-[#E5E7EB]">{qi + 1}. {q.question}</div>
                           <div className="space-y-2">
-                            <input
-                              type="text"
+                            <textarea
                               value={userAnswers[qi] || ""}
-                              onChange={(e) => setUserAnswers(prev => ({ ...prev, [qi]: e.target.value }))}
+                              onChange={(e) => {
+                                if (!e.target) return;
+                                setUserAnswers(prev => ({ ...prev, [qi]: e.target.value }));
+                              }}
                               className={
                                 quizResults?.[qi]
                                   ? quizResults[qi].correct
-                                    ? 'w-full rounded-lg border border-green-500 bg-green-500 bg-opacity-10 text-green-100 px-3 py-2 text-sm transition-colors'
-                                    : 'w-full rounded-lg border border-red-500 bg-red-500 bg-opacity-10 text-red-100 px-3 py-2 text-sm transition-colors'
-                                  : 'w-full rounded-lg border border-[#2B3140] bg-[#0F141D] text-[#E5E7EB] focus:border-[#00E5FF] focus:outline-none px-3 py-2 text-sm transition-colors'
+                                    ? 'w-full rounded-lg border border-green-500 bg-green-500 bg-opacity-10 text-green-100 px-3 py-2 text-sm transition-colors resize-none'
+                                    : 'w-full rounded-lg border border-red-500 bg-red-500 bg-opacity-10 text-red-100 px-3 py-2 text-sm transition-colors resize-none'
+                                  : 'w-full rounded-lg border border-[#2B3140] bg-[#0F141D] text-[#E5E7EB] focus:border-[#00E5FF] focus:outline-none px-3 py-2 text-sm transition-colors resize-none'
                               }
-                              placeholder="Your answer..."
+                              placeholder="Write your answer here..."
+                              rows={3}
                               disabled={checkingAnswers}
                             />
                             {quizResults?.[qi] && (
-                              <div className={
-                                quizResults[qi].correct
-                                  ? 'text-xs p-2 rounded bg-green-500 bg-opacity-20 text-green-200'
-                                  : 'text-xs p-2 rounded bg-red-500 bg-opacity-20 text-red-200'
-                              }>
-                                {quizResults[qi].explanation}
+                              <div className="space-y-2">
+                                <div className={
+                                  quizResults[qi].correct
+                                    ? 'text-xs p-3 rounded bg-green-500 bg-opacity-20 text-green-200 border border-green-500 border-opacity-30'
+                                    : 'text-xs p-3 rounded bg-red-500 bg-opacity-20 text-red-200 border border-red-500 border-opacity-30'
+                                }>
+                                  <div className="font-semibold mb-1">{quizResults[qi].correct ? '✓ Correct!' : '✗ Not quite'}</div>
+                                  {quizResults[qi].explanation}
+                                </div>
+                                
+                                {!quizResults[qi].correct && quizResults[qi].hint && (
+                                  <div className="space-y-1">
+                                    <button
+                                      onClick={() => setShowHints(prev => ({ ...prev, [qi]: !prev[qi] }))}
+                                      className="text-xs text-[#00E5FF] hover:underline"
+                                    >
+                                      {showHints[qi] ? '▼ Hide hint' : '▶ Show hint'}
+                                    </button>
+                                    {showHints[qi] && (
+                                      <div className="text-xs p-3 rounded bg-[#00E5FF] bg-opacity-10 text-[#00E5FF] border border-[#00E5FF] border-opacity-30">
+                                        💡 {quizResults[qi].hint}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                
+                                {quizResults[qi].fullSolution && (
+                                  <div className="space-y-1">
+                                    <button
+                                      onClick={() => setShowSolutions(prev => ({ ...prev, [qi]: !prev[qi] }))}
+                                      className="text-xs text-[#FF2D96] hover:underline"
+                                    >
+                                      {showSolutions[qi] ? '▼ Hide solution' : '▶ Show step-by-step solution'}
+                                    </button>
+                                    {showSolutions[qi] && (
+                                      <div className="text-xs p-3 rounded bg-[#FF2D96] bg-opacity-10 text-[#E5E7EB] border border-[#FF2D96] border-opacity-30 whitespace-pre-wrap">
+                                        {quizResults[qi].fullSolution}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -757,41 +962,84 @@ export default function NodePage() {
             </div>
 
             
-            <div className="flex items-center justify-center gap-2">
-              <button
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#2B3140] text-white hover:bg-[#3A4150] disabled:opacity-60 transition-colors"
-                onClick={() => {
-                  // Go to previous lesson
-                  if (currentLessonIndex > 0) {
-                    setCurrentLessonIndex(currentLessonIndex - 1);
-                    setUserAnswers({});
-                    setQuizResults(null);
-                  }
-                }}
-                disabled={currentLessonIndex === 0}
-                title="Previous lesson"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </button>
-              <button
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#2B3140] text-white hover:bg-[#3A4150] disabled:opacity-60 transition-colors"
-                onClick={() => {
-                  // Go to next lesson if available
-                  if (currentLessonIndex < (content?.lessonsMeta?.length || 0) - 1) {
-                    setCurrentLessonIndex(currentLessonIndex + 1);
-                    setUserAnswers({});
-                    setQuizResults(null);
-                  }
-                }}
-                disabled={currentLessonIndex >= (content?.lessonsMeta?.length || 0) - 1}
-                title="Next lesson"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9 18L15 12L9 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </button>
+            <div className="flex flex-col items-center gap-4 mt-8">
+              {/* Review Rating */}
+              {!reviewedThisSession.has(currentLessonIndex) ? (
+                <div className="w-full max-w-md">
+                  <div className="p-4 rounded-lg bg-[#1A1F2E] border border-[#2B3140] space-y-3">
+                    <div className="text-sm text-[#E5E7EB] font-medium text-center">How well did you understand this lesson?</div>
+                    <div className="grid grid-cols-6 gap-2">
+                      {[
+                        { value: 0, label: '😰', desc: 'Forgot everything' },
+                        { value: 1, label: '😕', desc: 'Struggled a lot' },
+                        { value: 2, label: '😐', desc: 'Struggled some' },
+                        { value: 3, label: '🙂', desc: 'Got it okay' },
+                        { value: 4, label: '😊', desc: 'Got it well' },
+                        { value: 5, label: '🎯', desc: 'Perfect!' }
+                      ].map((item) => (
+                        <button
+                          key={item.value}
+                          onClick={() => {
+                            markLessonReviewed(slug, title, currentLessonIndex, item.value);
+                            setReviewedThisSession(prev => new Set([...prev, currentLessonIndex]));
+                          }}
+                          className="flex flex-col items-center p-2 rounded-lg bg-[#2B3140] hover:bg-[#3A4150] transition-colors"
+                          title={item.desc}
+                        >
+                          <span className="text-2xl">{item.label}</span>
+                          <span className="text-[10px] text-[#A7AFBE] mt-1">{item.value}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="text-xs text-[#A7AFBE] text-center">Rate to schedule your next review</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="w-full max-w-md">
+                  <div className="p-4 rounded-lg bg-green-500 bg-opacity-10 border border-green-500 border-opacity-30 text-center">
+                    <div className="text-sm text-green-200 font-medium">✓ Marked for review</div>
+                    <div className="text-xs text-green-300 mt-1">Next review scheduled!</div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Lesson Navigation */}
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#2B3140] text-white hover:bg-[#3A4150] disabled:opacity-60 transition-colors"
+                  onClick={() => {
+                    // Go to previous lesson
+                    if (currentLessonIndex > 0) {
+                      setCurrentLessonIndex(currentLessonIndex - 1);
+                      setUserAnswers({});
+                      setQuizResults(null);
+                    }
+                  }}
+                  disabled={currentLessonIndex === 0}
+                  title="Previous lesson"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+                <button
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#2B3140] text-white hover:bg-[#3A4150] disabled:opacity-60 transition-colors"
+                  onClick={() => {
+                    // Go to next lesson if available
+                    if (currentLessonIndex < (content?.lessonsMeta?.length || 0) - 1) {
+                      setCurrentLessonIndex(currentLessonIndex + 1);
+                      setUserAnswers({});
+                      setQuizResults(null);
+                    }
+                  }}
+                  disabled={currentLessonIndex >= (content?.lessonsMeta?.length || 0) - 1}
+                  title="Next lesson"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M9 18L15 12L9 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         ) : (

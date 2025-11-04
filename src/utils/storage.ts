@@ -11,6 +11,16 @@ export type StoredSubjectNodeContent = {
   [nodeName: string]: TopicGeneratedContent | string; // legacy string supported
 };
 
+export type ReviewSchedule = {
+  topicName: string;
+  lessonIndex: number;
+  lastReviewed: number; // timestamp
+  nextReview: number; // timestamp
+  interval: number; // days until next review
+  ease: number; // difficulty multiplier (higher = easier)
+  reviews: number; // count of reviews
+};
+
 export type StoredSubjectData = {
   subject: string;
   files: { name: string; type?: string; data?: string }[];
@@ -26,6 +36,7 @@ export type StoredSubjectData = {
   course_notes?: string; // freeform notes for the course
   topic_notes?: { [topicName: string]: string }; // freeform notes per topic
   course_icon?: string; // emoji or short icon text
+  reviewSchedules?: { [key: string]: ReviewSchedule }; // key: "topicName-lessonIndex"
 };
 
 const PREFIX = "atomicSubjectData:";
@@ -79,6 +90,89 @@ export function upsertNodeContent(slug: string, nodeName: string, content: strin
   } as StoredSubjectData;
   existing.nodes[nodeName] = content as any;
   saveSubjectData(slug, existing);
+}
+
+// Spaced Repetition Functions
+// Based on SM-2 algorithm with intervals: 1, 3, 7, 14, 30, 60, 120+ days
+
+export function markLessonReviewed(
+  slug: string,
+  topicName: string,
+  lessonIndex: number,
+  quality: number // 0-5, where 0=forgot, 3=okay, 5=perfect
+) {
+  const data = loadSubjectData(slug);
+  if (!data) return;
+  
+  const key = `${topicName}-${lessonIndex}`;
+  const now = Date.now();
+  const existingSchedule = data.reviewSchedules?.[key];
+  
+  if (!existingSchedule) {
+    // First review
+    const initialInterval = quality >= 3 ? 1 : 0.5; // days
+    const newSchedule: ReviewSchedule = {
+      topicName,
+      lessonIndex,
+      lastReviewed: now,
+      nextReview: now + (initialInterval * 24 * 60 * 60 * 1000),
+      interval: initialInterval,
+      ease: 2.5,
+      reviews: 1
+    };
+    data.reviewSchedules = data.reviewSchedules || {};
+    data.reviewSchedules[key] = newSchedule;
+  } else {
+    // Subsequent review - use SM-2 algorithm
+    let newEase = existingSchedule.ease + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+    newEase = Math.max(1.3, newEase); // minimum ease factor
+    
+    let newInterval: number;
+    if (quality < 3) {
+      // Forgot or struggled - reset to short interval
+      newInterval = 1;
+    } else {
+      // Remember - increase interval
+      if (existingSchedule.reviews === 1) {
+        newInterval = 3; // second review after 3 days
+      } else {
+        newInterval = Math.round(existingSchedule.interval * newEase);
+      }
+    }
+    
+    const updatedSchedule: ReviewSchedule = {
+      ...existingSchedule,
+      lastReviewed: now,
+      nextReview: now + (newInterval * 24 * 60 * 60 * 1000),
+      interval: newInterval,
+      ease: newEase,
+      reviews: existingSchedule.reviews + 1
+    };
+    data.reviewSchedules[key] = updatedSchedule;
+  }
+  
+  saveSubjectData(slug, data);
+}
+
+export function getLessonsDueForReview(slug: string): ReviewSchedule[] {
+  const data = loadSubjectData(slug);
+  if (!data || !data.reviewSchedules) return [];
+  
+  const now = Date.now();
+  return Object.values(data.reviewSchedules).filter(
+    schedule => schedule.nextReview <= now
+  ).sort((a, b) => a.nextReview - b.nextReview); // oldest due first
+}
+
+export function getUpcomingReviews(slug: string, days: number = 7): ReviewSchedule[] {
+  const data = loadSubjectData(slug);
+  if (!data || !data.reviewSchedules) return [];
+  
+  const now = Date.now();
+  const future = now + (days * 24 * 60 * 60 * 1000);
+  return Object.values(data.reviewSchedules).filter(
+    schedule => schedule.nextReview > now && schedule.nextReview <= future
+  ).sort((a, b) => a.nextReview - b.nextReview);
 }
 
 

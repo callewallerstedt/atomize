@@ -123,6 +123,7 @@ export default function LessonPage() {
 
   async function onWordClick(word: string, parentText: string, e: React.MouseEvent) {
     e.preventDefault();
+    if (!e.target) return;
     const rect = (e.target as HTMLElement).getBoundingClientRect();
     setPopoverXY({ x: rect.left + window.scrollX, y: rect.bottom + window.scrollY + 6 });
     setPopoverOpen(true);

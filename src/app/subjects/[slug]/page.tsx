@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { loadSubjectData, saveSubjectData, StoredSubjectData, TopicMeta } from "@/utils/storage";
+import { loadSubjectData, saveSubjectData, StoredSubjectData, TopicMeta, getLessonsDueForReview, getUpcomingReviews } from "@/utils/storage";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import Modal from "@/components/Modal";
@@ -59,6 +59,8 @@ export default function SubjectPage() {
   const [quickLearnQuery, setQuickLearnQuery] = useState("");
   const [quickLearnLoading, setQuickLearnLoading] = useState(false);
   const [generatingBasics, setGeneratingBasics] = useState(false);
+  const [reviewsDue, setReviewsDue] = useState<ReturnType<typeof getLessonsDueForReview>>([]);
+  const [upcomingReviews, setUpcomingReviews] = useState<ReturnType<typeof getUpcomingReviews>>([]);
 
   useEffect(() => {
     const found = readSubjects().find((s) => s.slug === slug);
@@ -85,6 +87,10 @@ export default function SubjectPage() {
       setTree(saved.tree);
       setNodes(saved.nodes || {} as any);
     }
+    
+    // Load reviews
+    setReviewsDue(getLessonsDueForReview(slug));
+    setUpcomingReviews(getUpcomingReviews(slug, 7));
   }, [slug]);
 
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -216,13 +222,53 @@ export default function SubjectPage() {
   return (
     <div className="flex min-h-screen flex-col bg-[#0F1216]">
       <div className="mx-auto w-full max-w-3xl px-6 py-8">
-        {/* Welcome block removed */}
+        {/* Reviews Due Banner */}
+        {reviewsDue.length > 0 && (
+          <div className="mb-6 rounded-xl border border-[#00E5FF] border-opacity-30 bg-[#00E5FF] bg-opacity-10 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-[#00E5FF]">🔔 {reviewsDue.length} lesson{reviewsDue.length > 1 ? 's' : ''} due for review</div>
+                <div className="text-xs text-[#A7AFBE] mt-1">Spaced repetition helps you remember!</div>
+              </div>
+              <button
+                onClick={() => {
+                  if (reviewsDue.length > 0) {
+                    const first = reviewsDue[0];
+                    router.push(`/subjects/${slug}/node/${encodeURIComponent(first.topicName)}`);
+                  }
+                }}
+                className="inline-flex h-9 items-center rounded-full bg-[#00E5FF] px-4 text-sm font-medium text-white hover:opacity-95 transition-opacity"
+              >
+                Review Now
+              </button>
+            </div>
+            {reviewsDue.length > 1 && (
+              <div className="mt-3 space-y-1">
+                {reviewsDue.slice(0, 3).map((review, idx) => (
+                  <Link
+                    key={idx}
+                    href={`/subjects/${slug}/node/${encodeURIComponent(review.topicName)}`}
+                    className="block text-xs text-[#E5E7EB] hover:text-[#00E5FF] transition-colors"
+                  >
+                    • {review.topicName} - Lesson {review.lessonIndex + 1}
+                  </Link>
+                ))}
+                {reviewsDue.length > 3 && (
+                  <div className="text-xs text-[#A7AFBE]">+ {reviewsDue.length - 3} more</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Upcoming Reviews Info */}
+        {upcomingReviews.length > 0 && reviewsDue.length === 0 && (
+          <div className="mb-6 rounded-xl border border-[#2B3140] bg-[#0B0E12] p-4">
+            <div className="text-sm text-[#E5E7EB]">📅 {upcomingReviews.length} upcoming review{upcomingReviews.length > 1 ? 's' : ''} in the next 7 days</div>
+            <div className="text-xs text-[#A7AFBE] mt-1">Keep up the great work!</div>
+          </div>
+        )}
 
-        {/* Upload UI removed per spec: generation happens at creation time */}
-
-        {/* Selected files list removed for simpler course view */}
-
-        {/* Analyze button removed; course is generated at creation */}
         {activeTab === 'tree' && (
           <div className="mt-4">
             <div className="mb-3 flex items-center justify-between">
@@ -411,7 +457,7 @@ export default function SubjectPage() {
             <div className="mt-6">
               <input
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => { if (!e.target) return; setQuery(e.target.value); }}
                 placeholder="Search topics..."
                 className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none"
               />
@@ -465,6 +511,7 @@ export default function SubjectPage() {
             <textarea
               value={courseNotes}
               onChange={(e) => {
+                if (!e.target) return;
                 setCourseNotes(e.target.value);
                 try {
                   const data = loadSubjectData(slug) as StoredSubjectData | null;
@@ -591,7 +638,7 @@ export default function SubjectPage() {
               type="file"
               multiple
               accept=".pdf,.docx,.txt,.md,.markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown"
-              onChange={(e) => setBasicsFiles(Array.from(e.target.files || []))}
+              onChange={(e) => { if (!e.target?.files) return; setBasicsFiles(Array.from(e.target.files)); }}
               className="block w-full text-sm text-[#E5E7EB] file:mr-4 file:rounded-full file:border-0 file:bg-accent file:px-3 file:py-2 file:text-white"
             />
             <div className="mt-2 text-xs text-[#9AA3B2]">We’ll use these plus your saved course summary as context.</div>
@@ -653,7 +700,7 @@ export default function SubjectPage() {
             <label className="mb-2 block text-xs text-[#A7AFBE]">Topic name or question</label>
             <input
               value={newTopicValue}
-              onChange={(e) => setNewTopicValue(e.target.value)}
+              onChange={(e) => { if (!e.target) return; setNewTopicValue(e.target.value); }}
               className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none"
               placeholder="e.g. Linear Algebra basics or ‘What is eigenvalue?’"
             />
@@ -667,7 +714,7 @@ export default function SubjectPage() {
               <label className="mb-2 block text-xs text-[#A7AFBE]">What do you want to learn?</label>
               <textarea
                 value={quickLearnQuery}
-                onChange={(e) => setQuickLearnQuery(e.target.value)}
+                onChange={(e) => { if (!e.target) return; setQuickLearnQuery(e.target.value); }}
                 className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none resize-none"
                 placeholder="e.g. How does binary search work? Or paste a question from your course materials..."
                 rows={4}

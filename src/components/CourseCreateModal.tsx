@@ -36,11 +36,11 @@ export default function CourseCreateModal({ open, onClose, onCreate }: { open: b
       <form onSubmit={submit} className="space-y-4">
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Course name</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none" placeholder="e.g., Concurrent Programming" />
+          <input value={name} onChange={(e) => { if (!e.target) return; setName(e.target.value); }} className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none" placeholder="e.g., Concurrent Programming" />
         </div>
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Syllabus (optional)</label>
-          <textarea value={syllabus} onChange={(e) => setSyllabus(e.target.value)} rows={5} className="w-full resize-y rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none" placeholder="Paste syllabus or course description..." />
+          <textarea value={syllabus} onChange={(e) => { if (!e.target) return; setSyllabus(e.target.value); }} rows={5} className="w-full resize-y rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none" placeholder="Paste syllabus or course description..." />
         </div>
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Upload files (optional)</label>
@@ -104,7 +104,8 @@ export default function CourseCreateModal({ open, onClose, onCreate }: { open: b
             className="hidden"
             accept=".pdf,.txt,.md,.docx,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             onChange={(e) => {
-              const selectedFiles = Array.from(e.target.files || []);
+              if (!e.target?.files) return;
+              const selectedFiles = Array.from(e.target.files);
               console.log('Files selected:', selectedFiles);
               setFiles((prev) => [...prev, ...selectedFiles]);
               // Reset the input value so the same file can be selected again

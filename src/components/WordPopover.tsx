@@ -29,7 +29,7 @@ export default function WordPopover({
       if (e.key === "Escape") onClose();
     }
     function onDoc(e: MouseEvent) {
-      if (!ref.current) return;
+      if (!ref.current || !e.target) return;
       if (!ref.current.contains(e.target as Node)) onClose();
     }
     if (open) {

@@ -96,7 +96,7 @@ export default function SubjectModal({
             id="subject-name"
             ref={inputRef}
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => { if (!e.target) return; setName(e.target.value); }}
             placeholder="e.g., Calculus I"
             className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:border-[#2F86F6] focus:outline-none"
           />

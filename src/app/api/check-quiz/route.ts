@@ -29,21 +29,26 @@ export async function POST(req: Request) {
       `Question ${i + 1}: "${a.question}"\nUser Answer: "${a.userAnswer}"`
     ).join('\n\n');
 
-    const system = `You are a quiz answer checker. For each question, evaluate if the user's answer is correct based on the lesson content and course context.
+    const system = `You are a supportive tutor evaluating student answers and providing helpful feedback.
 
 Return JSON with this exact structure:
 {
   "results": {
-    "0": { "correct": boolean, "explanation": "string" },
-    "1": { "correct": boolean, "explanation": "string" },
+    "0": { "correct": boolean, "explanation": "string", "hint": "string", "fullSolution": "string" },
+    "1": { "correct": boolean, "explanation": "string", "hint": "string", "fullSolution": "string" },
     ...
   }
 }
 
 Rules:
-- correct: true if the answer is substantially correct, false otherwise
-- explanation: 2-3 sentences explaining why the answer is correct/incorrect and what the right answer should be
-- Be lenient but accurate - accept answers that demonstrate understanding even if not perfectly worded
+- correct: true if the answer demonstrates substantial understanding, false otherwise
+- explanation: 1-2 sentences of feedback on the user's answer - what they got right or what they missed
+- hint: If incorrect, provide a helpful hint that guides them toward the solution WITHOUT giving it away
+- fullSolution: A complete, step-by-step solution that shows the reasoning process clearly
+- Be VERY lenient - accept answers that show understanding even if terminology isn't perfect
+- Write in a friendly, encouraging tone
+- For the fullSolution, use numbered steps and explain the "why" at each step
+- CRITICAL: If using LaTeX math, use \\text{} for text (NOT \\t which is a tab character)
 - Use the lesson content and course context to determine correctness
 - Number keys starting from 0 for each question index
 - Return only valid JSON, no additional text`;

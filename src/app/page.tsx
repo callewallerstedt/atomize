@@ -88,6 +88,18 @@ export default function Home() {
         <h1 className="text-xl font-semibold text-white">Your subjects</h1>
         <div className="flex items-center gap-3">
           <button
+            onClick={() => router.push('/exam-snipe')}
+            className="inline-flex h-10 items-center rounded-full border border-[#FF2D96] bg-[#FF2D96]/10 px-4 text-sm font-medium text-[#FF2D96] hover:bg-[#FF2D96]/20 transition-colors"
+          >
+            🎯 Exam Snipe
+          </button>
+          <button
+            onClick={() => router.push('/readassist')}
+            className="inline-flex h-10 items-center rounded-full border border-[#00E5FF] bg-[#00E5FF]/10 px-4 text-sm font-medium text-[#00E5FF] hover:bg-[#00E5FF]/20 transition-colors"
+          >
+            📄 ReadAssist
+          </button>
+          <button
             onClick={() => { setQuickLearnQuery(""); setQuickLearnOpen(true); }}
             className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 text-sm font-medium text-white hover:opacity-95"
           >
@@ -287,7 +299,7 @@ export default function Home() {
               <label className="mb-2 block text-xs text-[#A7AFBE]">What do you want to learn?</label>
               <textarea
                 value={quickLearnQuery}
-                onChange={(e) => setQuickLearnQuery(e.target.value)}
+                onChange={(e) => { if (!e.target) return; setQuickLearnQuery(e.target.value); }}
                 className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none resize-none"
                 placeholder="e.g. How does machine learning work? Or paste a question from your textbook..."
                 rows={4}

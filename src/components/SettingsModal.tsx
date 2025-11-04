@@ -71,19 +71,19 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Background</label>
-          <input type="color" value={theme.background} onChange={(e) => setTheme((t) => ({ ...t, background: e.target.value }))} className="h-10 w-full cursor-pointer rounded-xl border border-[#222731] bg-[#0F141D]" />
+          <input type="color" value={theme.background} onChange={(e) => { if (!e.target) return; setTheme((t) => ({ ...t, background: e.target.value })); }} className="h-10 w-full cursor-pointer rounded-xl border border-[#222731] bg-[#0F141D]" />
         </div>
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Foreground</label>
-          <input type="color" value={theme.foreground} onChange={(e) => setTheme((t) => ({ ...t, foreground: e.target.value }))} className="h-10 w-full cursor-pointer rounded-xl border border-[#222731] bg-[#0F141D]" />
+          <input type="color" value={theme.foreground} onChange={(e) => { if (!e.target) return; setTheme((t) => ({ ...t, foreground: e.target.value })); }} className="h-10 w-full cursor-pointer rounded-xl border border-[#222731] bg-[#0F141D]" />
         </div>
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Accent cyan</label>
-          <input type="color" value={theme.accentCyan} onChange={(e) => setTheme((t) => ({ ...t, accentCyan: e.target.value }))} className="h-10 w-full cursor-pointer rounded-xl border border-[#222731] bg-[#0F141D]" />
+          <input type="color" value={theme.accentCyan} onChange={(e) => { if (!e.target) return; setTheme((t) => ({ ...t, accentCyan: e.target.value })); }} className="h-10 w-full cursor-pointer rounded-xl border border-[#222731] bg-[#0F141D]" />
         </div>
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Accent pink</label>
-          <input type="color" value={theme.accentPink} onChange={(e) => setTheme((t) => ({ ...t, accentPink: e.target.value }))} className="h-10 w-full cursor-pointer rounded-xl border border-[#222731] bg-[#0F141D]" />
+          <input type="color" value={theme.accentPink} onChange={(e) => { if (!e.target) return; setTheme((t) => ({ ...t, accentPink: e.target.value })); }} className="h-10 w-full cursor-pointer rounded-xl border border-[#222731] bg-[#0F141D]" />
         </div>
       </div>
     </Modal>
