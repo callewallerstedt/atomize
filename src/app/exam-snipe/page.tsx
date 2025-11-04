@@ -132,9 +132,6 @@ export default function ExamSnipePage() {
                   <div className="mt-6 text-sm text-[#6B7280]">
                     Perfect if you just started studying a couple days before your exams.
                   </div>
-                  <div className="mt-4 text-xs text-[#6B7280] border-t border-[#3A4454] pt-3">
-                    💡 <strong>Pro tip:</strong> Works with both text-based PDFs and scanned/image PDFs (OCR included)
-                  </div>
                 </div>
 
                 <div

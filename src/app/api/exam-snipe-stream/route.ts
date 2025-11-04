@@ -40,51 +40,12 @@ export async function POST(req: NextRequest) {
 
         // Check if we got any text
         if (!data.text || data.text.trim().length === 0) {
-          console.warn(`No text extracted from ${file.name} - trying OCR...`);
-
-          // Try OCR for image-based PDFs
-          try {
-            const { createWorker } = await import('tesseract.js');
-            const { pdf2pic } = await import('pdf2pic');
-
-            // Convert first page to image
-            const convert = pdf2pic.fromBuffer(buffer, {
-              density: 200,
-              saveFilename: "page",
-              savePath: "/tmp",
-              format: "png",
-              width: 2000,
-              height: 2000
-            });
-
-            const page = await convert(1); // Convert page 1
-            if (page.base64) {
-              // Create OCR worker
-              const worker = await createWorker('eng');
-              const { data: ocrData } = await worker.recognize(`data:image/png;base64,${page.base64}`);
-              await worker.terminate();
-
-              if (ocrData.text && ocrData.text.trim().length > 0) {
-                console.log(`OCR extracted ${ocrData.text.length} characters from ${file.name}`);
-                examTexts.push({
-                  name: file.name,
-                  text: ocrData.text
-                });
-              } else {
-                throw new Error('OCR found no text');
-              }
-            } else {
-              throw new Error('Failed to convert PDF to image');
-            }
-          } catch (ocrErr) {
-            console.error(`OCR failed for ${file.name}:`, ocrErr);
-            // Fallback to metadata
-            const text = `PDF: ${file.name} (${data.numpages} pages, ${data.info?.Title || 'Unknown title'}) - Image-based PDF, no text extracted`;
-            examTexts.push({
-              name: file.name,
-              text: text
-            });
-          }
+          console.warn(`No text extracted from ${file.name}`);
+          // Just add the file with empty text - let AI handle it
+          examTexts.push({
+            name: file.name,
+            text: `PDF: ${file.name} - No text could be extracted from this PDF.`
+          });
         } else {
           examTexts.push({
             name: file.name,
@@ -102,11 +63,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Check if we have any files with actual content (not just error messages)
-    const validTexts = examTexts.filter(exam => !exam.text.startsWith('Error extracting') && !exam.text.startsWith('PDF:'));
-    if (validTexts.length === 0) {
+    if (examTexts.length === 0) {
       controller.enqueue(
-        encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'No readable text found in uploaded PDFs. Make sure they contain selectable text, not just images.' })}\n\n`)
+        encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Failed to process any PDF files.' })}\n\n`)
       );
       controller.close();
       return;
