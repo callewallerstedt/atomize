@@ -74,16 +74,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-[#0F1216] text-[#E5E7EB]">
       {/* Main content */}
       <div className="flex min-h-screen w-full flex-col">
-        <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-[#222731] bg-[#0B0E12]/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-[#0B0E12]/80">
-          <nav className="flex items-center gap-2 text-sm text-[#A7AFBE]">
-            <Link href="/" className="hover:text-white">Home</Link>
-            {crumbs.map((c, i) => (
-              <span key={i} className="flex items-center gap-2">
-                <span className="text-[#384253]">/</span>
-                <Link href={c.href} className="hover:text-white max-w-[220px] truncate">{c.label}</Link>
-              </span>
-            ))}
-          </nav>
+        <header className="sticky top-0 z-20 flex h-14 items-center justify-center border-b border-[#222731] bg-[#0B0E12]/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-[#0B0E12]/80">
           <div className="flex items-center gap-3">
             <button
               onClick={() => router.push('/')}

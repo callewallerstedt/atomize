@@ -5,12 +5,9 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
 
 export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
-  
+
   const stream = new ReadableStream({
     async start(controller) {
-      let assistantId: string | null = null;
-      const uploadedFileIds: string[] = [];
-      
       try {
         const formData = await req.formData();
         const examFiles = formData.getAll('exams') as File[];
@@ -23,31 +20,71 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // Upload PDFs to OpenAI
-        for (const file of examFiles) {
-          try {
-            const uploadedFile = await openai.files.create({
-              file: file,
-              purpose: 'assistants',
-            });
-            uploadedFileIds.push(uploadedFile.id);
-          } catch (err) {
-            console.error(`Failed to upload ${file.name}:`, err);
-          }
-        }
+    // Extract text from all PDFs
+    const examTexts: { name: string; text: string }[] = [];
 
-        if (uploadedFileIds.length === 0) {
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Failed to upload files' })}\n\n`)
-          );
-          controller.close();
-          return;
-        }
+    for (const file of examFiles) {
+      try {
+        console.log(`Extracting text from ${file.name}...`);
 
-        // Create assistant with file search
-        const assistant = await openai.beta.assistants.create({
-          name: "Exam Analyzer",
-          instructions: `You are an expert exam analyzer. Analyze the provided old exams and identify the most valuable concepts/methods to study.
+        // Convert file to buffer
+        const bytes = await file.arrayBuffer();
+        const buffer = Buffer.from(bytes);
+
+        // Import pdf-parse dynamically
+        const pdfParse = (await import('pdf-parse')).default;
+        const data = await pdfParse(buffer);
+
+        // Check if we got any text
+        if (!data.text || data.text.trim().length === 0) {
+          console.warn(`No text extracted from ${file.name} - might be image-based PDF`);
+          // Try to include some metadata instead
+          const text = `PDF: ${file.name} (${data.numpages} pages, ${data.info?.Title || 'Unknown title'})`;
+          examTexts.push({
+            name: file.name,
+            text: text
+          });
+        } else {
+          examTexts.push({
+            name: file.name,
+            text: data.text
+          });
+          console.log(`Extracted ${data.text.length} characters from ${file.name}`);
+        }
+      } catch (err) {
+        console.error(`Failed to extract text from ${file.name}:`, err);
+        // Still add the file with an error note
+        examTexts.push({
+          name: file.name,
+          text: `Error extracting text from ${file.name}: ${err.message}`
+        });
+      }
+    }
+
+    // Check if we have any files with actual content (not just error messages)
+    const validTexts = examTexts.filter(exam => !exam.text.startsWith('Error extracting') && !exam.text.startsWith('PDF:'));
+    if (validTexts.length === 0) {
+      controller.enqueue(
+        encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'No readable text found in uploaded PDFs. Make sure they contain selectable text, not just images.' })}\n\n`)
+      );
+      controller.close();
+      return;
+    }
+
+        // Combine all exam texts with labels
+        const combinedText = examTexts.map((exam, index) =>
+          `=== EXAM ${index + 1}: ${exam.name} ===\n${exam.text}\n\n`
+        ).join('');
+
+        console.log(`Total combined text length: ${combinedText.length} characters`);
+
+        // Create streaming chat completion
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-5-mini',
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert exam analyzer. Analyze the provided old exams and identify the most valuable concepts/methods to study.
 
 FIRST: Extract the grade requirements from the exams (e.g., "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p"). This should be at the top level of the JSON as "gradeInfo".
 
@@ -107,120 +144,68 @@ Return JSON in this EXACT format:
   ]
 }
 
-The concepts array MUST be sorted by pointsPerHour descending.`,
-          model: "gpt-4o",
-          tools: [{ type: "file_search" }],
-        });
-        
-        assistantId = assistant.id;
-
-        // Create thread with files
-        const thread = await openai.beta.threads.create({
-          messages: [
-            {
-              role: "user",
-              content: `Analyze these ${examFiles.length} exam PDF(s) and return a JSON list of concepts ranked by Points/Hour.`,
-              attachments: uploadedFileIds.map(id => ({
-                file_id: id,
-                tools: [{ type: "file_search" }],
-              })),
+The concepts array MUST be sorted by pointsPerHour descending.`
             },
+            {
+              role: 'user',
+              content: `Analyze these ${examFiles.length} exam PDF(s) and return a JSON list of concepts ranked by Points/Hour.\n\n${combinedText}`
+            }
           ],
+          stream: true,
+          max_tokens: 4000,
+          temperature: 0.3
         });
 
-        // Run the assistant with streaming
-        const run = openai.beta.threads.runs.stream(thread.id, {
-          assistant_id: assistant.id,
-        });
+        // Stream the response
+        console.log('Starting to stream chat completion...');
+        let fullResponse = '';
 
-        // Stream the text as it comes in
-        console.log('Starting to stream assistant response...');
-        for await (const event of run) {
-          if (event.event === 'thread.message.delta') {
-            const delta = event.data.delta;
-            if (delta.content && delta.content[0] && delta.content[0].type === 'text') {
-              const text = delta.content[0].text?.value || '';
-              console.log('Streaming text chunk:', text.substring(0, 50));
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: 'text', content: text })}\n\n`)
-              );
+        for await (const chunk of completion) {
+          const content = chunk.choices[0]?.delta?.content;
+          if (content) {
+            console.log('Streaming text chunk:', content.substring(0, 50));
+            fullResponse += content;
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: 'text', content })}\n\n`)
+            );
+          }
+        }
+
+        console.log('Finished streaming, parsing response...');
+
+        // Parse JSON response
+        let analysisData;
+        try {
+          analysisData = JSON.parse(fullResponse);
+        } catch {
+          const jsonMatch = fullResponse.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+          if (jsonMatch) {
+            analysisData = JSON.parse(jsonMatch[1]);
+          } else {
+            const objectMatch = fullResponse.match(/\{[\s\S]*\}/);
+            if (objectMatch) {
+              analysisData = JSON.parse(objectMatch[0]);
             }
           }
         }
-        console.log('Finished streaming, getting final message...');
 
-        // Get final message
-        const messages = await openai.beta.threads.messages.list(thread.id);
-        const assistantMessage = messages.data.find(m => m.role === 'assistant');
-        
-        if (assistantMessage && assistantMessage.content[0]) {
-          const responseText = assistantMessage.content[0].type === 'text' 
-            ? assistantMessage.content[0].text.value 
-            : '';
-
-          // Parse JSON response
-          let analysisData;
-          try {
-            analysisData = JSON.parse(responseText);
-          } catch {
-            const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-            if (jsonMatch) {
-              analysisData = JSON.parse(jsonMatch[1]);
-            } else {
-              const objectMatch = responseText.match(/\{[\s\S]*\}/);
-              if (objectMatch) {
-                analysisData = JSON.parse(objectMatch[0]);
-              }
+        // Send final results
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({
+            type: 'done',
+            data: {
+              totalExams: examFiles.length,
+              gradeInfo: analysisData?.gradeInfo || null,
+              patternAnalysis: analysisData?.patternAnalysis || null,
+              concepts: analysisData?.concepts || [],
             }
-          }
-
-          // Send final results
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({
-              type: 'done',
-              data: {
-                totalExams: examFiles.length,
-                gradeInfo: analysisData?.gradeInfo || null,
-                patternAnalysis: analysisData?.patternAnalysis || null,
-                concepts: analysisData?.concepts || [],
-              }
-            })}\n\n`)
-          );
-        }
-
-        // Clean up
-        if (assistantId) {
-          try {
-            await openai.beta.assistants.delete(assistantId);
-          } catch (err) {
-            console.error('Failed to delete assistant:', err);
-          }
-        }
-        for (const fileId of uploadedFileIds) {
-          try {
-            await openai.files.delete(fileId);
-          } catch (err) {
-            console.error('Failed to delete file:', err);
-          }
-        }
+          })}\n\n`)
+        );
 
         controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         controller.close();
       } catch (error: any) {
         console.error('Streaming error:', error);
-        
-        // Clean up on error
-        if (assistantId) {
-          try {
-            await openai.beta.assistants.delete(assistantId);
-          } catch {}
-        }
-        for (const fileId of uploadedFileIds) {
-          try {
-            await openai.files.delete(fileId);
-          } catch {}
-        }
-        
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ type: 'error', error: error.message || 'Analysis failed' })}\n\n`)
         );

@@ -123,8 +123,19 @@ export default function ExamSnipePage() {
           <>
             {!examAnalyzing ? (
               <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8">
-                <div 
-                  className="w-full max-w-2xl rounded-2xl border-2 border-dashed border-[#3A4454] bg-transparent p-20 text-center hover:border-[#00E5FF]/50 transition-colors cursor-pointer"
+                <div className="text-center max-w-2xl">
+                  <h2 className="text-3xl font-bold text-white mb-4">Exam Snipe</h2>
+                  <p className="text-lg text-[#A7AFBE] leading-relaxed">
+                    Upload your old exams and let AI analyze them to find the highest-value concepts to study.
+                    Discover which topics appear most frequently and give you the best return on study time.
+                  </p>
+                  <div className="mt-6 text-sm text-[#6B7280]">
+                    Perfect if you just started studying a couple days before your exams.
+                  </div>
+                </div>
+
+                <div
+                  className={`w-full max-w-2xl rounded-2xl border-2 border-dashed border-[#3A4454] bg-transparent text-center hover:border-[#00E5FF]/50 transition-colors cursor-pointer ${examFiles.length === 0 ? 'p-20' : 'p-8'}`}
                   onClick={() => fileInputRef.current?.click()}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
@@ -205,51 +216,20 @@ export default function ExamSnipePage() {
                   {/* Streaming AI output */}
                   {streamingText && (
                     <div className="mt-6 w-full max-w-2xl mx-auto">
-                      <div className="text-xs font-semibold text-[#A7AFBE] mb-2 text-center">🤖 AI is analyzing...</div>
+                      <div className="text-xs font-semibold text-[#A7AFBE] mb-2 text-center">Raw output:</div>
                       <div className="relative rounded-lg bg-[#0B0E12] p-4 overflow-hidden">
                         {/* Neon gradient glow border */}
                         <div className="absolute inset-0 rounded-lg bg-gradient-to-r from-[#00E5FF] via-[#FF2D96] to-[#00E5FF] opacity-30 blur-sm"></div>
                         <div className="absolute inset-[2px] rounded-lg bg-[#0B0E12]"></div>
                         
                         {/* Scrolling text container */}
-                        <div className="relative h-20 overflow-hidden">
-                          <div className="absolute inset-0 flex flex-col justify-center items-center">
-                            {(() => {
-                              const lines = streamingText.split('\n').filter(l => l.trim());
-                              const currentIndex = Math.max(0, lines.length - 1);
-                              const prevLine = lines[currentIndex - 1] || '';
-                              const currentLine = lines[currentIndex] || '';
-                              const nextLine = ''; // No next line since we're showing the latest
-                              
-                              return (
-                                <>
-                                  {/* Previous line (blurred, smaller) */}
-                                  {prevLine && (
-                                    <div className="text-[10px] text-[#6B7280] font-mono blur-[2px] opacity-40 mb-1 whitespace-nowrap overflow-hidden text-ellipsis max-w-full px-3">
-                                      {prevLine.length > 80 ? prevLine.substring(0, 80) + '...' : prevLine}
-                                    </div>
-                                  )}
-                                  
-                                  {/* Current line (clear, gradient text) */}
-                                  <div className="text-sm font-mono whitespace-nowrap overflow-hidden text-ellipsis max-w-full px-3 mb-1">
-                                    <span className="bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] bg-clip-text text-transparent font-semibold">
-                                      {currentLine.length > 100 ? currentLine.substring(0, 100) + '...' : currentLine}
-                                      <span className="inline-block w-1.5 h-3 bg-[#00E5FF] animate-pulse ml-1"></span>
-                                    </span>
-                                  </div>
-                                  
-                                  {/* Next line (blurred, smaller) - placeholder for symmetry */}
-                                  <div className="text-[10px] text-[#6B7280] font-mono blur-[2px] opacity-40 whitespace-nowrap overflow-hidden text-ellipsis max-w-full px-3">
-                                    {nextLine || '...'}
-                                  </div>
-                                </>
-                              );
-                            })()}
+                        <div className="relative h-32 overflow-y-auto overflow-x-hidden">
+                          <div className="p-3">
+                            <div className="text-sm font-mono text-[#E5E7EB] whitespace-pre-wrap break-words leading-relaxed">
+                              {streamingText}
+                              <span className="inline-block w-1.5 h-3 bg-[#00E5FF] animate-pulse ml-1"></span>
+                            </div>
                           </div>
-                          
-                          {/* Gradient fade on edges */}
-                          <div className="absolute left-0 top-0 bottom-0 w-16 bg-gradient-to-r from-[#0B0E12] to-transparent pointer-events-none"></div>
-                          <div className="absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-[#0B0E12] to-transparent pointer-events-none"></div>
                         </div>
                       </div>
                     </div>

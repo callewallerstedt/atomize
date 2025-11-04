@@ -12,29 +12,70 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'No exam files provided' }, { status: 400 });
     }
 
-    // Upload PDFs to OpenAI
-    const uploadedFileIds: string[] = [];
-    
+    // Extract text from all PDFs
+    const examTexts: { name: string; text: string }[] = [];
+
     for (const file of examFiles) {
       try {
-        const uploadedFile = await openai.files.create({
-          file: file,
-          purpose: 'assistants',
-        });
-        uploadedFileIds.push(uploadedFile.id);
+        console.log(`Extracting text from ${file.name}...`);
+
+        // Convert file to buffer
+        const bytes = await file.arrayBuffer();
+        const buffer = Buffer.from(bytes);
+
+        // Import pdf-parse dynamically
+        const pdfParse = (await import('pdf-parse')).default;
+        const data = await pdfParse(buffer);
+
+        // Check if we got any text
+        if (!data.text || data.text.trim().length === 0) {
+          console.warn(`No text extracted from ${file.name} - might be image-based PDF`);
+          // Try to include some metadata instead
+          const text = `PDF: ${file.name} (${data.numpages} pages, ${data.info?.Title || 'Unknown title'})`;
+          examTexts.push({
+            name: file.name,
+            text: text
+          });
+        } else {
+          examTexts.push({
+            name: file.name,
+            text: data.text
+          });
+          console.log(`Extracted ${data.text.length} characters from ${file.name}`);
+        }
       } catch (err) {
-        console.error(`Failed to upload ${file.name}:`, err);
+        console.error(`Failed to extract text from ${file.name}:`, err);
+        // Still add the file with an error note
+        examTexts.push({
+          name: file.name,
+          text: `Error extracting text from ${file.name}: ${err.message}`
+        });
       }
     }
 
-    if (uploadedFileIds.length === 0) {
-      return NextResponse.json({ ok: false, error: 'Failed to upload any exam files' }, { status: 400 });
+    // Check if we have any files with actual content (not just error messages)
+    const validTexts = examTexts.filter(exam => !exam.text.startsWith('Error extracting') && !exam.text.startsWith('PDF:'));
+    if (validTexts.length === 0) {
+      return NextResponse.json({
+        ok: false,
+        error: 'No readable text found in uploaded PDFs. Make sure they contain selectable text, not just images.'
+      }, { status: 400 });
     }
 
-    // Create assistant with file search
-    const assistant = await openai.beta.assistants.create({
-      name: "Exam Analyzer",
-      instructions: `You are an expert exam analyzer. Analyze the provided old exams and identify the most valuable concepts/methods to study.
+    // Combine all exam texts with labels
+    const combinedText = examTexts.map((exam, index) =>
+      `=== EXAM ${index + 1}: ${exam.name} ===\n${exam.text}\n\n`
+    ).join('');
+
+    console.log(`Total combined text length: ${combinedText.length} characters`);
+
+    // Create chat completion
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-5-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert exam analyzer. Analyze the provided old exams and identify the most valuable concepts/methods to study.
 
 FIRST: Extract the grade requirements from the exams (e.g., "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p"). This should be at the top level of the JSON as "gradeInfo".
 
@@ -94,45 +135,18 @@ Return JSON in this EXACT format:
   ]
 }
 
-The concepts array MUST be sorted by pointsPerHour descending.`,
-      model: "gpt-4o",
-      tools: [{ type: "file_search" }],
-    });
-
-    // Create thread with files
-    const thread = await openai.beta.threads.create({
-      messages: [
-        {
-          role: "user",
-          content: `Analyze these ${examFiles.length} exam PDF(s) and return a JSON list of concepts ranked by Points/Hour.`,
-          attachments: uploadedFileIds.map(id => ({
-            file_id: id,
-            tools: [{ type: "file_search" }],
-          })),
+The concepts array MUST be sorted by pointsPerHour descending.`
         },
+        {
+          role: 'user',
+          content: `Analyze these ${examFiles.length} exam PDF(s) and return a JSON list of concepts ranked by Points/Hour.\n\n${combinedText}`
+        }
       ],
+      max_tokens: 4000,
+      temperature: 0.3
     });
 
-    // Run the assistant
-    const run = await openai.beta.threads.runs.createAndPoll(thread.id, {
-      assistant_id: assistant.id,
-    });
-
-    if (run.status !== 'completed') {
-      throw new Error(`Assistant run failed with status: ${run.status}`);
-    }
-
-    // Get the response
-    const messages = await openai.beta.threads.messages.list(thread.id);
-    const assistantMessage = messages.data.find(m => m.role === 'assistant');
-    
-    if (!assistantMessage || !assistantMessage.content[0]) {
-      throw new Error('No response from assistant');
-    }
-
-    const responseText = assistantMessage.content[0].type === 'text' 
-      ? assistantMessage.content[0].text.value 
-      : '';
+    const responseText = completion.choices[0]?.message?.content || '';
 
     // Parse JSON response
     let analysisData;
@@ -153,16 +167,6 @@ The concepts array MUST be sorted by pointsPerHour descending.`,
           throw new Error('No valid JSON found in response');
         }
       }
-    }
-
-    // Clean up
-    try {
-      await openai.beta.assistants.delete(assistant.id);
-    } catch {}
-    for (const fileId of uploadedFileIds) {
-      try {
-        await openai.files.delete(fileId);
-      } catch {}
     }
 
     return NextResponse.json({
