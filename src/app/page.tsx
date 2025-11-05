@@ -107,42 +107,51 @@ export default function Home() {
         {subjects.map((s) => (
           <div
             key={s.slug}
-            className="relative cursor-pointer rounded-2xl border border-[#222731] bg-[#0B0E12] p-5 text-white hover:bg-gradient-to-r hover:from-[#00E5FF]/10 hover:to-[#FF2D96]/10 transition-colors"
+            className={`relative rounded-2xl border border-[var(--accent-cyan)]/20 bg-[var(--background)] p-6 text-[var(--foreground)] transition-all duration-200 min-h-[80px] ${
+              preparingSlug === s.slug
+                ? 'cursor-not-allowed opacity-75 shadow-sm'
+                : 'cursor-pointer hover:border-[var(--accent-cyan)]/40 hover:shadow-lg hover:shadow-[var(--accent-cyan)]/10 hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5 hover:-translate-y-0.5'
+            }`}
             role="link"
-            tabIndex={0}
-            onClick={() => router.push(`/subjects/${s.slug}`)}
-            onKeyDown={(e) => {
+            tabIndex={preparingSlug === s.slug ? -1 : 0}
+            onClick={preparingSlug === s.slug ? undefined : () => router.push(`/subjects/${s.slug}`)}
+            onKeyDown={preparingSlug === s.slug ? undefined : (e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 router.push(`/subjects/${s.slug}`);
               }
             }}
           >
-            <div className="flex items-start justify-between gap-3">
-              <span className="text-base font-semibold">{s.name}</span>
+            <div className="flex items-center justify-between gap-3 h-full">
+              <span className="text-lg font-semibold flex-1 truncate">{s.name}</span>
               <button
                 onClick={(e) => { e.stopPropagation(); setMenuOpenFor((cur) => (cur === s.slug ? null : s.slug)); }}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#222731] bg-[#121721] text-[#A7AFBE] hover:bg-[#1B2030]"
+                disabled={preparingSlug === s.slug}
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--accent-cyan)]/20 text-[var(--foreground)]/60 ${
+                  preparingSlug === s.slug
+                    ? 'bg-[var(--background)]/50 opacity-50 cursor-not-allowed'
+                    : 'bg-[var(--background)]/80 hover:bg-[var(--background)] cursor-pointer'
+                }`}
                 aria-label="More actions"
                 title="More actions"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="5" cy="12" r="2" fill="#A7AFBE"/>
-                  <circle cx="12" cy="12" r="2" fill="#A7AFBE"/>
-                  <circle cx="19" cy="12" r="2" fill="#A7AFBE"/>
+                  <circle cx="5" cy="12" r="2" fill="currentColor"/>
+                  <circle cx="12" cy="12" r="2" fill="currentColor"/>
+                  <circle cx="19" cy="12" r="2" fill="currentColor"/>
                 </svg>
               </button>
             </div>
             
             {preparingSlug === s.slug && (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <div className="inline-flex items-center gap-2 rounded-full border border-[#2B3140] bg-[#0F141D]/90 px-3 py-1 text-[12px] text-white shadow-lg">
-                  <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-accent" /> Preparing…
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--background)]/80 backdrop-blur-sm rounded-2xl z-10">
+                <div className="inline-flex items-center gap-2 rounded-full border border-[var(--accent-cyan)]/20 bg-[var(--background)]/95 px-3 py-1 text-[12px] text-[var(--foreground)] shadow-lg">
+                  <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--accent-cyan)]" /> Preparing…
                 </div>
               </div>
             )}
             {menuOpenFor === s.slug && (
-              <div className="absolute right-3 top-12 z-50 w-40 rounded-xl border border-[#222731] bg-[#0B0E12] p-1 shadow-xl">
+              <div className="absolute right-3 top-12 z-50 w-40 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)] p-1 shadow-xl">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

@@ -8,19 +8,43 @@ import SettingsModal from "@/components/SettingsModal";
 // Loading Screen Component
 function LoadingScreen({ onComplete }: { onComplete: () => void }) {
   const [isFadingOut, setIsFadingOut] = useState(false);
+  const [displayedText, setDisplayedText] = useState('');
+  const [showSubtitle, setShowSubtitle] = useState(false);
+  const fullText = 'SYNAPSE';
 
   useEffect(() => {
-    // Start fade-out animation 500ms before completion
+    // Typewriter effect with random timing
+    let currentIndex = 0;
+    let typeTimeout: NodeJS.Timeout;
+
+    const typeNextChar = () => {
+      if (currentIndex < fullText.length) {
+        setDisplayedText(fullText.slice(0, currentIndex + 1));
+        currentIndex++;
+        // Random timing between 50-120ms for more natural feel
+        const randomDelay = Math.random() * 70 + 50;
+        typeTimeout = setTimeout(typeNextChar, randomDelay);
+      } else {
+        // SYNAPSE typing complete - show subtitle immediately
+        setShowSubtitle(true);
+      }
+    };
+
+    // Start typing immediately
+    typeTimeout = setTimeout(typeNextChar, 100);
+
+    // Start fade-out animation 500ms before completion (2 seconds after subtitle appears)
     const fadeTimer = setTimeout(() => {
       setIsFadingOut(true);
-    }, 1500); // Start fading at 1.5 seconds
+    }, 2800); // Start fading at 2.8 seconds
 
     // Complete loading after animation
     const completeTimer = setTimeout(() => {
       onComplete();
-    }, 2000); // Show for 2 seconds total
+    }, 3300); // Show for 3.3 seconds total
 
     return () => {
+      clearTimeout(typeTimeout);
       clearTimeout(fadeTimer);
       clearTimeout(completeTimer);
     };
@@ -40,11 +64,18 @@ function LoadingScreen({ onComplete }: { onComplete: () => void }) {
         </div>
       </div>
 
-      {/* SYNAPSE text below the ring */}
-      <div className="mt-6 text-center">
-        <span className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider font-mono">
-          SYNAPSE
+      {/* SYNAPSE text below the ring with typewriter effect */}
+      <div className="mt-6 text-center space-y-2">
+        <span className="text-7xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider font-mono">
+          {displayedText}
         </span>
+
+        {/* Studying Optimized subtitle */}
+        {showSubtitle && (
+          <div className="text-lg font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider font-mono animate-fade-in">
+            Studying Optimized
+          </div>
+        )}
       </div>
     </div>
   );
@@ -161,7 +192,7 @@ function PomodoroTimer() {
         onClick={() => setShowSettings(!showSettings)}
         className="relative inline-flex items-center justify-center gap-1 rounded-lg px-3 py-2 min-w-[100px]
                    text-white bg-[var(--background)]/90 backdrop-blur-md
-                   border border-transparent
+                   border-0 outline-none focus:outline-none
                    before:absolute before:inset-0 before:rounded-lg
                    before:bg-gradient-to-r before:from-[#00E5FF] before:via-[#FF2D96] before:to-[#00E5FF]
                    before:bg-[length:200%_200%] before:animate-[gradient-shift_15s_ease-in-out_infinite]
@@ -439,7 +470,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 onClick={() => router.push('/')}
                 className="relative inline-flex items-center rounded-xl px-4 py-2
                            text-white bg-[var(--background)]/90 backdrop-blur-md
-                           border border-transparent
+                           border-0 outline-none focus:outline-none
                            before:absolute before:inset-0 before:rounded-xl
                            before:bg-gradient-to-r before:from-[#00E5FF] before:via-[#FF2D96] before:to-[#00E5FF]
                            before:bg-[length:200%_200%] before:animate-[gradient-shift_15s_ease-in-out_infinite]
@@ -459,7 +490,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 onClick={() => router.push('/exam-snipe')}
                 className="relative inline-flex items-center rounded-xl px-4 py-2
                            text-white bg-[var(--background)]/90 backdrop-blur-md
-                           border border-transparent
+                           border-0 outline-none focus:outline-none
                            before:absolute before:inset-0 before:rounded-xl
                            before:bg-gradient-to-r before:from-[#FF2D96] before:via-[#00E5FF] before:to-[#FF2D96]
                            before:bg-[length:200%_200%] before:animate-[gradient-shift_15s_ease-in-out_infinite]
@@ -488,7 +519,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 onClick={() => setSettingsOpen(true)}
                 className="relative inline-flex h-10 w-10 items-center justify-center rounded-full
                            text-white bg-[var(--background)]/90 backdrop-blur-md
-                           border border-transparent
+                           border-0 outline-none focus:outline-none
                            before:absolute before:inset-0 before:rounded-full
                            before:bg-gradient-to-r before:from-[#00E5FF] before:via-[#FF2D96] before:to-[#00E5FF]
                            before:bg-[length:200%_200%] before:animate-[gradient-shift_15s_ease-in-out_infinite]
@@ -506,7 +537,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               >
                 {/* Settings icon */}
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90 relative z-10">
-                  <path d="M12 8a4 4 0 100 8 4 4 0 000-8zm9 4a7.96 7.96 0 00-.53-2.83l2.11-1.63-2-3.46-2.49 1A8.04 8.04 0 0014.83 3l-.38-2.65h-4.9L9.17 3A8.04 8.04 0 006.91 5.08l-2.49-1-2 3.46 2.11 1.63A7.96 7.96 0 004 12c0 .98.18 1.92.53 2.83L2.42 16.46l2 3.46 2.49-1A8.04 8.04 0 009.17 21l.38 2.65h4.9L14.83 21a8.04 8.04 0 002.26-2.08l2.49 1 2-3.46-2.11-1.63c.35-.91.53-1.85.53-2.83z" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" stroke="currentColor" strokeWidth="1.5"/>
+                  <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5"/>
                 </svg>
               </button>
             </div>
