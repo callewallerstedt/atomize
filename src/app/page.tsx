@@ -103,8 +103,8 @@ export default function Home() {
             key={s.slug}
             className={`relative rounded-2xl border border-[var(--accent-cyan)]/20 bg-[var(--background)] p-6 text-[var(--foreground)] transition-all duration-200 min-h-[80px] ${
               preparingSlug === s.slug
-                ? 'cursor-not-allowed opacity-75 shadow-sm'
-                : 'cursor-pointer hover:border-[var(--accent-cyan)]/40 hover:shadow-lg hover:shadow-[var(--accent-cyan)]/10 hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5 hover:-translate-y-0.5'
+                ? 'cursor-not-allowed opacity-75'
+                : 'cursor-pointer hover:border-[var(--accent-cyan)]/40 hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5'
             }`}
             role="link"
             tabIndex={preparingSlug === s.slug ? -1 : 0}
@@ -145,7 +145,7 @@ export default function Home() {
               </div>
             )}
             {menuOpenFor === s.slug && (
-              <div className="absolute right-3 top-12 z-50 w-40 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)] p-1 shadow-xl">
+              <div className="absolute right-3 top-12 z-50 w-40 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)] p-1">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

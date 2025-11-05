@@ -742,7 +742,7 @@ export default function SubjectPage() {
       {loading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="flex flex-col items-center gap-6">
-            <div className="h-24 w-24 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] shadow-[0_0_40px_rgba(0,229,255,0.35)]" />
+            <div className="h-24 w-24 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
             <div className="text-base font-medium text-white">Analyzing files…</div>
           </div>
         </div>

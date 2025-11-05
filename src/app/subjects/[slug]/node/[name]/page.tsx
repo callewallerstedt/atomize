@@ -339,7 +339,7 @@ export default function NodePage() {
                                 <p
                                   className={
                                     isSimplifying
-                                      ? 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 shadow-[0_0_15px_rgba(0,229,255,0.4)] leading-normal'
+                                      ? 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 leading-normal'
                                       : 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 leading-normal'
                                   }
                                   style={isSimplifying ? {
@@ -466,7 +466,7 @@ export default function NodePage() {
                                 <span
                                   className={
                                     isSimplifying
-                                      ? 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 shadow-[0_0_15px_rgba(0,229,255,0.4)] leading-normal'
+                                      ? 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 leading-normal'
                                       : 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 leading-normal'
                                   }
                                   style={isSimplifying ? {
@@ -1046,7 +1046,7 @@ export default function NodePage() {
           <div className="relative mx-auto mt-24 flex max-w-md flex-col items-center justify-center">
             <div className="pointer-events-none absolute -inset-10 -z-10 rounded-full bg-[radial-gradient(circle_at_center,rgba(0,229,255,0.25),rgba(255,45,150,0.12)_60%,transparent_70%)] blur-2xl" />
             <button
-              className="inline-flex h-12 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-10 text-base font-semibold text-white shadow-[0_0_30px_rgba(0,229,255,0.25)] hover:opacity-95"
+              className="inline-flex h-12 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-10 text-base font-semibold text-white hover:opacity-95"
               onClick={async () => {
                 try {
                   setLessonLoading(true);

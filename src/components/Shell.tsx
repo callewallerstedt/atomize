@@ -252,7 +252,6 @@ function PomodoroTimer() {
                          before:p-[1px] before:content-['']
                          after:absolute after:inset-[1px] after:rounded-xl
                          after:bg-[var(--background)]/98 after:backdrop-blur-md
-                         shadow-[0_0_10px_rgba(0,229,255,0.3)]
                          overflow-hidden">
             <div className="relative z-10 space-y-3 min-w-[220px]">
               <div className="text-center">
@@ -493,10 +492,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                            before:p-[1px] before:content-['']
                            after:absolute after:inset-[1px] after:rounded-xl
                            after:bg-[var(--background)]/95 after:backdrop-blur-md
-                           shadow-[0_0_8px_rgba(0,229,255,0.3)]
-                           hover:shadow-[0_0_12px_rgba(0,229,255,0.4),0_0_18px_rgba(255,45,150,0.2)]
                            hover:before:bg-[length:250%_250%]
-                           active:shadow-[0_0_4px_rgba(0,229,255,0.5),inset_0_0_8px_rgba(0,229,255,0.2)]
                            transition-all duration-200 ease-out
                            overflow-hidden"
               >
@@ -514,10 +510,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                              before:p-[1px] before:content-['']
                              after:absolute after:inset-[1px] after:rounded-xl
                              after:bg-[var(--background)]/95 after:backdrop-blur-md
-                             shadow-[0_0_8px_rgba(0,229,255,0.3)]
-                             hover:shadow-[0_0_12px_rgba(0,229,255,0.4),0_0_18px_rgba(255,45,150,0.2)]
                              hover:before:bg-[length:250%_250%]
-                             active:shadow-[0_0_4px_rgba(0,229,255,0.5),inset_0_0_8px_rgba(0,229,255,0.2)]
                              transition-all duration-200 ease-out
                              overflow-hidden"
                 >
@@ -544,7 +537,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                                  before:p-[1px] before:content-['']
                                  after:absolute after:inset-[1px] after:rounded-xl
                                  after:bg-[var(--background)]/98 after:backdrop-blur-md
-                                 shadow-[0_0_10px_rgba(0,229,255,0.3)]
                                  overflow-hidden">
                       <div className="relative z-10 space-y-1 min-w-[160px]">
                         <button
@@ -592,10 +584,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                            before:p-[1px] before:content-['']
                            after:absolute after:inset-[1px] after:rounded-full
                            after:bg-[var(--background)]/95 after:backdrop-blur-md
-                           shadow-[0_0_8px_rgba(0,229,255,0.3)]
-                           hover:shadow-[0_0_12px_rgba(0,229,255,0.4),0_0_18px_rgba(255,45,150,0.2)]
                            hover:before:bg-[length:250%_250%]
-                           active:shadow-[0_0_4px_rgba(0,229,255,0.5),inset_0_0_8px_rgba(0,229,255,0.2)]
                            transition-all duration-200 ease-out
                            overflow-hidden"
                 aria-label="Settings"
