@@ -42,33 +42,65 @@ export async function POST(req: NextRequest) {
           }
 
           // Extract on server only if files were sent (fallback path)
-          console.log(`Processing ${examFiles.length} PDF files...`);
+          console.log(`Processing ${examFiles.length} files...`);
 
           for (const file of examFiles) {
             console.log(`Starting to process ${file.name}...`);
             try {
               const bytes = await file.arrayBuffer();
               const uint8 = new Uint8Array(bytes);
-              console.log(`Converted ${file.name} to Uint8Array, size: ${uint8.length} bytes`);
-
-              // Use pdf-parse (simple and reliable)
-              console.log(`Attempting PDF text extraction on ${file.name}...`);
-              const pdfParse = require('pdf-parse');
               const buffer = Buffer.from(uint8);
-              const data = await pdfParse(buffer);
+              const fileName = file.name.toLowerCase();
+              console.log(`Converted ${file.name} to buffer, size: ${uint8.length} bytes`);
+
+              let extractedText = '';
+
+              // Handle DOCX files
+              if (fileName.endsWith('.docx')) {
+                try {
+                  console.log(`Attempting DOCX text extraction on ${file.name}...`);
+                  const mammoth = await import('mammoth');
+                  const mammothModule = mammoth.default || mammoth;
+                  const result = await mammothModule.extractRawText({ buffer });
+                  extractedText = result.value || '';
+                  console.log(`✓ Successfully extracted ${extractedText.length} chars from ${file.name}`);
+                } catch (err: any) {
+                  console.error(`DOCX extraction failed for ${file.name}:`, err?.message);
+                  examTexts.push({ name: file.name, text: `DOCX: ${file.name} - Text extraction failed: ${err?.message || 'unknown error'}` });
+                  continue;
+                }
+              }
+              // Handle PDF files
+              else if (fileName.endsWith('.pdf')) {
+                try {
+                  // Use pdf-parse (simple and reliable)
+                  console.log(`Attempting PDF text extraction on ${file.name}...`);
+                  const pdfParse = require('pdf-parse');
+                  const data = await pdfParse(buffer);
+                  
+                  console.log(`PDF loaded: ${data.numpages} pages, ${data.text.length} chars`);
+                  extractedText = data.text || '';
+                } catch (err: any) {
+                  console.error(`PDF extraction failed for ${file.name}:`, err?.message);
+                  examTexts.push({ name: file.name, text: `PDF: ${file.name} - Text extraction failed: ${err?.message || 'unknown error'}` });
+                  continue;
+                }
+              }
+              // Handle text files
+              else if (file.type?.startsWith('text/') || fileName.endsWith('.txt') || fileName.endsWith('.md')) {
+                extractedText = new TextDecoder().decode(buffer);
+              }
               
-              console.log(`PDF loaded: ${data.numpages} pages, ${data.text.length} chars`);
-              
-              if (data.text && data.text.trim().length > 0) {
-                examTexts.push({ name: file.name, text: data.text.trim() });
-                console.log(`✓ Successfully extracted ${data.text.length} chars from ${file.name}`);
+              if (extractedText && extractedText.trim().length > 0) {
+                examTexts.push({ name: file.name, text: extractedText.trim() });
+                console.log(`✓ Successfully extracted ${extractedText.length} chars from ${file.name}`);
               } else {
-                examTexts.push({ name: file.name, text: `PDF: ${file.name} - No readable text found in PDF` });
+                examTexts.push({ name: file.name, text: `${fileName.endsWith('.docx') ? 'DOCX' : 'PDF'}: ${file.name} - No readable text found` });
                 console.log(`⚠ No text found in ${file.name}`);
               }
             } catch (err: any) {
               console.error(`Server extraction failed for ${file.name}:`, err?.message);
-              examTexts.push({ name: file.name, text: `PDF: ${file.name} - Text extraction failed: ${err?.message || 'unknown error'}` });
+              examTexts.push({ name: file.name, text: `${file.name} - Text extraction failed: ${err?.message || 'unknown error'}` });
             }
           }
         }

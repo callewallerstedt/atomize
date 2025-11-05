@@ -18,22 +18,23 @@ export async function POST(req: Request) {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
     const system = [
-      "Extract ONLY main topics from the course material.",
+      "Read ALL provided files and context deeply. Extract the most relevant topics and core concepts students must learn.",
       "Return STRICT JSON with this exact shape:",
       "{ subject: string; topics: { name: string; summary: string; coverage: number }[] }",
       "Rules:",
-      "- Use 6-12 concise main topics (2-5 words).",
-      "- summary: 1-2 sentences based on the material.",
-      "- coverage: integer 0-100 estimating how much of the total material this topic covers; topics should roughly sum to ~100 but do not exceed.",
-      "- No subtopics, no markdown, no code fences, JSON only.",
-      "- Ignore the subject/course name string for determining topics; use only the provided material content.",
+      "- Use 8-16 concise topics (2-6 words) that together cover the course.",
+      "- Topics should be informed by the file content FIRST, then course name/description/context as supporting signals.",
+      "- Include both conceptual areas and essential methods/skills (e.g., 'Gradient Descent', 'Markov Decision Processes').",
+      "- summary: 1–2 sentences explaining what a student will learn in this topic.",
+      "- coverage: integer 0–100 estimating how much of the total content this topic covers; topics should roughly sum close to 100 but must not exceed it.",
+      "- No subtopics, no markdown, no code fences. JSON only.",
     ].join("\n");
 
     const inputContent: any[] = [
-      { type: "input_text", text: `Subject (label only, do not infer from it): ${subject}\nPlease extract ONLY main topics from the attached files. Return JSON only.` },
+      { type: "input_text", text: `Subject: ${subject}\nTask: Read all materials and extract the full set of topics and core concepts students need to learn.` },
       ...fileIds.map((id: string) => ({ type: "input_file", file_id: id })),
     ];
-    if (contextText) inputContent.push({ type: "input_text", text: `Additional context (user-provided):\n${contextText}` });
+    if (contextText) inputContent.push({ type: "input_text", text: `Additional context (name, description, notes):\n${contextText}` });
 
     const resp = await client.responses.create({
       model: "gpt-4o-mini",

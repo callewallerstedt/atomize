@@ -265,11 +265,8 @@ export default function ExamSnipePage() {
                             })()}
                           </div>
                         </div>
-                        {/* Fixed blur overlay */}
-                        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[var(--background)] pointer-events-none">
-                          <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[var(--background)] to-transparent blur-[1px] opacity-60"></div>
-                          <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-[var(--background)] to-transparent blur-[2px] opacity-40"></div>
-                        </div>
+                        {/* Fixed blur overlay - now blurs the TOP */}
+                        <div className="absolute top-0 left-0 right-0 h-12 pointer-events-none backdrop-blur-md"></div>
                       </div>
                     </div>
                   )}

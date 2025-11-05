@@ -30,7 +30,17 @@ export default function WordPopover({
     }
     function onDoc(e: MouseEvent) {
       if (!ref.current || !e.target) return;
-      if (!ref.current.contains(e.target as Node)) onClose();
+      // Don't close while loading - wait for content to load first
+      if (loading) {
+        console.log('Ignoring click while loading');
+        return;
+      }
+      const containsTarget = ref.current.contains(e.target as Node);
+      console.log('Click detected:', { containsTarget, loading, target: e.target });
+      if (!containsTarget) {
+        console.log('Closing popover due to outside click');
+        onClose();
+      }
     }
     if (open) {
       document.addEventListener("keydown", onKey);
@@ -42,14 +52,20 @@ export default function WordPopover({
     }
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || x === 0 || y === 0) return null;
+
+  const finalX = Math.max(12, Math.min(x, window.innerWidth - 380));
+  const finalY = Math.max(12, y);
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-50 pointer-events-none">
       <div
         ref={ref}
-        className="absolute z-50 w-[360px] max-w-[calc(100vw-24px)] rounded-2xl border border-[#222731] bg-[#0B0E12] p-4 text-[#E5E7EB] shadow-2xl"
-        style={{ left: Math.min(Math.max(12, x), window.innerWidth - 372), top: Math.min(Math.max(12, y), window.innerHeight - 220) }}
+        className="fixed z-50 w-[360px] max-w-[calc(100vw-24px)] rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/95 backdrop-blur-sm p-4 text-[var(--foreground)] shadow-2xl pointer-events-auto"
+        style={{
+          left: `${finalX}px`,
+          top: `${finalY}px`
+        }}
       >
         {loading ? (
           <div className="flex items-center gap-3 text-sm">

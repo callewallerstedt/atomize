@@ -284,3 +284,29 @@ select {
 .animate-fade-in {
   animation: fade-in 0.5s ease-out forwards;
 }
+
+/* Remove focus outlines for header buttons (but keep hover shadows) */
+button:focus,
+button:focus-visible {
+  outline: none !important;
+}
+
+/* Specifically target chat and settings buttons to remove focus rings and active effects */
+button[aria-label="Chat"],
+button[aria-label="Settings"] {
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+button[aria-label="Chat"]:focus,
+button[aria-label="Chat"]:focus-visible,
+button[aria-label="Chat"]:active,
+button[aria-label="Settings"]:focus,
+button[aria-label="Settings"]:focus-visible,
+button[aria-label="Settings"]:active {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  transform: none !important;
+  filter: none !important;
+  -webkit-filter: none !important;
+  will-change: auto !important;
+}

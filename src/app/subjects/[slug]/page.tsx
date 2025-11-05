@@ -222,6 +222,14 @@ export default function SubjectPage() {
   return (
     <div className="flex min-h-screen flex-col bg-[#0F1216]">
       <div className="mx-auto w-full max-w-3xl px-6 py-8">
+        {(generatingBasics || loading) && (
+          <div className="fixed inset-0 z-[9998] flex flex-col items-center justify-center bg-[var(--background)]/80 backdrop-blur-sm">
+            <div className="relative w-24 h-24">
+              <div className="absolute inset-0 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-spin" style={{ WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)', mask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)' }}></div>
+            </div>
+            <div className="mt-4 text-lg font-semibold text-[var(--foreground)]">Extracting Topics...</div>
+          </div>
+        )}
         {/* Reviews Due Banner */}
         {reviewsDue.length > 0 && (
           <div className="mb-6 rounded-xl border border-[#00E5FF] border-opacity-30 bg-[#00E5FF] bg-opacity-10 p-4">
@@ -319,7 +327,7 @@ export default function SubjectPage() {
                     }
                   }}
                 >
-                  Generate basics
+                  Extract Topics
                 </button>
               </div>
             </div>
@@ -359,25 +367,7 @@ export default function SubjectPage() {
                                   const saved = loadSubjectData(slug) as StoredSubjectData | null;
                                   const topicSummary = (topics || []).find((tt) => tt.name === name)?.summary || "";
 
-                                  // Generate topic plan
-                                  const res = await fetch('/api/node-plan', {
-                                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({
-                                      subject: subjectName || slug,
-                                      topic: name,
-                                      course_context: (saved?.course_context || courseNotes || ""),
-                                      topic_summary: topicSummary,
-                                      combinedText,
-                                      course_language_code: saved?.course_language_code,
-                                      course_language_name: saved?.course_language_name,
-                                      course_topics: (topics || []).map((tt) => tt.name),
-                                    })
-                                  });
-                                  const json = await res.json().catch(() => ({}));
-                                  if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
-                                  const { overview_child, symbols, lessonsMeta } = json.data || {};
-
-                                  // Generate the first lesson content
+                                  // Generate ONE comprehensive lesson directly
                                   const lessonRes = await fetch('/api/node-lesson', {
                                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
@@ -386,11 +376,11 @@ export default function SubjectPage() {
                                       course_context: (saved?.course_context || ""),
                                       combinedText: saved?.combinedText || "",
                                       topicSummary: topicSummary,
-                                      lessonsMeta: Array.isArray(lessonsMeta) ? lessonsMeta.map((m: any) => ({ type: String(m.type||"Concept"), title: String(m.title||"Lesson") })) : [],
+                                      lessonsMeta: [{ type: 'Full Lesson', title: name }],
                                       lessonIndex: 0,
                                       previousLessons: [],
                                       generatedLessons: [],
-                                      otherLessonsMeta: Array.isArray(lessonsMeta) ? lessonsMeta.slice(1).map((m: any, i: number) => ({ index: i+1, type: String(m.type||"Concept"), title: String(m.title||"Lesson") })) : [],
+                                      otherLessonsMeta: [],
                                       courseTopics: (topics || []).map((tt) => tt.name),
                                       languageName: saved?.course_language_name || "",
                                     })
@@ -404,14 +394,13 @@ export default function SubjectPage() {
                                   if (data) {
                                     data.nodes = data.nodes || {} as any;
                                     data.nodes[name] = {
-                                      ...(typeof data.nodes[name] === 'object' && data.nodes[name] !== null ? data.nodes[name] : {}),
-                                      overview: overview_child || ((typeof data.nodes[name] === 'object' && data.nodes[name] !== null ? data.nodes[name].overview : '') || ''),
-                                      symbols: Array.isArray(symbols) ? symbols : ((typeof data.nodes[name] === 'object' && data.nodes[name] !== null ? data.nodes[name].symbols : []) || []),
-                                      lessonsMeta: Array.isArray(lessonsMeta) ? lessonsMeta : ((typeof data.nodes[name] === 'object' && data.nodes[name] !== null ? data.nodes[name].lessonsMeta : []) || []),
+                                      overview: topicSummary || '',
+                                      symbols: [],
+                                      lessonsMeta: [{ type: 'Full Lesson', title: String(lessonData.title || name) }],
                                       lessons: [{
-                                        title: String(lessonData.title || (Array.isArray(lessonsMeta) ? lessonsMeta[0]?.title || "Lesson 1" : "Lesson 1")),
-                                        body: String(lessonData.body || ""),
-                                        quiz: Array.isArray(lessonData.quiz) ? lessonData.quiz.map((q: any) => ({ question: String(q.question || "") })) : []
+                                        title: String(lessonData.title || name),
+                                        body: String(lessonData.body || ''),
+                                        quiz: Array.isArray(lessonData.quiz) ? lessonData.quiz.map((q: any) => ({ question: String(q.question || '') })) : []
                                       }],
                                       rawLessonJson: [typeof lessonJson.raw === 'string' ? lessonJson.raw : JSON.stringify(lessonData)],
                                     } as any;
@@ -556,7 +545,7 @@ export default function SubjectPage() {
         <Modal
           open={basicsModalOpen}
           onClose={() => { if (!generatingBasics) setBasicsModalOpen(false); }}
-          title="Generate basics"
+          title="Extract Topics"
           footer={
             <div className="flex items-center justify-end gap-2">
               <button onClick={() => setBasicsModalOpen(false)} className="inline-flex h-9 items-center rounded-full bg-[#141923] px-4 text-sm text-[#E5E7EB] hover:bg-[#1B2030]" disabled={generatingBasics}>Cancel</button>
@@ -619,16 +608,16 @@ export default function SubjectPage() {
                     }
                     setBasicsModalOpen(false);
                   } catch (e: any) {
-                    console.error('Failed to generate basics:', e);
+                    console.error('Failed to extract topics:', e);
                     // Show error in UI instead of blocking alert
-                    setError(e?.message || 'Failed to generate basics');
+                    setError(e?.message || 'Failed to extract topics');
                   } finally {
                     setGeneratingBasics(false);
                   }
                 }}
                 className="inline-flex h-9 items-center rounded-full bg-accent px-4 text-sm font-medium text-white"
                 disabled={generatingBasics}
-              >{generatingBasics ? 'Generating…' : 'Generate'}</button>
+              >{generatingBasics ? 'Extracting…' : 'Extract'}</button>
             </div>
           }
         >
@@ -709,13 +698,13 @@ export default function SubjectPage() {
 
         <Modal open={quickLearnOpen} onClose={() => setQuickLearnOpen(false)}>
           <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-white">Quick Learn</h3>
+            <h3 className="text-lg font-semibold text-[var(--foreground)]">Quick Learn</h3>
             <div>
-              <label className="mb-2 block text-xs text-[#A7AFBE]">What do you want to learn?</label>
+              <label className="mb-2 block text-xs text-[var(--foreground)]/70">What do you want to learn?</label>
               <textarea
                 value={quickLearnQuery}
                 onChange={(e) => { if (!e.target) return; setQuickLearnQuery(e.target.value); }}
-                className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none resize-none"
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none"
                 placeholder="e.g. How does binary search work? Or paste a question from your course materials..."
                 rows={4}
               />
@@ -723,7 +712,7 @@ export default function SubjectPage() {
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setQuickLearnOpen(false)}
-                className="rounded-lg border border-[#222731] bg-[#0F141D] px-4 py-2 text-sm text-[#E5E7EB] hover:bg-[#1B2030]"
+                className="rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/60"
                 disabled={quickLearnLoading}
               >
                 Cancel

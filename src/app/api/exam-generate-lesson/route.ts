@@ -64,7 +64,7 @@ Title should be: ${subConceptName}
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
-      temperature: 0.4,
+      temperature: 0.8,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },

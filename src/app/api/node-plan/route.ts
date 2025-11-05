@@ -21,16 +21,20 @@ export async function POST(req: Request) {
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const system = [
-      "You prepare a detailed plan for teaching ONE topic using the course context and materials.",
+      "You design an optimal lesson sequence for teaching ONE topic that builds deep, lasting understanding.",
       "Return STRICT JSON (no markdown, no code fences) with:",
-      "{ overview_child: string; lessonsMeta: { type: 'Intro' | 'Concept' | 'Integration' | 'Application' | 'Mastery'; title: string }[] }",
+      "{ overview_child: string; lessonsMeta: { type: string; title: string }[] }",
       "Rules:",
-      `- Use the detailed course context to identify SPECIFIC concepts, methods, and skills that should be taught in this topic.`,
+      `- Analyze the course context and materials to identify the most important concepts, methods, and skills for deep understanding.`,
+      `- Design a lesson sequence that builds progressively from foundational knowledge to mastery.`,
+      `- Let the content determine the optimal structure - don't force artificial categories.`,
+      `- Each lesson should build upon previous ones, creating a coherent learning pathway.`,
       `- overview_child is brief, child-level, KaTeX-ready Markdown ($...$, $$...$$ allowed). ${languageName ? `Write in ${languageName}.` : ''}`,
-      "- lessonsMeta order and types: Intro (1), Concept (2–4), Integration (≥1), Application (≥1), Mastery (1).",
-      "- Design lesson titles that reflect the specific concepts and methods from the course context",
-      "- Ensure the lesson progression teaches the key learning objectives identified in the course materials",
-      "- titles should be concise (2–6 words) but descriptive of the specific content to teach.",
+      "- Choose lesson types that best fit the content (examples: 'Foundations', 'Core Concepts', 'Problem Solving', 'Advanced Applications', 'Mastery & Review', etc.)",
+      "- Lesson titles should be descriptive and reflect the specific learning goals",
+      "- Aim for 4-8 lessons that comprehensively cover the topic without overwhelming",
+      "- Focus on lessons that develop both conceptual understanding and practical skills",
+      "- Ensure the sequence creates meaningful connections between ideas",
     ].join("\n");
 
     const user = [
@@ -59,7 +63,7 @@ export async function POST(req: Request) {
                   type: "object",
                   additionalProperties: false,
                   properties: {
-                    type: { type: "string", enum: ["Intro", "Concept", "Integration", "Application", "Mastery"] },
+                    type: { type: "string", description: "Descriptive lesson type that fits the content (e.g., 'Foundations', 'Core Concepts', 'Problem Solving', etc.)" },
                     title: { type: "string" },
                   },
                   required: ["type", "title"],
@@ -75,7 +79,7 @@ export async function POST(req: Request) {
         { role: "system", content: system },
         { role: "user", content: user },
       ],
-      temperature: 0.3,
+      temperature: 0.7,
       max_tokens: 900,
     });
 

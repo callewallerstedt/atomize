@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -9,7 +10,7 @@ import rehypeKatex from "rehype-katex";
 import katex from "katex";
 import { Highlight, themes } from "prism-react-renderer";
 import { loadSubjectData, upsertNodeContent, TopicGeneratedContent, TopicGeneratedLesson, StoredSubjectData, markLessonReviewed, ReviewSchedule } from "@/utils/storage";
-import WordPopover from "@/components/WordPopover";
+import { AutoFixMarkdown } from "@/components/AutoFixMarkdown";
 
 // Regex patterns moved inside component to avoid any global scope issues
 
@@ -23,11 +24,12 @@ export default function NodePage() {
   const [lessonLoading, setLessonLoading] = useState<boolean>(false);
   const [shorteningLesson, setShorteningLesson] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [popoverOpen, setPopoverOpen] = useState(false);
-  const [popoverXY, setPopoverXY] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [popoverLoading, setPopoverLoading] = useState(false);
-  const [popoverError, setPopoverError] = useState<string | null>(null);
-  const [popoverContent, setPopoverContent] = useState<string>("");
+  const [showExplanation, setShowExplanation] = useState(false);
+  const [explanationPosition, setExplanationPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [explanationWord, setExplanationWord] = useState<string>("");
+  const [explanationContent, setExplanationContent] = useState<string>("");
+  const [explanationLoading, setExplanationLoading] = useState(false);
+  const [explanationError, setExplanationError] = useState<string | null>(null);
   const [userAnswers, setUserAnswers] = useState<{ [key: number]: string }>({});
   const [quizResults, setQuizResults] = useState<{ [key: number]: { correct: boolean; explanation: string; hint?: string; fullSolution?: string } } | null>(null);
   const [checkingAnswers, setCheckingAnswers] = useState(false);
@@ -37,6 +39,71 @@ export default function NodePage() {
   const [showHints, setShowHints] = useState<{ [key: number]: boolean }>({});
   const [showSolutions, setShowSolutions] = useState<{ [key: number]: boolean }>({});
   const [reviewedThisSession, setReviewedThisSession] = useState<Set<number>>(new Set());
+  const [paragraphGroups, setParagraphGroups] = useState<{ [key: string]: string[] }>({});
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  async function readLesson() {
+    if (isPlaying && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+      setIsPlaying(false);
+      return;
+    }
+
+    try {
+      setAudioLoading(true);
+      const lessonBody = content?.lessons?.[currentLessonIndex]?.body || "";
+      if (!lessonBody) return;
+
+      // Extract plain text from lesson content
+      const response = await fetch('/api/text-to-speech', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: lessonBody }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate audio');
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        setIsPlaying(false);
+        URL.revokeObjectURL(audioUrl);
+        audioRef.current = null;
+      };
+
+      audio.onerror = () => {
+        setIsPlaying(false);
+        setAudioLoading(false);
+        URL.revokeObjectURL(audioUrl);
+        audioRef.current = null;
+      };
+
+      await audio.play();
+      setIsPlaying(true);
+      setAudioLoading(false);
+    } catch (error: any) {
+      console.error('Error reading lesson:', error);
+      setAudioLoading(false);
+      setIsPlaying(false);
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
 
   const subjectData = useMemo(() => loadSubjectData(slug), [slug]);
   const courseTopics = useMemo(() => {
@@ -62,8 +129,19 @@ export default function NodePage() {
 
 
   function wrapTextNode(str: string, parentFull?: string) {
-    // Just return the string as-is for now
-    return str;
+    return str.split(/(\b[\p{L}\p{N}][\p{L}\p{N}\-]*\b)/u).map((token, idx) => {
+      const isWord = /^(\b[\p{L}\p{N}][\p{L}\p{N}\-]*\b)$/u.test(token);
+      if (!isWord) return token;
+      return (
+        <span
+          key={idx}
+          className="hoverable-word cursor-pointer hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/20 hover:to-[var(--accent-pink)]/20 rounded px-0.5 transition-colors"
+          onClick={(e) => onWordClick(token, parentFull || str, e)}
+        >
+          {token}
+        </span>
+      );
+    });
   }
 
   function wrapChildren(children: any): any {
@@ -76,31 +154,62 @@ export default function NodePage() {
     });
   }
 
-  async function onWordClick(word: string, parentText: string, e: React.MouseEvent) {
+  async   function onWordClick(word: string, parentText: string, e: React.MouseEvent) {
     e.preventDefault();
+    e.stopPropagation();
     if (!e.target) return;
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
-    setPopoverXY({ x: rect.left + window.scrollX, y: rect.bottom + window.scrollY });
-    setPopoverOpen(true);
-    setPopoverLoading(true);
-    setPopoverError(null);
-    setPopoverContent("");
+
+    // Position at middle bottom of screen
+    const x = window.innerWidth / 2;
+    const y = window.innerHeight - 20; // 20px from bottom
+
+    setExplanationPosition({ x, y });
+    setExplanationWord(word);
+    setShowExplanation(true);
+    setExplanationLoading(true);
+    setExplanationError(null);
+    setExplanationContent("");
+
     try {
       const idx = parentText.indexOf(word);
       const localContext = idx >= 0 ? parentText.slice(Math.max(0, idx - 120), Math.min(parentText.length, idx + word.length + 120)) : parentText.slice(0, 240);
       const res = await fetch("/api/quick-explain", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject: subjectData?.subject || slug, topic: title, word, localContext, courseTopics, languageName: subjectData?.course_language_name || "" }),
+        body: JSON.stringify({
+          subject: subjectData?.subject || slug,
+          topic: title,
+          word,
+          localContext,
+          courseTopics,
+          languageName: subjectData?.course_language_name || ""
+        }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
-      setPopoverContent(json.content || "");
+      setExplanationContent(json.content || "");
     } catch (err: any) {
-      setPopoverError(err?.message || "Failed to explain");
+      setExplanationError(err?.message || "Failed to explain");
     } finally {
-      setPopoverLoading(false);
+      setExplanationLoading(false);
     }
+  }
+
+
+  // Helper to estimate line count (rough estimate based on character count)
+  function estimateLineCount(text: string): number {
+    // Assume ~80 chars per line on average
+    return Math.max(1, Math.ceil(text.length / 80));
+  }
+
+  // Helper to get paragraph group key (for merging small paragraphs)
+  function getParagraphGroupKey(paragraphText: string): string {
+    const group = paragraphGroups[paragraphText];
+    if (group && group.length > 0) {
+      // Return the key as the first paragraph in the group
+      return group[0];
+    }
+    return paragraphText;
   }
 
   async function simplifyParagraph(paragraphText: string) {
@@ -145,35 +254,103 @@ export default function NodePage() {
     }
   }, [slug, title, subjectData]);
 
+  // Build paragraph groups when lesson changes
+  useEffect(() => {
+    if (!content?.lessons?.[currentLessonIndex]?.body) {
+      setParagraphGroups({});
+      return;
+    }
+
+    const body = content.lessons[currentLessonIndex].body;
+    const sections = body.split(/(?=^#+ )/m); // Split on headings but keep them
+    const groups: { [key: string]: string[] } = {};
+    
+    console.log('📚 Building paragraph groups for lesson:', currentLessonIndex);
+    
+    for (const section of sections) {
+      if (!section.trim()) continue;
+      
+      // Get the heading
+      const lines = section.split('\n');
+      const headingLine = lines.find(l => l.trim().startsWith('#'));
+      
+      // Extract all paragraphs (text between empty lines)
+      const paragraphs: string[] = [];
+      let currentPara = '';
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) {
+          if (currentPara) {
+            paragraphs.push(currentPara.trim());
+            currentPara = '';
+          }
+        } else {
+          // Add to current paragraph
+          if (currentPara) currentPara += ' ';
+          // Clean markdown list markers
+          const cleaned = trimmed.replace(/^[-*+]\s+/, '').replace(/^\d+\.\s+/, '');
+          currentPara += cleaned;
+        }
+      }
+      if (currentPara) {
+        paragraphs.push(currentPara.trim());
+      }
+      
+      if (paragraphs.length <= 1) continue; // No grouping needed
+      
+      const sectionLeader = paragraphs[0];
+      console.log(`  Section "${headingLine?.trim()}" has ${paragraphs.length} paragraphs, leader: "${sectionLeader.substring(0, 50)}..."`);
+      
+      // Map all paragraphs in this section to the group
+      paragraphs.forEach(para => {
+        groups[para] = paragraphs;
+      });
+    }
+    
+    console.log('✅ Built groups:', Object.keys(groups).length, 'total items');
+    setParagraphGroups(groups);
+  }, [content, currentLessonIndex]);
+
 
   return (
     <>
-    <div className="flex min-h-screen flex-col bg-[#0F1216]">
+    <div className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)]">
       <div className="mx-auto w-full max-w-3xl px-6 py-8">
         {error ? (
-          <div className="mb-4 rounded-xl border border-[#3A1E2C] bg-[#1B0F15] p-3 text-sm text-[#FFC0DA]">{error}</div>
+          <div className="mb-4 rounded-xl border border-[var(--accent-pink)]/30 bg-[var(--background)]/60 p-3 text-sm text-[var(--accent-pink)]">{error}</div>
         ) : null}
 
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="flex flex-col items-center gap-5">
-              <div className="h-20 w-20 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
-              <div className="text-sm text-[#A7AFBE]">Generating content…</div>
+              <div className="h-20 w-20 animate-pulse rounded-full bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)]" />
+              <div className="text-sm text-[var(--foreground)]/70">Generating content…</div>
             </div>
           </div>
         ) : (lessonLoading || shorteningLesson) ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="flex flex-col items-center gap-5">
-              <div className="h-20 w-20 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
-              <div className="text-sm text-[#A7AFBE]">
-                {shorteningLesson ? "Shortening lesson content…" : "Generating lesson content…"}
+          <div className="flex items-center justify-center py-32">
+            <div className="flex flex-col items-center justify-center space-y-6">
+              <div className="relative w-24 h-24">
+                {/* Spinning gradient ring */}
+                <div className="absolute inset-0 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-spin" 
+                     style={{ 
+                       WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)',
+                       mask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)'
+                     }}>
+                </div>
+              </div>
+              <div className="text-center space-y-2">
+                <div className="text-lg font-semibold text-[var(--foreground)]">
+                  {shorteningLesson ? "Shortening lesson content…" : "Generating lesson content…"}
+                </div>
               </div>
             </div>
           </div>
         ) : content && content.lessons && content.lessons.length > 0 ? (
             <div className="space-y-6">
               
-              <div className="rounded-2xl border border-[#222731] bg-[#0B0E12] p-5 text-[#E5E7EB]">
+              <div className="rounded-2xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 p-5 text-[var(--foreground)] shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
               
               <div className="flex items-center gap-2 mb-4">
                 <button
@@ -214,7 +391,7 @@ export default function NodePage() {
                     }
                   }}
                   disabled={shorteningLesson || lessonLoading}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#2B3140] bg-[#0F141D] text-[#E5E7EB] hover:bg-[#151922] disabled:opacity-60 transition-colors"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 text-[var(--foreground)] hover:bg-[var(--background)]/80 disabled:opacity-60 transition-colors"
                   title="Shorten lesson (make it concise)"
                 >
                   <span className="text-lg font-bold">-</span>
@@ -268,7 +445,7 @@ export default function NodePage() {
                     }
                   }}
                   disabled={lessonLoading}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[#2B3140] bg-[#0F141D] text-[#E5E7EB] hover:bg-[#151922] disabled:opacity-60 transition-colors"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 text-[var(--foreground)] hover:bg-[var(--background)]/80 disabled:opacity-60 transition-colors"
                   title="Regenerate this lesson"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -276,30 +453,10 @@ export default function NodePage() {
                   </svg>
                 </button>
 
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-[#A7AFBE]">Lesson:</label>
-                  <select
-                    value={currentLessonIndex}
-                    onChange={(e) => {
-                      if (!e.target) return;
-                      const selectedIndex = parseInt(e.target.value);
-                      // Switch to the selected lesson (generated or not)
-                      setCurrentLessonIndex(selectedIndex);
-                      setUserAnswers({});
-                      setQuizResults(null);
-                    }}
-                    className="rounded-lg border border-[#2B3140] bg-[#0F141D] px-3 py-1 text-sm text-[#E5E7EB] focus:border-[#00E5FF] focus:outline-none"
-                  >
-                    {content.lessonsMeta?.map((meta, index) => (
-                      <option key={index} value={index}>
-                        {content.lessons[index] ? "✓ " : "○ "}{meta.type}: {meta.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* Single-lesson mode: dropdown removed */}
               </div>
 
-              <div className="lesson-content">
+              <div className="lesson-content" style={{ wordSpacing: '-0.04em' }}>
                 {lessonLoading && (
                   <div className="flex items-center justify-center py-8 mb-4 rounded-lg bg-[#1A1F2E] border border-[#2B3140]">
                     <div className="flex items-center gap-3">
@@ -310,10 +467,30 @@ export default function NodePage() {
                 )}
                 {content.lessons[currentLessonIndex]?.body ? (
                   <>
-                    <div className="text-sm text-[#A7AFBE] mb-2">{content.lessonsMeta?.[currentLessonIndex]?.type}: {content.lessonsMeta?.[currentLessonIndex]?.title}</div>
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm, remarkMath]}
-                      rehypePlugins={[[rehypeKatex, { output: 'html', throwOnError: false, errorColor: '#cc0000', strict: false }]]}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-sm text-[var(--foreground)]/70">{content.lessonsMeta?.[currentLessonIndex]?.title}</div>
+                      <button
+                        onClick={readLesson}
+                        disabled={audioLoading}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 text-[var(--foreground)] hover:bg-[var(--background)]/80 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={isPlaying ? "Stop reading" : "Read lesson"}
+                      >
+                        {audioLoading ? (
+                          <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21 12a9 9 0 11-6.219-8.56"/>
+                          </svg>
+                        ) : isPlaying ? (
+                          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                          </svg>
+                        ) : (
+                          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M5 3l14 9-14 9V3z"/>
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                    <AutoFixMarkdown
                       components={{
                         p: ({ children, ...props }: any) => {
                           let paragraphText = String(children);
@@ -328,6 +505,10 @@ export default function NodePage() {
                             }
                           }
                           const isSimplifying = simplifyingParagraph === paragraphText;
+                          const groupKey = getParagraphGroupKey(paragraphText);
+                          const isGroupLeader = groupKey === paragraphText;
+                          // Only show simplify button on the first paragraph/item in each section
+                          const showSimplifyButton = false; // DISABLED FOR NOW
 
                           return (
                             <div
@@ -349,15 +530,16 @@ export default function NodePage() {
                                   {wrapChildren(children)}
                                 </p>
                               </div>
-                              <div
+                              {/* Vertical line - DISABLED */}
+                              {false && <div
                                 className={
                                   hoveredParagraph === paragraphText
                                     ? 'paragraph-line absolute -right-12 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-100 scale-y-100'
                                     : 'paragraph-line absolute -right-12 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-0 scale-y-0'
                                 }
                                 style={{ transformOrigin: 'top' }}
-                              />
-                              {!isSimplifying && (
+                              />}
+                              {!isSimplifying && showSimplifyButton && (
                                 <div className="absolute -right-20 top-1 flex items-start">
                                   <button
                                     tabIndex={-1}
@@ -455,6 +637,10 @@ export default function NodePage() {
                             }
                           }
                           const isSimplifying = simplifyingParagraph === itemText;
+                          const groupKey = getParagraphGroupKey(itemText);
+                          const isGroupLeader = groupKey === itemText;
+                          // Only show simplify button on the first item in each section
+                          const showSimplifyButton = false; // DISABLED FOR NOW
 
                           return (
                             <li
@@ -476,15 +662,16 @@ export default function NodePage() {
                                   {wrapChildren(children)}
                                 </span>
                               </div>
-                              <div
+                              {/* Vertical line - DISABLED */}
+                              {false && <div
                                 className={
                                   hoveredParagraph === itemText
                                     ? 'paragraph-line absolute -right-12 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-100 scale-y-100'
                                     : 'paragraph-line absolute -right-12 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-0 scale-y-0'
                                 }
                                 style={{ transformOrigin: 'top' }}
-                              />
-                              {!isSimplifying && (
+                              />}
+                              {!isSimplifying && showSimplifyButton && (
                                 <div className="absolute -right-20 top-1 flex items-start">
                                   <button
                                     tabIndex={-1}
@@ -646,74 +833,30 @@ export default function NodePage() {
                         },
                       }}
                     >
-                      {
-                        (() => {
-                          // Convert LaTeX bracket notation to dollar signs and fix common errors
-                          let processedBody = content.lessons[currentLessonIndex].body;
-                          
-                          // Debug: Log original body if it contains \t
-                          if (processedBody.includes('\\t')) {
-                            console.log('🔍 DEBUG: Found \\t in lesson body');
-                            console.log('Original body snippet:', processedBody.substring(0, 500));
-                            
-                            // Find all \t occurrences
-                            const matches = [];
-                            for (let i = 0; i < processedBody.length - 1; i++) {
-                              if (processedBody[i] === '\\' && processedBody[i + 1] === 't') {
-                                matches.push({
-                                  position: i,
-                                  context: processedBody.substring(Math.max(0, i - 20), Math.min(processedBody.length, i + 30))
-                                });
-                              }
-                            }
-                            console.log('\\t occurrences:', matches);
-                          }
-                          
-                          // Remove metadata header if present
-                          processedBody = processedBody
-                            .replace(/^Lesson Title:.*\n/m, '')
-                            .replace(/^Subject:.*\n/m, '')
-                            .replace(/^Topic:.*\n/m, '');
-                          
-                          processedBody = processedBody
-                            .replace(/\\\[/g, '$$')
-                            .replace(/\\\]/g, '$$')
-                            .replace(/\\\(/g, '$')
-                            .replace(/\\\)/g, '$')
-                            // Fix \t errors AGGRESSIVELY - these should be \text{} not tab characters
-                            // The issue is \t\text{ creates nested \text - we need to fix this
-                            .replace(/\\t\\text\{/g, '\\text{')  // Fix nested \t\text{
-                            .replace(/\\t([A-Za-z])/g, '\\text{$1')
-                            .replace(/\\t\(/g, '\\text{(')
-                            .replace(/\\t\s/g, '\\text{ ')
-                            .replace(/\\t\}/g, '\\text{}')
-                            .replace(/\\t\\/g, '\\text{\\')  // Fix \t\ patterns
-                            // Fix common LaTeX errors - Greek letters
-                            .replace(/\bbeta(?![a-zA-Z\\])/g, '\\beta')
-                            .replace(/\balpha(?![a-zA-Z\\])/g, '\\alpha')
-                            .replace(/\btheta(?![a-zA-Z\\])/g, '\\theta')
-                            .replace(/\bheta(?![a-zA-Z\\])/g, '\\theta')  // Fix heta -> theta
-                            .replace(/\bgamma(?![a-zA-Z\\])/g, '\\gamma')
-                            .replace(/\bdelta(?![a-zA-Z\\])/g, '\\delta')
-                            .replace(/\bsigma(?![a-zA-Z\\])/g, '\\sigma')
-                            .replace(/\bmu(?![a-zA-Z\\])/g, '\\mu')
-                            .replace(/\bpi(?![a-zA-Z\\])/g, '\\pi')
-                            .replace(/\beta(?![a-zA-Z\\])/g, '\\eta')
-                            .replace(/\beta(?![a-zA-Z\\])/g, '\\eta')  // Fix eta -> \eta
-                            .replace(/ext\{/g, '\\text{')
-                            // Fix fraction spacing issues - add spaces around fractions
-                            .replace(/(\w)\\frac/g, '$1 \\frac')
-                            .replace(/\}(\w)/g, '} $1');
-                          
-                          // Debug: Log processed result if we made changes
-                          if (processedBody !== content.lessons[currentLessonIndex].body) {
-                            console.log('✅ Processed body (first 500 chars):', processedBody.substring(0, 500));
-                          }
-                          
-                          return processedBody;
-                        })()
-                      }
-                    </ReactMarkdown>
+                      {(() => {
+                        // Convert LaTeX bracket notation to dollar signs and fix common errors
+                        let processedBody = content.lessons[currentLessonIndex].body;
+                        
+                        // Remove metadata header if present
+                        processedBody = processedBody
+                          .replace(/^Lesson Title:.*\n/m, '')
+                          .replace(/^Subject:.*\n/m, '')
+                          .replace(/^Topic:.*\n/m, '');
+                        
+                        processedBody = processedBody
+                          .replace(/\\\[/g, '$$')
+                          .replace(/\\\]/g, '$$')
+                          .replace(/\\\(/g, '$')
+                          .replace(/\\\)/g, '$');
+                        
+                        return processedBody;
+                      })()}
+                    </AutoFixMarkdown>
+                    <style jsx global>{`
+                      .lesson-content p{ margin: 0.45rem 0 !important; }
+                      .lesson-content ul, .lesson-content ol{ margin: 0.4rem 0 !important; }
+                      .lesson-content h1, .lesson-content h2, .lesson-content h3{ margin-top: 0.6rem !important; margin-bottom: 0.35rem !important; }
+                    `}</style>
                   </>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-16 space-y-4">
@@ -786,11 +929,13 @@ export default function NodePage() {
                 )}
                 {content.lessons[currentLessonIndex]?.quiz && content.lessons[currentLessonIndex].quiz.length > 0 && (
                   <div className="mt-6">
-                    <h3 className="text-sm font-semibold text-[#E5E7EB] mb-4">Practice Problems</h3>
+                    <h3 className="text-sm font-semibold text-[var(--foreground)] mb-4">Practice Problems</h3>
                     <div className="space-y-6">
                       {content.lessons[currentLessonIndex].quiz.map((q, qi) => (
-                        <div key={qi} className="space-y-3 p-4 rounded-lg bg-[#1A1F2E] border border-[#2B3140]">
-                          <div className="text-sm font-medium text-[#E5E7EB]">{qi + 1}. {q.question}</div>
+                        <div key={qi} className="space-y-3 p-4 rounded-lg bg-[var(--background)]/60 border border-[var(--foreground)]/10">
+                          <div className="text-sm font-medium text-[var(--foreground)]">
+                            {qi + 1}. <AutoFixMarkdown>{q.question}</AutoFixMarkdown>
+                          </div>
                           <div className="space-y-2">
                             <textarea
                               value={userAnswers[qi] || ""}
@@ -801,9 +946,9 @@ export default function NodePage() {
                               className={
                                 quizResults?.[qi]
                                   ? quizResults[qi].correct
-                                    ? 'w-full rounded-lg border border-green-500 bg-green-500 bg-opacity-10 text-green-100 px-3 py-2 text-sm transition-colors resize-none'
-                                    : 'w-full rounded-lg border border-red-500 bg-red-500 bg-opacity-10 text-red-100 px-3 py-2 text-sm transition-colors resize-none'
-                                  : 'w-full rounded-lg border border-[#2B3140] bg-[#0F141D] text-[#E5E7EB] focus:border-[#00E5FF] focus:outline-none px-3 py-2 text-sm transition-colors resize-none'
+                                    ? 'w-full rounded-lg border border-green-500 bg-green-500/10 text-green-700 dark:text-green-200 px-3 py-2 text-sm transition-colors resize-none'
+                                    : 'w-full rounded-lg border border-red-500 bg-red-500/10 text-red-700 dark:text-red-200 px-3 py-2 text-sm transition-colors resize-none'
+                                  : 'w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none px-3 py-2 text-sm transition-colors resize-none'
                               }
                               placeholder="Write your answer here..."
                               rows={3}
@@ -813,24 +958,24 @@ export default function NodePage() {
                               <div className="space-y-2">
                                 <div className={
                                   quizResults[qi].correct
-                                    ? 'text-xs p-3 rounded bg-green-500 bg-opacity-20 text-green-200 border border-green-500 border-opacity-30'
-                                    : 'text-xs p-3 rounded bg-red-500 bg-opacity-20 text-red-200 border border-red-500 border-opacity-30'
+                                    ? 'text-xs p-3 rounded bg-green-500/20 text-green-700 dark:text-green-200 border border-green-500/30'
+                                    : 'text-xs p-3 rounded bg-red-500/20 text-red-700 dark:text-red-200 border border-red-500/30'
                                 }>
                                   <div className="font-semibold mb-1">{quizResults[qi].correct ? '✓ Correct!' : '✗ Not quite'}</div>
-                                  {quizResults[qi].explanation}
+                                  <AutoFixMarkdown>{quizResults[qi].explanation}</AutoFixMarkdown>
                                 </div>
                                 
                                 {!quizResults[qi].correct && quizResults[qi].hint && (
                                   <div className="space-y-1">
                                     <button
                                       onClick={() => setShowHints(prev => ({ ...prev, [qi]: !prev[qi] }))}
-                                      className="text-xs text-[#00E5FF] hover:underline"
+                                      className="text-xs text-[#60A5FA] hover:text-[#93C5FD] hover:underline transition-colors"
                                     >
                                       {showHints[qi] ? '▼ Hide hint' : '▶ Show hint'}
                                     </button>
                                     {showHints[qi] && (
-                                      <div className="text-xs p-3 rounded bg-[#00E5FF] bg-opacity-10 text-[#00E5FF] border border-[#00E5FF] border-opacity-30">
-                                        💡 {quizResults[qi].hint}
+                                      <div className="text-xs p-3 rounded bg-blue-50 dark:bg-[#1E3A5F]/30 text-blue-900 dark:text-[#E0F2FE] border border-blue-200 dark:border-[#60A5FA]/20">
+                                        💡 <AutoFixMarkdown>{quizResults[qi].hint}</AutoFixMarkdown>
                                       </div>
                                     )}
                                   </div>
@@ -840,13 +985,13 @@ export default function NodePage() {
                                   <div className="space-y-1">
                                     <button
                                       onClick={() => setShowSolutions(prev => ({ ...prev, [qi]: !prev[qi] }))}
-                                      className="text-xs text-[#FF2D96] hover:underline"
+                                      className="text-xs text-[#C084FC] hover:text-[#D8B4FE] hover:underline transition-colors"
                                     >
                                       {showSolutions[qi] ? '▼ Hide solution' : '▶ Show step-by-step solution'}
                                     </button>
                                     {showSolutions[qi] && (
-                                      <div className="text-xs p-3 rounded bg-[#FF2D96] bg-opacity-10 text-[#E5E7EB] border border-[#FF2D96] border-opacity-30 whitespace-pre-wrap">
-                                        {quizResults[qi].fullSolution}
+                                      <div className="text-xs p-3 rounded bg-purple-50 dark:bg-[#3B1F4F]/30 text-purple-900 dark:text-[#F3E8FF] border border-purple-200 dark:border-[#C084FC]/20">
+                                        <AutoFixMarkdown>{quizResults[qi].fullSolution}</AutoFixMarkdown>
                                       </div>
                                     )}
                                   </div>
@@ -966,8 +1111,8 @@ export default function NodePage() {
               {/* Review Rating */}
               {!reviewedThisSession.has(currentLessonIndex) ? (
                 <div className="w-full max-w-md">
-                  <div className="p-4 rounded-lg bg-[#1A1F2E] border border-[#2B3140] space-y-3">
-                    <div className="text-sm text-[#E5E7EB] font-medium text-center">How well did you understand this lesson?</div>
+                  <div className="p-4 rounded-lg bg-[var(--background)]/60 border border-[var(--foreground)]/20 space-y-3">
+                    <div className="text-sm text-[var(--foreground)] font-medium text-center">How well did you understand this lesson?</div>
                     <div className="grid grid-cols-6 gap-2">
                       {[
                         { value: 0, label: '😰', desc: 'Forgot everything' },
@@ -983,70 +1128,42 @@ export default function NodePage() {
                             markLessonReviewed(slug, title, currentLessonIndex, item.value);
                             setReviewedThisSession(prev => new Set([...prev, currentLessonIndex]));
                           }}
-                          className="flex flex-col items-center p-2 rounded-lg bg-[#2B3140] hover:bg-[#3A4150] transition-colors"
+                          className="flex flex-col items-center p-2 rounded-lg bg-[var(--background)]/80 border border-[var(--foreground)]/10 hover:bg-[var(--background)]/60 hover:border-[var(--accent-cyan)]/30 transition-colors"
                           title={item.desc}
                         >
                           <span className="text-2xl">{item.label}</span>
-                          <span className="text-[10px] text-[#A7AFBE] mt-1">{item.value}</span>
+                          <span className="text-[10px] text-[var(--foreground)]/70 mt-1">{item.value}</span>
                         </button>
                       ))}
                     </div>
-                    <div className="text-xs text-[#A7AFBE] text-center">Rate to schedule your next review</div>
+                    <div className="text-xs text-[var(--foreground)]/70 text-center">Rate to schedule your next review</div>
                   </div>
                 </div>
               ) : (
                 <div className="w-full max-w-md">
-                  <div className="p-4 rounded-lg bg-green-500 bg-opacity-10 border border-green-500 border-opacity-30 text-center">
-                    <div className="text-sm text-green-200 font-medium">✓ Marked for review</div>
-                    <div className="text-xs text-green-300 mt-1">Next review scheduled!</div>
+                  <div className="p-4 rounded-lg bg-green-500/20 dark:bg-green-500/10 border border-green-500/30 dark:border-green-500/30 text-center">
+                    <div className="text-sm text-green-700 dark:text-green-200 font-medium">✓ Marked for review</div>
+                    <div className="text-xs text-green-600 dark:text-green-300 mt-1">Next review scheduled!</div>
                   </div>
                 </div>
               )}
               
-              {/* Lesson Navigation */}
-              <div className="flex items-center justify-center gap-2">
-                <button
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#2B3140] text-white hover:bg-[#3A4150] disabled:opacity-60 transition-colors"
-                  onClick={() => {
-                    // Go to previous lesson
-                    if (currentLessonIndex > 0) {
-                      setCurrentLessonIndex(currentLessonIndex - 1);
-                      setUserAnswers({});
-                      setQuizResults(null);
-                    }
-                  }}
-                  disabled={currentLessonIndex === 0}
-                  title="Previous lesson"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M15 18L9 12L15 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </button>
-                <button
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#2B3140] text-white hover:bg-[#3A4150] disabled:opacity-60 transition-colors"
-                  onClick={() => {
-                    // Go to next lesson if available
-                    if (currentLessonIndex < (content?.lessonsMeta?.length || 0) - 1) {
-                      setCurrentLessonIndex(currentLessonIndex + 1);
-                      setUserAnswers({});
-                      setQuizResults(null);
-                    }
-                  }}
-                  disabled={currentLessonIndex >= (content?.lessonsMeta?.length || 0) - 1}
-                  title="Next lesson"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M9 18L15 12L9 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </button>
-              </div>
+              {/* Lesson Navigation removed for single-lesson mode */}
             </div>
           </div>
         ) : (
           <div className="relative mx-auto mt-24 flex max-w-md flex-col items-center justify-center">
             <div className="pointer-events-none absolute -inset-10 -z-10 rounded-full bg-[radial-gradient(circle_at_center,rgba(0,229,255,0.25),rgba(255,45,150,0.12)_60%,transparent_70%)] blur-2xl" />
-            <button
-              className="inline-flex h-12 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-10 text-base font-semibold text-white hover:opacity-95"
+            <div className="relative">
+              {/* Spinning gradient ring around button */}
+              <div className="absolute -inset-2 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-spin" 
+                   style={{ 
+                     WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 4px), white 0)',
+                     mask: 'radial-gradient(farthest-side, transparent calc(100% - 4px), white 0)'
+                   }}>
+              </div>
+              <button
+                className="relative inline-flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white font-semibold text-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity shadow-[0_4px_12px_rgba(0,0,0,0.5)]"
               onClick={async () => {
                 try {
                   setLessonLoading(true);
@@ -1069,22 +1186,23 @@ export default function NodePage() {
                   if (!planRes.ok || !planJson?.ok) throw new Error(planJson?.error || `Server error (${planRes.status})`);
                   const planData = planJson.data || {};
 
-                  // Then, generate the first lesson
+                  // Then, generate ONE comprehensive lesson covering the entire topic
                   const topicMeta = (subjectData?.topics || []).find((t: any) => String(t.name) === title);
                   const lessonRes = await fetch("/api/node-lesson", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                       subject: subjectData?.subject || slug,
-                      topic: title,
+                      topic: title, // Ensure we're using the correct topic from the URL
                       course_context: subjectData?.course_context || "",
                       combinedText: subjectData?.combinedText || "",
                       topicSummary: topicMeta?.summary || "",
-                      lessonsMeta: Array.isArray(planData.lessonsMeta) ? planData.lessonsMeta.map((m: any) => ({ type: String(m.type||"Concept"), title: String(m.title||"Lesson") })) : [],
+                      // Generate ONE comprehensive "Full Lesson" covering the entire topic
+                      lessonsMeta: [{ type: 'Full Lesson', title: title }],
                       lessonIndex: 0,
                       previousLessons: [],
                       generatedLessons: [],
-                      otherLessonsMeta: Array.isArray(planData.lessonsMeta) ? planData.lessonsMeta.slice(1).map((m: any, i: number) => ({ index: i+1, type: String(m.type||"Concept"), title: String(m.title||"Lesson") })) : [],
+                      otherLessonsMeta: [],
                       courseTopics,
                       languageName: subjectData?.course_language_name || "",
                     }),
@@ -1093,13 +1211,14 @@ export default function NodePage() {
                   if (!lessonRes.ok || !lessonJson?.ok) throw new Error(lessonJson?.error || `Server error (${lessonRes.status})`);
                   const lessonData = lessonJson.data || {};
 
-                  // Combine plan and first lesson
+                  // Combine plan and lesson - use single "Full Lesson" metadata
                   const normalized: TopicGeneratedContent = {
                     overview: String(planData.overview_child || ""),
                     symbols: Array.isArray(planData.symbols) ? planData.symbols.map((s: any) => ({ symbol: String(s.symbol||""), meaning: String(s.meaning||""), units: s.units ? String(s.units) : undefined })) : [],
-                    lessonsMeta: Array.isArray(planData.lessonsMeta) ? planData.lessonsMeta.map((m: any) => ({ type: String(m.type||"Concept"), title: String(m.title||"Lesson") })) : [],
+                    // Use single "Full Lesson" instead of plan's multiple lessons
+                    lessonsMeta: [{ type: 'Full Lesson', title: title }],
                     lessons: [{
-                      title: String(lessonData.title || (Array.isArray(planData.lessonsMeta) ? planData.lessonsMeta[0]?.title || "Lesson 1" : "Lesson 1")),
+                      title: String(lessonData.title || title),
                       body: String(lessonData.body || ""),
                       quiz: Array.isArray(lessonData.quiz) ? lessonData.quiz.map((q: any) => ({ question: String(q.question || "") })) : []
                     }],
@@ -1114,22 +1233,50 @@ export default function NodePage() {
                   setLessonLoading(false);
                 }
               }}
+              disabled={lessonLoading}
             >
-              Start
+              <span className="text-center leading-tight px-2">Start<br />Lesson</span>
             </button>
+            </div>
           </div>
         )}
       </div>
     </div>
-    <WordPopover
-      open={popoverOpen}
-      x={popoverXY.x}
-      y={popoverXY.y}
-      loading={popoverLoading}
-      error={popoverError}
-      content={popoverContent}
-      onClose={() => setPopoverOpen(false)}
-    />
+    {/* Word explanation box - rendered as portal to avoid parent CSS transforms */}
+    {showExplanation && createPortal(
+      <div
+        className="fixed inset-0 z-50 pointer-events-auto"
+        onClick={() => setShowExplanation(false)}
+      >
+        <div
+          className="fixed z-50 w-[504px] max-w-[calc(100vw-24px)] rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/95 backdrop-blur-sm p-4 text-[var(--foreground)] shadow-2xl pointer-events-auto"
+          style={{
+            left: `${explanationPosition.x}px`,
+            top: `${explanationPosition.y}px`,
+            transform: 'translateX(-50%) translateY(-100%)'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {explanationLoading ? (
+            <div className="flex items-center gap-3 text-xl">
+              <span className="h-4 w-4 animate-pulse rounded-full bg-accent" />
+              Generating explanation for "{explanationWord}"…
+            </div>
+          ) : explanationError ? (
+            <div className="text-xl text-[#FFC0DA]">{explanationError}</div>
+          ) : (
+            <div className="space-y-3">
+              <div className="text-xl font-semibold text-[var(--accent-cyan)]">
+                "{explanationWord}"
+              </div>
+              <div className="lesson-content text-xl max-h-64 overflow-y-auto leading-relaxed">
+                <AutoFixMarkdown>{explanationContent}</AutoFixMarkdown>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    , document.body)}
     </>
   );
 }

@@ -12,10 +12,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'No exam files provided' }, { status: 400 });
     }
 
-    // Extract text from all PDFs
+    // Extract text from all PDFs and DOCX files
     const examTexts: { name: string; text: string }[] = [];
 
-    console.log(`Processing ${examFiles.length} PDF files...`);
+    console.log(`Processing ${examFiles.length} files...`);
 
     for (const file of examFiles) {
       console.log(`Starting to process ${file.name}...`);
@@ -24,55 +24,78 @@ export async function POST(req: NextRequest) {
         // Convert file to buffer
         const bytes = await file.arrayBuffer();
         const uint8 = new Uint8Array(bytes);
-        console.log(`Converted ${file.name} to Uint8Array, size: ${uint8.length} bytes`);
+        const buffer = Buffer.from(bytes);
+        const fileName = file.name.toLowerCase();
+        console.log(`Converted ${file.name} to buffer, size: ${uint8.length} bytes`);
 
-        // Extract text using pdfjs-dist (multiple import fallbacks for Turbopack/ESM)
         let extractedText = '';
-        const tryPdfJsExtract = async (): Promise<string> => {
-          const tryImports = [
-            () => import('pdfjs-dist' as any),
-            () => import('pdfjs-dist/build/pdf.mjs' as any),
-            () => import('pdfjs-dist/legacy/build/pdf.mjs' as any),
-          ];
-          let lastErr: any = null;
-          for (const loader of tryImports) {
-            try {
-              const lib: any = await loader();
-              const getDocument = lib.getDocument || lib?.default?.getDocument;
-              if (!getDocument) throw new Error('getDocument not available');
-              const loadingTask = getDocument({ data: uint8, disableWorker: true });
-              const pdf = await loadingTask.promise;
-              let fullText = '';
-              for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-                const page = await pdf.getPage(pageNum);
-                const textContent = await page.getTextContent();
-                const pageText = (textContent.items || [])
-                  .map((item: any) => (item && typeof item.str === 'string' ? item.str : ''))
-                  .join(' ');
-                fullText += pageText + '\n';
-              }
-              return fullText;
-            } catch (err) {
-              lastErr = err;
-              continue;
-            }
-          }
-          throw lastErr || new Error('Failed to import/use pdfjs-dist');
-        };
 
-        try {
-          console.log(`Attempting pdfjs-dist text extraction on ${file.name}...`);
-          extractedText = await tryPdfJsExtract();
-          console.log(`pdfjs-dist extracted ${extractedText.length} chars from ${file.name}`);
-        } catch (e) {
-          console.warn(`All pdfjs-dist variants failed for ${file.name}:`, (e as any)?.message);
+        // Handle DOCX files
+        if (fileName.endsWith('.docx')) {
+          try {
+            console.log(`Attempting DOCX text extraction on ${file.name}...`);
+            const mammoth = await import('mammoth');
+            const mammothModule = mammoth.default || mammoth;
+            const result = await mammothModule.extractRawText({ buffer });
+            extractedText = result.value || '';
+            console.log(`Mammoth extracted ${extractedText.length} chars from ${file.name}`);
+          } catch (e: any) {
+            console.warn(`DOCX extraction failed for ${file.name}:`, e?.message);
+          }
+        }
+        // Handle PDF files
+        else if (fileName.endsWith('.pdf')) {
+          // Extract text using pdfjs-dist (multiple import fallbacks for Turbopack/ESM)
+          const tryPdfJsExtract = async (): Promise<string> => {
+            const tryImports = [
+              () => import('pdfjs-dist' as any),
+              () => import('pdfjs-dist/build/pdf.mjs' as any),
+              () => import('pdfjs-dist/legacy/build/pdf.mjs' as any),
+            ];
+            let lastErr: any = null;
+            for (const loader of tryImports) {
+              try {
+                const lib: any = await loader();
+                const getDocument = lib.getDocument || lib?.default?.getDocument;
+                if (!getDocument) throw new Error('getDocument not available');
+                const loadingTask = getDocument({ data: uint8, disableWorker: true });
+                const pdf = await loadingTask.promise;
+                let fullText = '';
+                for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                  const page = await pdf.getPage(pageNum);
+                  const textContent = await page.getTextContent();
+                  const pageText = (textContent.items || [])
+                    .map((item: any) => (item && typeof item.str === 'string' ? item.str : ''))
+                    .join(' ');
+                  fullText += pageText + '\n';
+                }
+                return fullText;
+              } catch (err) {
+                lastErr = err;
+                continue;
+              }
+            }
+            throw lastErr || new Error('Failed to import/use pdfjs-dist');
+          };
+
+          try {
+            console.log(`Attempting pdfjs-dist text extraction on ${file.name}...`);
+            extractedText = await tryPdfJsExtract();
+            console.log(`pdfjs-dist extracted ${extractedText.length} chars from ${file.name}`);
+          } catch (e) {
+            console.warn(`All pdfjs-dist variants failed for ${file.name}:`, (e as any)?.message);
+          }
+        }
+        // Handle text files
+        else if (file.type?.startsWith('text/') || fileName.endsWith('.txt') || fileName.endsWith('.md')) {
+          extractedText = new TextDecoder().decode(buffer);
         }
 
         // Finalize
         if (!extractedText || extractedText.trim().length === 0) {
           examTexts.push({
             name: file.name,
-            text: `PDF: ${file.name} - Text extraction failed (no readable text).`
+            text: `${file.name.endsWith('.docx') ? 'DOCX' : 'PDF'}: ${file.name} - Text extraction failed (no readable text).`
           });
         } else {
           console.log(`Extracted ${extractedText.length} characters total from ${file.name}`);

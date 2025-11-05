@@ -27,6 +27,7 @@ export default function Home() {
   const [quickLearnOpen, setQuickLearnOpen] = useState(false);
   const [quickLearnQuery, setQuickLearnQuery] = useState("");
   const [quickLearnLoading, setQuickLearnLoading] = useState(false);
+  const [filesModalOpen, setFilesModalOpen] = useState<string | null>(null);
   useEffect(() => {
     setSubjects(readSubjects());
   }, []);
@@ -101,10 +102,10 @@ export default function Home() {
         {subjects.map((s) => (
           <div
             key={s.slug}
-            className={`relative rounded-2xl border border-[var(--accent-cyan)]/20 bg-[var(--background)] p-6 text-[var(--foreground)] transition-all duration-200 min-h-[80px] ${
+            className={`relative rounded-2xl bg-[var(--background)] p-6 text-[var(--foreground)] transition-all duration-200 min-h-[80px] shadow-[0_2px_8px_rgba(0,0,0,0.7)] ${
               preparingSlug === s.slug
                 ? 'cursor-not-allowed opacity-75'
-                : 'cursor-pointer hover:border-[var(--accent-cyan)]/40 hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5 hover:shadow-[0_4px_16px_rgba(0,0,0,0.8)]'
+                : 'cursor-pointer hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)]'
             }`}
             role="link"
             tabIndex={preparingSlug === s.slug ? -1 : 0}
@@ -173,6 +174,16 @@ export default function Home() {
                   className="block w-full rounded-lg px-3 py-2 text-left text-sm text-[#FFC0DA] hover:bg-[#20141A]"
                 >
                   Delete
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuOpenFor(null);
+                    setFilesModalOpen(s.slug);
+                  }}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-[#E5E7EB] hover:bg-[#121821]"
+                >
+                  View Files
                 </button>
                 <button
                   onClick={(e) => {
@@ -290,14 +301,14 @@ export default function Home() {
       {/* Quick Learn Modal */}
       {quickLearnOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-[#222731] bg-[#0B0E12] p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">Quick Learn</h3>
+          <div className="w-full max-w-md rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md p-6">
+            <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Quick Learn</h3>
             <div className="mb-4">
-              <label className="mb-2 block text-xs text-[#A7AFBE]">What do you want to learn?</label>
+              <label className="mb-2 block text-xs text-[var(--foreground)]/70">What do you want to learn?</label>
               <textarea
                 value={quickLearnQuery}
                 onChange={(e) => { if (!e.target) return; setQuickLearnQuery(e.target.value); }}
-                className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none resize-none"
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none"
                 placeholder="e.g. How does machine learning work? Or paste a question from your textbook..."
                 rows={4}
               />
@@ -305,7 +316,7 @@ export default function Home() {
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setQuickLearnOpen(false)}
-                className="rounded-lg border border-[#222731] bg-[#0F141D] px-4 py-2 text-sm text-[#E5E7EB] hover:bg-[#1B2030]"
+                className="rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/60"
                 disabled={quickLearnLoading}
               >
                 Cancel
@@ -321,6 +332,101 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* Files Modal */}
+      {filesModalOpen && (() => {
+        const slug = filesModalOpen;
+        const data = loadSubjectData(slug) as StoredSubjectData | null;
+        const files = data?.files || [];
+        const fileInputRef = useRef<HTMLInputElement>(null);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setFilesModalOpen(null)}>
+            <div className="w-full max-w-2xl rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/95 backdrop-blur-sm p-6" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-[var(--foreground)]">Course Files</h3>
+                <button
+                  onClick={() => setFilesModalOpen(null)}
+                  className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] text-xl"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="mb-4 space-y-2">
+                {files.length === 0 ? (
+                  <div className="text-sm text-[var(--foreground)]/70 py-6 text-center">
+                    No files added yet. Click "Add Files" below to upload course materials.
+                  </div>
+                ) : (
+                  files.map((file, idx) => (
+                    <div key={idx} className="flex items-center justify-between rounded-lg bg-[var(--background)]/60 border border-[var(--accent-cyan)]/20 px-4 py-3">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <svg className="flex-shrink-0 w-5 h-5 text-[var(--accent-cyan)]" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" />
+                        </svg>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-[var(--foreground)] truncate">{file.name}</div>
+                          <div className="text-xs text-[var(--foreground)]/70">{file.type || 'Unknown type'}</div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (!window.confirm(`Remove "${file.name}" from this subject?`)) return;
+                          const updatedFiles = files.filter((_, i) => i !== idx);
+                          if (data) {
+                            data.files = updatedFiles;
+                            saveSubjectData(slug, data);
+                            setFilesModalOpen(null);
+                            setTimeout(() => setFilesModalOpen(slug), 10);
+                          }
+                        }}
+                        className="ml-3 text-[#FF2D96] hover:text-[#FF2D96]/80 text-sm font-medium"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-[var(--accent-cyan)]/20">
+                <button
+                  onClick={() => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.multiple = true;
+                    input.onchange = async (e) => {
+                      const target = e.target as HTMLInputElement;
+                      const newFiles = Array.from(target.files || []);
+                      if (newFiles.length === 0) return;
+
+                      // Add new files to the subject data
+                      const storedFiles = newFiles.map((f) => ({ name: f.name, type: f.type }));
+                      if (data) {
+                        data.files = [...files, ...storedFiles];
+                        saveSubjectData(slug, data);
+                        setFilesModalOpen(null);
+                        setTimeout(() => setFilesModalOpen(slug), 10);
+                      }
+                    };
+                    input.click();
+                  }}
+                  className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95"
+                >
+                  Add Files
+                </button>
+                <button
+                  onClick={() => setFilesModalOpen(null)}
+                  className="rounded-lg border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/80"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

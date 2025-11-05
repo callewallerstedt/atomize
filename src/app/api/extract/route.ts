@@ -32,10 +32,12 @@ async function readFileAsText(file: File): Promise<string> {
   if (name.endsWith(".docx")) {
     try {
       const mammoth = await import("mammoth");
-      const { value } = await mammoth.extractRawText({ buffer });
-      return value || "";
-    } catch {
-      // ignore
+      const mammothModule = mammoth.default || mammoth;
+      const result = await mammothModule.extractRawText({ buffer });
+      return result.value || "";
+    } catch (err: any) {
+      console.error(`Failed to extract DOCX text from ${file.name}:`, err?.message);
+      return "";
     }
   }
   if (file.type?.startsWith("text/") || name.endsWith(".md") || name.endsWith(".txt")) {

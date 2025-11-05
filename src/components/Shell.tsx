@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import SettingsModal from "@/components/SettingsModal";
@@ -11,6 +15,21 @@ function LoadingScreen({ onComplete }: { onComplete: () => void }) {
   const [displayedText, setDisplayedText] = useState('');
   const [showSubtitle, setShowSubtitle] = useState(false);
   const fullText = 'SYNAPSE';
+
+  // Play startup sound when component mounts
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const audio = new Audio('/startup.mp3');
+        audio.volume = 0.3; // Set volume to 30%
+        audio.play().catch(err => {
+          console.log('Audio play failed:', err);
+        });
+      } catch (err) {
+        console.log('Audio initialization failed:', err);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     // Typewriter effect with random timing
@@ -350,6 +369,404 @@ function PomodoroTimer() {
   );
 }
 
+type ChatHistory = {
+  id: string;
+  title: string;
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  timestamp: number;
+};
+
+function ChatDropdown() {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [sending, setSending] = useState(false);
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: 480, h: 460 });
+  const [resizing, setResizing] = useState(false);
+  const [start, setStart] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastMessageContentRef = useRef<string>('');
+  const [scrollTrigger, setScrollTrigger] = useState(0);
+  const chatDropdownRef = useRef<HTMLDivElement>(null);
+  const chatButtonRef = useRef<HTMLButtonElement>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
+  const lastSavedRef = useRef<string>('');
+  const isLoadingFromHistoryRef = useRef<boolean>(false);
+
+  // Load chat history from localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = localStorage.getItem('chatHistory');
+      if (stored) {
+        setChatHistory(JSON.parse(stored));
+      }
+    } catch {}
+  }, []);
+
+  // Save chat to history when a conversation is complete (not during streaming)
+  useEffect(() => {
+    // Don't save if we're loading from history
+    if (isLoadingFromHistoryRef.current) {
+      isLoadingFromHistoryRef.current = false;
+      const messagesKey = JSON.stringify(messages);
+      lastSavedRef.current = messagesKey; // Update ref to match loaded messages
+      return;
+    }
+
+    if (messages.length > 0 && !sending && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content) {
+      const messagesKey = JSON.stringify(messages);
+      // Only save if messages have changed and conversation is complete
+      if (messagesKey !== lastSavedRef.current) {
+        // Check if this exact conversation already exists in history
+        const messagesExist = chatHistory.some(chat => JSON.stringify(chat.messages) === messagesKey);
+        if (!messagesExist) {
+          const firstUserMessage = messages.find(m => m.role === 'user');
+          if (firstUserMessage) {
+            const title = firstUserMessage.content.slice(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '');
+            const newChat: ChatHistory = {
+              id: Date.now().toString(),
+              title,
+              messages: [...messages],
+              timestamp: Date.now()
+            };
+            const updated = [newChat, ...chatHistory.filter(c => c.id !== newChat.id)].slice(0, 50); // Keep last 50 chats
+            setChatHistory(updated);
+            lastSavedRef.current = messagesKey;
+            try {
+              localStorage.setItem('chatHistory', JSON.stringify(updated));
+            } catch {}
+          }
+        } else {
+          // Update ref even if not saving (messages already exist)
+          lastSavedRef.current = messagesKey;
+        }
+      }
+    }
+  }, [messages, sending, chatHistory]);
+
+  function startNewChat() {
+    setMessages([]);
+    setInput("");
+    setShowHistory(false);
+    lastSavedRef.current = '';
+  }
+
+  function loadChat(chat: ChatHistory) {
+    isLoadingFromHistoryRef.current = true;
+    setMessages(chat.messages);
+    setShowHistory(false);
+  }
+
+  function deleteChat(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    const updated = chatHistory.filter(c => c.id !== id);
+    setChatHistory(updated);
+    try {
+      localStorage.setItem('chatHistory', JSON.stringify(updated));
+    } catch {}
+  }
+
+  // Track message content changes for streaming and new messages
+  useEffect(() => {
+    const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+    const currentContent = lastMessage?.content || '';
+    if (currentContent !== lastMessageContentRef.current) {
+      lastMessageContentRef.current = currentContent;
+      setScrollTrigger(prev => prev + 1);
+    }
+  }, [messages.length]);
+  
+  // Also poll during streaming to catch content updates
+  useEffect(() => {
+    if (!open || !sending) return;
+    
+    const interval = setInterval(() => {
+      const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+      const currentContent = lastMessage?.content || '';
+      if (currentContent !== lastMessageContentRef.current) {
+        lastMessageContentRef.current = currentContent;
+        setScrollTrigger(prev => prev + 1);
+      }
+    }, 100); // Check every 100ms during streaming
+    
+    return () => clearInterval(interval);
+  }, [open, sending, messages.length]);
+
+  // Auto-scroll to bottom when messages change (especially during streaming)
+  useEffect(() => {
+    if (!open || !messagesEndRef.current) return;
+    
+    // Always scroll when messages length changes or when sending state changes
+    requestAnimationFrame(() => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    });
+  }, [messages.length, sending, open, scrollTrigger]);
+
+  async function sendMessage() {
+    const text = input.trim();
+    if (!text || sending) return;
+    setInput("");
+    setMessages((m) => [...m, { role: 'user', content: text }]);
+    try {
+      setSending(true);
+      // Gather page context (lesson content or visible text)
+      let context = '';
+      try {
+        const el = document.querySelector('.lesson-content');
+        context = el ? (el as HTMLElement).innerText : document.body.innerText;
+        context = context.slice(0, 12000);
+      } catch {}
+      // Prepare placeholder for streaming
+      setMessages((m) => [...m, { role: 'assistant', content: '' }]);
+      const idx = messages.length + 1; // assistant index
+      const res = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          context,
+          messages: [...messages, { role: 'user', content: text }],
+          path: typeof window !== 'undefined' ? window.location.pathname : ''
+        })
+      });
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value);
+          chunk.split('\n').forEach((line) => {
+            if (!line.startsWith('data: ')) return;
+            const payload = line.slice(6);
+            if (!payload) return;
+            try {
+              const obj = JSON.parse(payload);
+              if (obj.type === 'text') {
+                setMessages((m) => {
+                  const copy = [...m];
+                  copy[idx] = { role: 'assistant', content: (copy[idx]?.content || '') + obj.content } as any;
+                  return copy;
+                });
+              }
+            } catch {}
+          });
+        }
+      }
+    } catch (e: any) {
+      setMessages((m) => [...m, { role: 'assistant', content: 'Error: ' + (e?.message || 'Failed to send') }]);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  // Auto-scroll to bottom when messages change (especially during streaming)
+  useEffect(() => {
+    if (!open || !messagesEndRef.current) return;
+    
+    // Always scroll when messages length changes or when sending state changes
+    requestAnimationFrame(() => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    });
+  }, [messages.length, sending, open]);
+
+  // Click outside to close chat
+  useEffect(() => {
+    if (!open) return;
+    
+    function handleClickOutside(event: MouseEvent) {
+      const target = event.target as Node;
+      // Check if click is outside both the chat button and dropdown
+      if (
+        chatDropdownRef.current &&
+        chatButtonRef.current &&
+        !chatDropdownRef.current.contains(target) &&
+        !chatButtonRef.current.contains(target)
+      ) {
+        setOpen(false);
+      }
+    }
+    
+    // Use capture phase to catch clicks before they bubble
+    document.addEventListener('mousedown', handleClickOutside, true);
+    
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside, true);
+    };
+  }, [open]);
+
+  // Resize handlers (bottom-left grip)
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (!resizing || !start) return;
+      const dx = e.clientX - start.x; // moving right is positive
+      const dy = e.clientY - start.y; // moving down is positive
+      // Anchored to right edge; dragging bottom-left: decrease x to grow width
+      setSize({ w: Math.max(420, start.w - dx), h: Math.max(320, start.h + dy) });
+    }
+    function onUp() { setResizing(false); setStart(null); }
+    if (resizing) {
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [resizing, start]);
+
+  return (
+    <div className="relative">
+      <button
+        ref={chatButtonRef}
+        onClick={() => setOpen(!open)}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }}
+        className="relative inline-flex h-10 items-center rounded-full px-3 text-sm
+                   text-white bg-[var(--background)]/90
+                   shadow-[0_2px_8px_rgba(0,0,0,0.7)]
+                   hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95
+                   focus:outline-none focus:ring-0 focus-visible:outline-none 
+                   active:shadow-[0_2px_8px_rgba(0,0,0,0.7)] active:scale-[1]
+                   transition-shadow duration-200 ease-out"
+        style={{ outline: 'none', WebkitTapHighlightColor: 'transparent', transform: 'none !important' }}
+        aria-label="Chat"
+        title="Chat"
+      >
+        Chat
+        <svg className={`h-4 w-4 ml-1 transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
+      </button>
+      {open && (
+        <>
+          <div 
+            ref={chatDropdownRef}
+            className="absolute right-0 mt-2 z-50 rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-2xl p-3
+                        max-md:fixed max-md:inset-4 max-md:right-4 max-md:left-4 max-md:top-4 max-md:bottom-4 max-md:mt-0 max-md:w-auto max-md:h-auto
+                        md:absolute md:right-0 md:mt-2 flex flex-col" 
+            style={{ 
+              width: typeof window !== 'undefined' && window.innerWidth < 768 ? 'auto' : size.w, 
+              height: typeof window !== 'undefined' && window.innerWidth < 768 ? 'auto' : size.h 
+            }}
+             onClick={(e) => e.stopPropagation()}>
+          {/* Top right icons */}
+          <div className="relative flex items-center gap-2 justify-end mb-2 flex-shrink-0">
+            <button
+              onClick={startNewChat}
+              className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors"
+              title="New chat"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+            </button>
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors"
+              title="Chat history"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 3h18v18H3V3z"/>
+                <path d="M3 9h18M9 3v18"/>
+              </svg>
+            </button>
+            
+            {/* History panel - absolute positioned to overlay */}
+            {showHistory && (
+              <div className="absolute top-full right-0 mt-1 w-64 p-2 rounded-lg bg-[var(--background)]/95 backdrop-blur-md border border-[var(--foreground)]/20 shadow-xl z-50 max-h-64 overflow-y-auto">
+                {chatHistory.length === 0 ? (
+                  <div className="text-xs text-[var(--foreground)]/60 text-center py-4">No chat history</div>
+                ) : (
+                  <div className="space-y-1">
+                    {chatHistory.map((chat) => (
+                      <div
+                        key={chat.id}
+                        onClick={() => loadChat(chat)}
+                        className="flex items-center justify-between group p-2 rounded hover:bg-[var(--background)]/80 cursor-pointer transition-colors"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-medium text-[var(--foreground)] truncate">{chat.title}</div>
+                          <div className="text-[10px] text-[var(--foreground)]/50">
+                            {new Date(chat.timestamp).toLocaleDateString()}
+                          </div>
+                        </div>
+                        <button
+                          onClick={(e) => deleteChat(chat.id, e)}
+                          className="opacity-0 group-hover:opacity-100 text-[var(--foreground)]/50 hover:text-[var(--foreground)] transition-opacity ml-2"
+                          title="Delete"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M18 6L6 18M6 6l12 12"/>
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          
+          <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0">
+            {messages.length === 0 && (
+              <div className="text-xs text-[var(--foreground)]/60">Ask a question about this page. I'll use the current page content as context.</div>
+            )}
+            {messages.map((m, i) => (
+              <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+                <div className="max-w-[80%]">
+                  <div className="text-[10px] text-[var(--foreground)]/60 mb-1 ml-1">{m.role === 'user' ? 'You' : 'Nova'}</div>
+                  <div className={m.role === 'user' ? 'rounded-xl bg-[var(--accent-cyan)]/20 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--accent-cyan)]/30' : 'rounded-xl bg-[var(--background)]/80 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--foreground)]/10'}>
+                  {m.role === 'assistant' ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+                      {m.content}
+                    </ReactMarkdown>
+                  ) : (
+                    <span>{m.content}</span>
+                  )}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {/* Scroll target for auto-scroll */}
+            <div ref={messagesEndRef} />
+          </div>
+          <div className="mt-2 flex items-center gap-2 flex-shrink-0">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(); }}
+              placeholder="Type a message..."
+              className="flex-1 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
+            />
+            <button
+              onClick={sendMessage}
+              disabled={sending}
+              className="inline-flex h-9 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 text-sm font-medium !text-white hover:opacity-95 disabled:opacity-60 disabled:!text-white"
+              style={{ color: 'white' }}
+            >
+              {sending ? 'Sending…' : 'Send'}
+            </button>
+            {/* Bottom-left resize handle */}
+            <div
+              onMouseDown={(e) => { setResizing(true); setStart({ x: e.clientX, y: e.clientY, w: size.w, h: size.h }); }}
+              title="Resize"
+              className="max-md:hidden absolute left-2 bottom-2 h-3 w-3 cursor-nwse-resize bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] rounded-sm"
+            />
+          </div>
+        </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 type Subject = { name: string; slug: string };
 
 function getSubjects(): Subject[] {
@@ -461,7 +878,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-[var(--background)] text-[var(--foreground)]" style={{ zoom: 1.4 }}>
       {/* Main content */}
       <div className="flex min-h-screen w-full flex-col">
-        <header className="sticky top-0 z-50 backdrop-blur supports-[backdrop-filter]:bg-[var(--background)]/70 bg-[var(--background)]">
+        <header className="sticky top-0 z-50 backdrop-blur supports-[backdrop-filter]:bg-[var(--background)]/70 bg-[var(--background)] border-b border-[#4A5568]">
           <nav className="relative flex h-14 items-center px-4">
             {/* Left side buttons */}
             <div className="flex items-center gap-3">
@@ -535,15 +952,24 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               <PomodoroTimer />
             </div>
 
-            {/* Right side - Settings */}
-            <div className="absolute right-4 top-1/2 transform -translate-y-1/2">
+            {/* Right side - Chat + Settings */}
+            <div className="absolute right-4 top-1/2 transform -translate-y-1/2 flex items-center gap-2">
+              {/* Chat dropdown */}
+              <ChatDropdown />
               <button
                 onClick={() => setSettingsOpen(true)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                }}
                 className="relative inline-flex h-10 w-10 items-center justify-center rounded-full
-                           text-white bg-[var(--background)]/90 backdrop-blur-md
+                           text-white bg-[var(--background)]/90
                            shadow-[0_2px_8px_rgba(0,0,0,0.7)]
                            hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95
-                           transition-all duration-200 ease-out"
+                           focus:outline-none focus:ring-0 focus-visible:outline-none 
+                           active:shadow-[0_2px_8px_rgba(0,0,0,0.7)] active:scale-[1]
+                           transition-shadow duration-200 ease-out"
+                style={{ outline: 'none', WebkitTapHighlightColor: 'transparent', transform: 'none !important' }}
                 aria-label="Settings"
                 title="Settings"
               >
@@ -558,7 +984,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </header>
         <main className="flex-1">{children}</main>
       </div>
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <div className="settings-modal">
+        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      </div>
     </div>
     </>
   );
