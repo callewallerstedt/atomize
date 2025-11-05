@@ -254,3 +254,17 @@ select {
     background-position: 100% 50%;
   }
 }
+
+/* Reverse spin animation for loading screen */
+@keyframes spin-reverse {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+.animate-spin-reverse {
+  animation: spin-reverse 1s linear infinite;
+}

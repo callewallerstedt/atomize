@@ -5,6 +5,38 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import SettingsModal from "@/components/SettingsModal";
 
+// Loading Screen Component
+function LoadingScreen({ onComplete }: { onComplete: () => void }) {
+  useEffect(() => {
+    // Simulate loading time and then hide the screen
+    const timer = setTimeout(() => {
+      onComplete();
+    }, 2000); // Show for 2 seconds
+
+    return () => clearTimeout(timer);
+  }, [onComplete]);
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--background)]">
+      {/* Spinning gradient ring */}
+      <div className="relative flex items-center justify-center">
+        <div className="w-32 h-32 rounded-full border-4 border-transparent border-t-[var(--accent-cyan)] border-r-[var(--accent-pink)] animate-spin"></div>
+        <div className="absolute inset-4 rounded-full border-2 border-transparent border-b-[var(--accent-cyan)] border-l-[var(--accent-pink)] animate-spin-reverse"></div>
+
+        {/* SYNAPSE text in the center */}
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider font-mono">
+            SYNAPSE
+          </span>
+        </div>
+
+        {/* Additional glow effect */}
+        <div className="absolute inset-0 rounded-full bg-gradient-to-r from-[var(--accent-cyan)]/20 via-[var(--accent-pink)]/20 to-[var(--accent-cyan)]/20 blur-xl animate-pulse"></div>
+      </div>
+    </div>
+  );
+}
+
 // Pomodoro Timer Component
 function PomodoroTimer() {
   const [timeLeft, setTimeLeft] = useState(25 * 60); // 25 minutes in seconds
@@ -309,6 +341,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     setSubjects(getSubjects());
@@ -374,7 +407,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     return items;
   }, [pathname, subjects]);
 
+  const handleLoadingComplete = () => {
+    setIsLoading(false);
+  };
+
   return (
+    <>
+      {/* Loading Screen */}
+      {isLoading && <LoadingScreen onComplete={handleLoadingComplete} />}
     <div className="flex min-h-screen bg-[var(--background)] text-[var(--foreground)]" style={{ zoom: 1.4 }}>
       {/* Main content */}
       <div className="flex min-h-screen w-full flex-col">
@@ -463,6 +503,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       </div>
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
+    </>
   );
 }
 
