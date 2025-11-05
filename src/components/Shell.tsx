@@ -191,9 +191,9 @@ function PomodoroTimer() {
       <button
         onClick={() => setShowSettings(!showSettings)}
         className="relative inline-flex items-center justify-center gap-1 rounded-lg px-3 py-2 min-w-[100px]
-                   text-white bg-[var(--background)]/90 backdrop-blur-md border border-[var(--accent-cyan)]/30
-                   shadow-lg shadow-[var(--accent-cyan)]/20
-                   hover:shadow-xl hover:shadow-[var(--accent-cyan)]/30 hover:bg-[var(--background)]/95
+                   text-white bg-[var(--background)]/90 backdrop-blur-md
+                   shadow-[0_2px_8px_rgba(0,0,0,0.4)]
+                   hover:shadow-[0_4px_12px_rgba(0,0,0,0.5)] hover:bg-[var(--background)]/95
                    transition-all duration-300 ease-out"
       >
         <div className="flex items-center gap-1.5">
@@ -474,9 +474,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               <button
                 onClick={() => router.push('/')}
                 className="relative inline-flex items-center rounded-xl px-4 py-2
-                           text-white bg-[var(--background)]/90 backdrop-blur-md border border-[var(--accent-cyan)]/30
-                           shadow-lg shadow-[var(--accent-cyan)]/20
-                           hover:shadow-xl hover:shadow-[var(--accent-cyan)]/30 hover:bg-[var(--background)]/95
+                           text-white bg-[var(--background)]/90 backdrop-blur-md
+                           shadow-[0_2px_8px_rgba(0,0,0,0.4)]
+                           hover:shadow-[0_4px_12px_rgba(0,0,0,0.5)] hover:bg-[var(--background)]/95
                            transition-all duration-200 ease-out"
               >
                 <span>Home</span>
@@ -485,9 +485,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 <button
                   onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
                   className="relative inline-flex items-center rounded-xl px-4 py-2
-                             text-white bg-[var(--background)]/90 backdrop-blur-md border border-[var(--accent-cyan)]/30
-                             shadow-lg shadow-[var(--accent-cyan)]/20
-                             hover:shadow-xl hover:shadow-[var(--accent-cyan)]/30 hover:bg-[var(--background)]/95
+                             text-white bg-[var(--background)]/90 backdrop-blur-md
+                             shadow-[0_2px_8px_rgba(0,0,0,0.4)]
+                             hover:shadow-[0_4px_12px_rgba(0,0,0,0.5)] hover:bg-[var(--background)]/95
                              transition-all duration-200 ease-out"
                 >
                   <span>Tools</span>
@@ -552,9 +552,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               <button
                 onClick={() => setSettingsOpen(true)}
                 className="relative inline-flex h-10 w-10 items-center justify-center rounded-full
-                           text-white bg-[var(--background)]/90 backdrop-blur-md border border-[var(--accent-cyan)]/30
-                           shadow-lg shadow-[var(--accent-cyan)]/20
-                           hover:shadow-xl hover:shadow-[var(--accent-cyan)]/30 hover:bg-[var(--background)]/95
+                           text-white bg-[var(--background)]/90 backdrop-blur-md
+                           shadow-[0_2px_8px_rgba(0,0,0,0.4)]
+                           hover:shadow-[0_4px_12px_rgba(0,0,0,0.5)] hover:bg-[var(--background)]/95
                            transition-all duration-200 ease-out"
                 aria-label="Settings"
                 title="Settings"
