@@ -92,7 +92,10 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-[var(--foreground)]">Theme</span>
           <button
-            onClick={toggleLightMode}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleLightMode();
+            }}
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
               isLightMode ? 'bg-[#0EA5E9]' : 'bg-[#374151]'
             }`}
