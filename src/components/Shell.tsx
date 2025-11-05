@@ -17,21 +17,22 @@ function LoadingScreen({ onComplete }: { onComplete: () => void }) {
   }, [onComplete]);
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[var(--background)]">
-      {/* Spinning gradient ring */}
-      <div className="relative flex items-center justify-center">
-        <div className="w-32 h-32 rounded-full border-4 border-transparent border-t-[var(--accent-cyan)] border-r-[var(--accent-pink)] animate-spin"></div>
-        <div className="absolute inset-4 rounded-full border-2 border-transparent border-b-[var(--accent-cyan)] border-l-[var(--accent-pink)] animate-spin-reverse"></div>
-
-        {/* SYNAPSE text in the center */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider font-mono">
-            SYNAPSE
-          </span>
+    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--background)]">
+      {/* Spinning gradient ring - same as Exam Snipe */}
+      <div className="relative w-24 h-24">
+        <div className="absolute inset-0 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-spin"
+             style={{
+               WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)',
+               mask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)'
+             }}>
         </div>
+      </div>
 
-        {/* Additional glow effect */}
-        <div className="absolute inset-0 rounded-full bg-gradient-to-r from-[var(--accent-cyan)]/20 via-[var(--accent-pink)]/20 to-[var(--accent-cyan)]/20 blur-xl animate-pulse"></div>
+      {/* SYNAPSE text below the ring */}
+      <div className="mt-6 text-center">
+        <span className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider font-mono">
+          SYNAPSE
+        </span>
       </div>
     </div>
   );
