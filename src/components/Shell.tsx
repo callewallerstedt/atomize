@@ -385,6 +385,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -420,6 +421,21 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       console.error('Error loading theme:', e);
     }
   }, [pathname]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (settingsOpen && !(event.target as Element).closest('.settings-modal')) {
+        setSettingsOpen(false);
+      }
+      if (toolsDropdownOpen && !(event.target as Element).closest('.tools-dropdown')) {
+        setToolsDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [settingsOpen, toolsDropdownOpen]);
 
   const crumbs = useMemo(() => {
     const parts = (pathname || "/").split("/").filter(Boolean);
@@ -486,26 +502,76 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               >
                 <span className="relative z-10">Home</span>
               </button>
-              <button
-                onClick={() => router.push('/exam-snipe')}
-                className="relative inline-flex items-center rounded-xl px-4 py-2
-                           text-white bg-[var(--background)]/90 backdrop-blur-md
-                           border-0 outline-none focus:outline-none
-                           before:absolute before:inset-0 before:rounded-xl
-                           before:bg-gradient-to-r before:from-[#FF2D96] before:via-[#00E5FF] before:to-[#FF2D96]
-                           before:bg-[length:200%_200%] before:animate-[gradient-shift_15s_ease-in-out_infinite]
-                           before:p-[1px] before:content-['']
-                           after:absolute after:inset-[1px] after:rounded-xl
-                           after:bg-[var(--background)]/95 after:backdrop-blur-md
-                           shadow-[0_0_8px_rgba(255,45,150,0.3)]
-                           hover:shadow-[0_0_12px_rgba(255,45,150,0.4),0_0_18px_rgba(0,229,255,0.2)]
-                           hover:before:bg-[length:250%_250%]
-                           active:shadow-[0_0_4px_rgba(255,45,150,0.5),inset_0_0_8px_rgba(255,45,150,0.2)]
-                           transition-all duration-200 ease-out
-                           overflow-hidden"
-              >
-                <span className="relative z-10">Exam Snipe</span>
-              </button>
+              <div className="relative tools-dropdown">
+                <button
+                  onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
+                  className="relative inline-flex items-center rounded-xl px-4 py-2
+                             text-white bg-[var(--background)]/90 backdrop-blur-md
+                             border-0 outline-none focus:outline-none
+                             before:absolute before:inset-0 before:rounded-xl
+                             before:bg-gradient-to-r before:from-[#00E5FF] before:via-[#FF2D96] before:to-[#00E5FF]
+                             before:bg-[length:200%_200%] before:animate-[gradient-shift_15s_ease-in-out_infinite]
+                             before:p-[1px] before:content-['']
+                             after:absolute after:inset-[1px] after:rounded-xl
+                             after:bg-[var(--background)]/95 after:backdrop-blur-md
+                             shadow-[0_0_8px_rgba(0,229,255,0.3)]
+                             hover:shadow-[0_0_12px_rgba(0,229,255,0.4),0_0_18px_rgba(255,45,150,0.2)]
+                             hover:before:bg-[length:250%_250%]
+                             active:shadow-[0_0_4px_rgba(0,229,255,0.5),inset_0_0_8px_rgba(0,229,255,0.2)]
+                             transition-all duration-200 ease-out
+                             overflow-hidden"
+                >
+                  <span className="relative z-10">Tools</span>
+                  <svg
+                    className={`relative z-10 h-4 w-4 ml-1 transition-transform duration-200 ${toolsDropdownOpen ? 'rotate-180' : ''}`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {/* Tools Dropdown */}
+                {toolsDropdownOpen && (
+                  <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 z-50">
+                    <div className="relative rounded-xl p-2
+                                 bg-[var(--background)]/95 backdrop-blur-md
+                                 border border-transparent
+                                 before:absolute before:inset-0 before:rounded-xl
+                                 before:bg-gradient-to-r before:from-[#00E5FF] before:via-[#FF2D96] before:to-[#00E5FF]
+                                 before:bg-[length:200%_200%] before:animate-[gradient-shift_15s_ease-in-out_infinite]
+                                 before:p-[1px] before:content-['']
+                                 after:absolute after:inset-[1px] after:rounded-xl
+                                 after:bg-[var(--background)]/98 after:backdrop-blur-md
+                                 shadow-[0_0_10px_rgba(0,229,255,0.3)]
+                                 overflow-hidden">
+                      <div className="relative z-10 space-y-1 min-w-[160px]">
+                        <button
+                          onClick={() => {
+                            router.push('/exam-snipe');
+                            setToolsDropdownOpen(false);
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-lg bg-[var(--background)]/60 text-[var(--foreground)]
+                                     hover:bg-[var(--background)]/80 transition-colors text-sm"
+                        >
+                          Exam Snipe
+                        </button>
+                        <button
+                          onClick={() => {
+                            router.push('/readassist');
+                            setToolsDropdownOpen(false);
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-lg bg-[var(--background)]/60 text-[var(--foreground)]
+                                     hover:bg-[var(--background)]/80 transition-colors text-sm"
+                        >
+                          Read Assist
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Absolutely centered Pomodoro Timer */}

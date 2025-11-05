@@ -88,12 +88,6 @@ export default function Home() {
         <h1 className="text-xl font-semibold text-white">Your subjects</h1>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => router.push('/readassist')}
-            className="inline-flex h-10 items-center rounded-full border border-[#00E5FF] bg-[#00E5FF]/10 px-4 text-sm font-medium text-[#00E5FF] hover:bg-[#00E5FF]/20 transition-colors"
-          >
-            📄 ReadAssist
-          </button>
-          <button
             onClick={() => { setQuickLearnQuery(""); setQuickLearnOpen(true); }}
             className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 text-sm font-medium text-white hover:opacity-95"
           >
