@@ -7,17 +7,29 @@ import SettingsModal from "@/components/SettingsModal";
 
 // Loading Screen Component
 function LoadingScreen({ onComplete }: { onComplete: () => void }) {
-  useEffect(() => {
-    // Simulate loading time and then hide the screen
-    const timer = setTimeout(() => {
-      onComplete();
-    }, 2000); // Show for 2 seconds
+  const [isFadingOut, setIsFadingOut] = useState(false);
 
-    return () => clearTimeout(timer);
+  useEffect(() => {
+    // Start fade-out animation 500ms before completion
+    const fadeTimer = setTimeout(() => {
+      setIsFadingOut(true);
+    }, 1500); // Start fading at 1.5 seconds
+
+    // Complete loading after animation
+    const completeTimer = setTimeout(() => {
+      onComplete();
+    }, 2000); // Show for 2 seconds total
+
+    return () => {
+      clearTimeout(fadeTimer);
+      clearTimeout(completeTimer);
+    };
   }, [onComplete]);
 
   return (
-    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--background)]">
+    <div className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--background)] transition-all duration-500 ease-out ${
+      isFadingOut ? 'opacity-0 scale-95' : 'opacity-100 scale-100'
+    }`}>
       {/* Spinning gradient ring - same as Exam Snipe */}
       <div className="relative w-24 h-24">
         <div className="absolute inset-0 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-spin"
