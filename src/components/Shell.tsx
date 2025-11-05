@@ -190,7 +190,7 @@ function PomodoroTimer() {
       {/* Main Timer Display */}
       <button
         onClick={() => setShowSettings(!showSettings)}
-        className="relative inline-flex items-center justify-center gap-1 rounded-lg px-3 py-2 min-w-[100px]
+        className="relative inline-flex items-center justify-center gap-1 rounded-lg px-2.5 py-1.5 min-w-[100px]
                    text-white bg-[var(--background)]/90 backdrop-blur-md
                    shadow-[0_2px_8px_rgba(0,0,0,0.4)]
                    hover:shadow-[0_4px_12px_rgba(0,0,0,0.5)] hover:bg-[var(--background)]/95
@@ -235,15 +235,9 @@ function PomodoroTimer() {
         <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 z-50">
           <div className="relative rounded-xl p-4
                          bg-[var(--background)]/95 backdrop-blur-md
-                         border border-transparent
-                         before:absolute before:inset-0 before:rounded-xl
-                         before:bg-gradient-to-r before:from-[#00E5FF] before:via-[#FF2D96] before:to-[#00E5FF]
-                         before:bg-[length:200%_200%] before:animate-[gradient-shift_15s_ease-in-out_infinite]
-                         before:p-[1px] before:content-['']
-                         after:absolute after:inset-[1px] after:rounded-xl
-                         after:bg-[var(--background)]/98 after:backdrop-blur-md
+                         shadow-[0_4px_12px_rgba(0,0,0,0.4)]
                          overflow-hidden">
-            <div className="relative z-10 space-y-3 min-w-[220px]">
+            <div className="space-y-3 min-w-[220px]">
               <div className="text-center">
                 <h3 className="text-[var(--foreground)] font-semibold text-sm">Pomodoro Controls</h3>
               </div>
@@ -473,7 +467,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => router.push('/')}
-                className="relative inline-flex items-center rounded-xl px-4 py-2
+                className="relative inline-flex items-center rounded-xl px-3 py-1.5
                            text-white bg-[var(--background)]/90 backdrop-blur-md
                            shadow-[0_2px_8px_rgba(0,0,0,0.4)]
                            hover:shadow-[0_4px_12px_rgba(0,0,0,0.5)] hover:bg-[var(--background)]/95
@@ -484,7 +478,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               <div className="relative tools-dropdown">
                 <button
                   onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
-                  className="relative inline-flex items-center rounded-xl px-4 py-2
+                  className="relative inline-flex items-center rounded-xl px-3 py-1.5
                              text-white bg-[var(--background)]/90 backdrop-blur-md
                              shadow-[0_2px_8px_rgba(0,0,0,0.4)]
                              hover:shadow-[0_4px_12px_rgba(0,0,0,0.5)] hover:bg-[var(--background)]/95
@@ -506,15 +500,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 z-50">
                     <div className="relative rounded-xl p-2
                                  bg-[var(--background)]/95 backdrop-blur-md
-                                 border border-transparent
-                                 before:absolute before:inset-0 before:rounded-xl
-                                 before:bg-gradient-to-r before:from-[#00E5FF] before:via-[#FF2D96] before:to-[#00E5FF]
-                                 before:bg-[length:200%_200%] before:animate-[gradient-shift_15s_ease-in-out_infinite]
-                                 before:p-[1px] before:content-['']
-                                 after:absolute after:inset-[1px] after:rounded-xl
-                                 after:bg-[var(--background)]/98 after:backdrop-blur-md
+                                 shadow-[0_4px_12px_rgba(0,0,0,0.4)]
                                  overflow-hidden">
-                      <div className="relative z-10 space-y-1 min-w-[160px]">
+                      <div className="space-y-1 min-w-[160px]">
                         <button
                           onClick={() => {
                             router.push('/exam-snipe');
