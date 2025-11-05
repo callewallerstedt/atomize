@@ -104,7 +104,7 @@ export default function Home() {
             className={`relative rounded-2xl border border-[var(--accent-cyan)]/20 bg-[var(--background)] p-6 text-[var(--foreground)] transition-all duration-200 min-h-[80px] ${
               preparingSlug === s.slug
                 ? 'cursor-not-allowed opacity-75'
-                : 'cursor-pointer hover:border-[var(--accent-cyan)]/40 hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5'
+                : 'cursor-pointer hover:border-[var(--accent-cyan)]/40 hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5 hover:shadow-[0_4px_16px_rgba(0,0,0,0.8)]'
             }`}
             role="link"
             tabIndex={preparingSlug === s.slug ? -1 : 0}

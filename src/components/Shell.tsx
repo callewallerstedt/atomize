@@ -235,7 +235,7 @@ function PomodoroTimer() {
         <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 z-50">
           <div className="relative rounded-xl p-4
                          bg-[var(--background)]/95 backdrop-blur-md
-                         shadow-[0_4px_12px_rgba(0,0,0,0.4)]
+                         shadow-[0_4px_12px_rgba(0,0,0,0.7)]
                          overflow-hidden">
             <div className="space-y-3 min-w-[220px]">
               <div className="text-center">
@@ -378,7 +378,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       if (raw) {
         const t = JSON.parse(raw);
         const root = document.documentElement;
-        root.style.setProperty("--background", t.background || "#0F1216");
+        root.style.setProperty("--background", t.background || "#1a1d23");
         root.style.setProperty("--foreground", t.foreground || "#E5E7EB");
         root.style.setProperty("--accent-cyan", t.accentCyan || "#00E5FF");
         root.style.setProperty("--accent-pink", t.accentPink || "#FF2D96");
@@ -469,8 +469,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 onClick={() => router.push('/')}
                 className="relative inline-flex items-center rounded-xl px-3 py-1.5
                            text-white bg-[var(--background)]/90 backdrop-blur-md
-                           shadow-[0_2px_8px_rgba(0,0,0,0.4)]
-                           hover:shadow-[0_4px_12px_rgba(0,0,0,0.5)] hover:bg-[var(--background)]/95
+                           shadow-[0_2px_8px_rgba(0,0,0,0.7)]
+                           hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95
                            transition-all duration-200 ease-out"
               >
                 <span>Home</span>
@@ -500,7 +500,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 z-50">
                     <div className="relative rounded-xl p-2
                                  bg-[var(--background)]/95 backdrop-blur-md
-                                 shadow-[0_4px_12px_rgba(0,0,0,0.4)]
+                                 shadow-[0_4px_12px_rgba(0,0,0,0.7)]
                                  overflow-hidden">
                       <div className="space-y-1 min-w-[160px]">
                         <button
@@ -541,8 +541,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 onClick={() => setSettingsOpen(true)}
                 className="relative inline-flex h-10 w-10 items-center justify-center rounded-full
                            text-white bg-[var(--background)]/90 backdrop-blur-md
-                           shadow-[0_2px_8px_rgba(0,0,0,0.4)]
-                           hover:shadow-[0_4px_12px_rgba(0,0,0,0.5)] hover:bg-[var(--background)]/95
+                           shadow-[0_2px_8px_rgba(0,0,0,0.7)]
+                           hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95
                            transition-all duration-200 ease-out"
                 aria-label="Settings"
                 title="Settings"
