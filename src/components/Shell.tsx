@@ -191,31 +191,21 @@ function PomodoroTimer() {
       <button
         onClick={() => setShowSettings(!showSettings)}
         className="relative inline-flex items-center justify-center gap-1 rounded-lg px-3 py-2 min-w-[100px]
-                   text-white bg-[var(--background)]/90 backdrop-blur-md
-                   border-0 outline-none focus:outline-none
-                   before:absolute before:inset-0 before:rounded-lg
-                   before:bg-gradient-to-r before:from-[#00E5FF] before:via-[#FF2D96] before:to-[#00E5FF]
-                   before:bg-[length:200%_200%] before:animate-[gradient-shift_15s_ease-in-out_infinite]
-                   before:p-[1px] before:content-['']
-                   after:absolute after:inset-[1px] after:rounded-lg
-                   after:bg-[var(--background)]/95 after:backdrop-blur-md
-                   shadow-[0_0_8px_rgba(0,229,255,0.3)]
-                   hover:shadow-[0_0_12px_rgba(0,229,255,0.4),0_0_18px_rgba(255,45,150,0.2)]
-                   hover:before:bg-[length:250%_250%]
-                   active:shadow-[0_0_4px_rgba(0,229,255,0.5),inset_0_0_8px_rgba(0,229,255,0.2)]
-                   transition-all duration-300 ease-out
-                   overflow-hidden"
+                   text-white bg-[var(--background)]/90 backdrop-blur-md border border-[var(--accent-cyan)]/30
+                   shadow-lg shadow-[var(--accent-cyan)]/20
+                   hover:shadow-xl hover:shadow-[var(--accent-cyan)]/30 hover:bg-[var(--background)]/95
+                   transition-all duration-300 ease-out"
       >
         <div className="flex items-center gap-1.5">
-          <span className="relative z-10 font-mono text-xl font-bold leading-none">
+          <span className="font-mono text-xl font-bold leading-none">
             {formatTime(timeLeft)}
           </span>
-          <span className="relative z-10 text-xs opacity-75">
+          <span className="text-xs opacity-75">
             {isBreak ? 'BREAK' : 'STUDY'}
           </span>
         </div>
         <svg
-          className={`relative z-10 h-3 w-3 transition-transform duration-200 ${showSettings ? 'rotate-180' : ''}`}
+          className={`h-3 w-3 transition-transform duration-200 ${showSettings ? 'rotate-180' : ''}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -484,39 +474,25 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               <button
                 onClick={() => router.push('/')}
                 className="relative inline-flex items-center rounded-xl px-4 py-2
-                           text-white bg-[var(--background)]/90 backdrop-blur-md
-                           border-0 outline-none focus:outline-none
-                           before:absolute before:inset-0 before:rounded-xl
-                           before:bg-gradient-to-r before:from-[#00E5FF] before:via-[#FF2D96] before:to-[#00E5FF]
-                           before:bg-[length:200%_200%] before:animate-[gradient-shift_15s_ease-in-out_infinite]
-                           before:p-[1px] before:content-['']
-                           after:absolute after:inset-[1px] after:rounded-xl
-                           after:bg-[var(--background)]/95 after:backdrop-blur-md
-                           hover:before:bg-[length:250%_250%]
-                           transition-all duration-200 ease-out
-                           overflow-hidden"
+                           text-white bg-[var(--background)]/90 backdrop-blur-md border border-[var(--accent-cyan)]/30
+                           shadow-lg shadow-[var(--accent-cyan)]/20
+                           hover:shadow-xl hover:shadow-[var(--accent-cyan)]/30 hover:bg-[var(--background)]/95
+                           transition-all duration-200 ease-out"
               >
-                <span className="relative z-10">Home</span>
+                <span>Home</span>
               </button>
               <div className="relative tools-dropdown">
                 <button
                   onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
                   className="relative inline-flex items-center rounded-xl px-4 py-2
-                             text-white bg-[var(--background)]/90 backdrop-blur-md
-                             border-0 outline-none focus:outline-none
-                             before:absolute before:inset-0 before:rounded-xl
-                             before:bg-gradient-to-r before:from-[#00E5FF] before:via-[#FF2D96] before:to-[#00E5FF]
-                             before:bg-[length:200%_200%] before:animate-[gradient-shift_15s_ease-in-out_infinite]
-                             before:p-[1px] before:content-['']
-                             after:absolute after:inset-[1px] after:rounded-xl
-                             after:bg-[var(--background)]/95 after:backdrop-blur-md
-                             hover:before:bg-[length:250%_250%]
-                             transition-all duration-200 ease-out
-                             overflow-hidden"
+                             text-white bg-[var(--background)]/90 backdrop-blur-md border border-[var(--accent-cyan)]/30
+                             shadow-lg shadow-[var(--accent-cyan)]/20
+                             hover:shadow-xl hover:shadow-[var(--accent-cyan)]/30 hover:bg-[var(--background)]/95
+                             transition-all duration-200 ease-out"
                 >
-                  <span className="relative z-10">Tools</span>
+                  <span>Tools</span>
                   <svg
-                    className={`relative z-10 h-4 w-4 ml-1 transition-transform duration-200 ${toolsDropdownOpen ? 'rotate-180' : ''}`}
+                    className={`h-4 w-4 ml-1 transition-transform duration-200 ${toolsDropdownOpen ? 'rotate-180' : ''}`}
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -576,22 +552,15 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               <button
                 onClick={() => setSettingsOpen(true)}
                 className="relative inline-flex h-10 w-10 items-center justify-center rounded-full
-                           text-white bg-[var(--background)]/90 backdrop-blur-md
-                           border-0 outline-none focus:outline-none
-                           before:absolute before:inset-0 before:rounded-full
-                           before:bg-gradient-to-r before:from-[#00E5FF] before:via-[#FF2D96] before:to-[#00E5FF]
-                           before:bg-[length:200%_200%] before:animate-[gradient-shift_15s_ease-in-out_infinite]
-                           before:p-[1px] before:content-['']
-                           after:absolute after:inset-[1px] after:rounded-full
-                           after:bg-[var(--background)]/95 after:backdrop-blur-md
-                           hover:before:bg-[length:250%_250%]
-                           transition-all duration-200 ease-out
-                           overflow-hidden"
+                           text-white bg-[var(--background)]/90 backdrop-blur-md border border-[var(--accent-cyan)]/30
+                           shadow-lg shadow-[var(--accent-cyan)]/20
+                           hover:shadow-xl hover:shadow-[var(--accent-cyan)]/30 hover:bg-[var(--background)]/95
+                           transition-all duration-200 ease-out"
                 aria-label="Settings"
                 title="Settings"
               >
                 {/* Settings icon */}
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90 relative z-10">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
                   <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" stroke="currentColor" strokeWidth="1.5"/>
                   <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5"/>
                 </svg>
