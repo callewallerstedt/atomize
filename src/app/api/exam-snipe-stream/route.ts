@@ -51,43 +51,21 @@ export async function POST(req: NextRequest) {
               const uint8 = new Uint8Array(bytes);
               console.log(`Converted ${file.name} to Uint8Array, size: ${uint8.length} bytes`);
 
-              // Use pdfjs-dist only (multiple import fallbacks) with disableWorker
-              const tryPdfJsExtract = async (): Promise<string> => {
-                const tryImports = [
-                  () => import('pdfjs-dist' as any),
-                  () => import('pdfjs-dist/build/pdf.mjs' as any),
-                  () => import('pdfjs-dist/legacy/build/pdf.mjs' as any),
-                ];
-                let lastErr: any = null;
-                for (const loader of tryImports) {
-                  try {
-                    const lib: any = await loader();
-                    const getDocument = lib.getDocument || lib?.default?.getDocument;
-                    if (!getDocument) throw new Error('getDocument not available');
-                    const loadingTask = getDocument({ data: uint8, disableWorker: true });
-                    const pdf = await loadingTask.promise;
-                    let fullText = '';
-                    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-                      const page = await pdf.getPage(pageNum);
-                      const textContent = await page.getTextContent();
-                      const pageText = (textContent.items || [])
-                        .map((item: any) => (item && typeof item.str === 'string' ? item.str : ''))
-                        .join(' ');
-                      fullText += pageText + '\n';
-                    }
-                    return fullText;
-                  } catch (err) {
-                    lastErr = err;
-                    continue;
-                  }
-                }
-                throw lastErr || new Error('Failed to import/use pdfjs-dist');
-              };
-
-              console.log(`Attempting pdfjs-dist text extraction on ${file.name}...`);
-              const text = await tryPdfJsExtract();
-              console.log(`pdfjs-dist extracted ${text.length} chars from ${file.name}`);
-              examTexts.push({ name: file.name, text: text && text.trim().length ? text : `PDF: ${file.name} - Text extraction failed (no readable text).` });
+              // Use pdf-parse (simple and reliable)
+              console.log(`Attempting PDF text extraction on ${file.name}...`);
+              const pdfParse = require('pdf-parse');
+              const buffer = Buffer.from(uint8);
+              const data = await pdfParse(buffer);
+              
+              console.log(`PDF loaded: ${data.numpages} pages, ${data.text.length} chars`);
+              
+              if (data.text && data.text.trim().length > 0) {
+                examTexts.push({ name: file.name, text: data.text.trim() });
+                console.log(`✓ Successfully extracted ${data.text.length} chars from ${file.name}`);
+              } else {
+                examTexts.push({ name: file.name, text: `PDF: ${file.name} - No readable text found in PDF` });
+                console.log(`⚠ No text found in ${file.name}`);
+              }
             } catch (err: any) {
               console.error(`Server extraction failed for ${file.name}:`, err?.message);
               examTexts.push({ name: file.name, text: `PDF: ${file.name} - Text extraction failed: ${err?.message || 'unknown error'}` });
@@ -138,10 +116,15 @@ For each concept/method, provide:
 5. **Points per hour** - calculate as: (avg_points_number * frequency * recency_bonus) / study_time_hours
    - recency_bonus = 1.3 if appears in FIRST exam, 1.2 if in first TWO exams, 1.1 if in first THREE exams, otherwise 1.0
    - This prioritizes concepts that appear in early exams
-6. **Details** - Array of specific questions/topics found under this broader concept. For each detail include:
-   - topic: The specific question or subtopic (e.g., "Implement monitor with wait/signal")
-   - points: Points for this specific question (e.g., "8p")
-   - exam: Which exam it appeared in (e.g., "Exam 1", "Exam 2")
+6. **Details** - Array of specific sub-concepts you should learn under this broader concept. For each detail include:
+   - name: A specific concept/topic to learn (e.g., "Monitor Synchronization", "Semaphore Operations", "Race Condition Detection")
+   - description: 1-2 sentences explaining what this specific concept is
+   - example: A more detailed example showing the concept in action (5-15 words, e.g., "Using wait() to block a thread and signal() to wake it up", "Producer adds items to buffer, consumer removes them safely")
+   - difficulty: "beginner", "intermediate", or "advanced"
+   - priority: "high", "medium", or "low" based on how fundamental it is
+   - components: Comma-separated list of specific technical components/skills to master (e.g., "Pid ! message, receive pattern matching, message queues, process linking, error handling")
+   - learning_objectives: 3-5 specific learning objectives (e.g., "Send messages between Erlang processes using Pid ! Message, Implement receive blocks with pattern matching, Handle process failures with linking")
+   - common_pitfalls: 2-3 common mistakes students make (e.g., "Forgetting to handle all message patterns in receive, Not understanding message delivery is asynchronous, Ignoring process monitoring")
 
 IMPORTANT:
 - Go through ALL questions in ALL exams - don't miss any
@@ -151,6 +134,7 @@ IMPORTANT:
 - Calculate Points/Hour CORRECTLY with recency bonus
 - Sort concepts by pointsPerHour in DESCENDING order (highest first)
 - Provide detailed breakdown in the "details" array so users can see exactly what questions fall under each concept
+- CRITICAL COVERAGE RULE: Include ALL concepts that appear in at least two-thirds (\u2265 2/3) of the exams (ceil(2/3 * totalExams)). Do NOT cap the number of concepts returned. If many concepts meet this threshold, return them all.
 
 Return JSON in this EXACT format:
 {
@@ -165,21 +149,31 @@ Return JSON in this EXACT format:
       "pointsPerHour": "10.0",
       "details": [
         {
-          "topic": "Specific question or subtopic found",
-          "points": "8p",
-          "exam": "Exam 1"
+          "name": "Monitor Synchronization",
+          "description": "Monitors provide a high-level synchronization mechanism using condition variables for thread coordination.",
+          "example": "Using wait() to block a thread when a condition is false and signal() to wake waiting threads",
+          "difficulty": "intermediate",
+          "priority": "high",
+          "components": "wait() method, signal() method, condition variables, mutual exclusion, deadlock prevention",
+          "learning_objectives": "Implement wait() and signal() operations correctly, Understand condition variable semantics, Prevent race conditions in monitor usage, Handle deadlock scenarios",
+          "common_pitfalls": "Calling signal() before wait(), Forgetting to recheck conditions after waking, Not understanding monitor mutual exclusion"
         },
         {
-          "topic": "Another specific question",
-          "points": "10p",
-          "exam": "Exam 2"
+          "name": "Erlang Messaging",
+          "description": "Erlang uses message passing between lightweight processes for concurrency and fault tolerance.",
+          "example": "Process sends message to another process and waits for response using pattern matching",
+          "difficulty": "intermediate",
+          "priority": "high",
+          "components": "Pid ! message, receive pattern matching, message queues, process linking, error handling, spawn() function",
+          "learning_objectives": "Send messages between Erlang processes using Pid ! Message syntax, Implement receive blocks with proper pattern matching, Handle process failures with linking and monitoring, Understand asynchronous message delivery",
+          "common_pitfalls": "Forgetting to handle all message patterns in receive blocks, Not understanding that message delivery is asynchronous, Ignoring process monitoring for fault tolerance"
         }
       ]
     }
   ]
 }
 
-The concepts array MUST be sorted by pointsPerHour descending.`
+The concepts array MUST be sorted by pointsPerHour descending. Ensure all concepts meeting the 2/3 coverage threshold are included in the array.`
             },
             {
               role: 'user',

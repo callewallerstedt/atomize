@@ -8,50 +8,73 @@ type Theme = {
   foreground: string;
   accentCyan: string;
   accentPink: string;
+  isLightMode?: boolean;
 };
 
-const DEFAULTS: Theme = {
+const DARK_DEFAULTS: Theme = {
   background: "#0F1216",
   foreground: "#E5E7EB",
   accentCyan: "#00E5FF",
   accentPink: "#FF2D96",
+  isLightMode: false,
+};
+
+const LIGHT_DEFAULTS: Theme = {
+  background: "#F8FAFC",
+  foreground: "#1E293B",
+  accentCyan: "#0EA5E9",
+  accentPink: "#EC4899",
+  isLightMode: true,
 };
 
 function applyTheme(t: Theme) {
+  console.log('Applying theme:', t);
   const root = document.documentElement;
   root.style.setProperty("--background", t.background);
   root.style.setProperty("--foreground", t.foreground);
   root.style.setProperty("--accent-cyan", t.accentCyan);
   root.style.setProperty("--accent-pink", t.accentPink);
   root.style.setProperty("--accent-grad", `linear-gradient(90deg, ${t.accentCyan}, ${t.accentPink})`);
+
+  // Handle light/dark mode class
+  if (t.isLightMode) {
+    console.log('Adding light-mode class');
+    root.classList.add('light-mode');
+  } else {
+    console.log('Removing light-mode class');
+    root.classList.remove('light-mode');
+  }
 }
 
 export default function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [theme, setTheme] = useState<Theme>(DEFAULTS);
+  const [theme, setTheme] = useState<Theme>(DARK_DEFAULTS);
+  const [isLightMode, setIsLightMode] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     try {
       const raw = localStorage.getItem("atomicTheme");
-      const saved = raw ? (JSON.parse(raw) as Theme) : DEFAULTS;
-      setTheme({ ...DEFAULTS, ...saved });
+      const saved = raw ? (JSON.parse(raw) as Theme) : DARK_DEFAULTS;
+      const mode = saved.isLightMode ?? false;
+      setIsLightMode(mode);
+      setTheme({ ...(mode ? LIGHT_DEFAULTS : DARK_DEFAULTS), ...saved });
     } catch {
-      setTheme(DEFAULTS);
+      setTheme(DARK_DEFAULTS);
+      setIsLightMode(false);
     }
   }, [open]);
 
-  function save() {
-    applyTheme(theme);
-    localStorage.setItem("atomicTheme", JSON.stringify(theme));
-    onClose();
+  function toggleLightMode() {
+    const newMode = !isLightMode;
+    console.log('Toggling to:', newMode ? 'light' : 'dark');
+    setIsLightMode(newMode);
+    const newTheme = { ...(newMode ? LIGHT_DEFAULTS : DARK_DEFAULTS), isLightMode: newMode };
+    console.log('New theme:', newTheme);
+    setTheme(newTheme);
+    applyTheme(newTheme);
+    localStorage.setItem("atomicTheme", JSON.stringify(newTheme));
   }
 
-  function reset() {
-    setTheme(DEFAULTS);
-    applyTheme(DEFAULTS);
-    localStorage.setItem("atomicTheme", JSON.stringify(DEFAULTS));
-    onClose();
-  }
 
   return (
     <Modal
@@ -59,32 +82,31 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
       onClose={onClose}
       title="Settings"
       footer={
-        <div className="flex items-center justify-between">
-          <button onClick={reset} className="inline-flex h-9 items-center rounded-full bg-[#141923] px-4 text-sm text-[#E5E7EB] hover:bg-[#1B2030]">Reset</button>
-          <div className="flex items-center gap-2">
-            <button onClick={onClose} className="inline-flex h-9 items-center rounded-full bg-[#141923] px-4 text-sm text-[#E5E7EB] hover:bg-[#1B2030]">Cancel</button>
-            <button onClick={save} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white" style={{ backgroundImage: "var(--accent-grad)" }}>Save</button>
-          </div>
+        <div className="flex justify-end">
+          <button onClick={onClose} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white" style={{ backgroundImage: "var(--accent-grad)" }}>Close</button>
         </div>
       }
     >
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div>
-          <label className="mb-1 block text-xs text-[#A7AFBE]">Background</label>
-          <input type="color" value={theme.background} onChange={(e) => { if (!e.target) return; setTheme((t) => ({ ...t, background: e.target.value })); }} className="h-10 w-full cursor-pointer rounded-xl border border-[#222731] bg-[#0F141D]" />
+      {/* Light/Dark Mode Toggle */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-[var(--foreground)]">Theme</span>
+          <button
+            onClick={toggleLightMode}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              isLightMode ? 'bg-[#0EA5E9]' : 'bg-[#374151]'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                isLightMode ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
         </div>
-        <div>
-          <label className="mb-1 block text-xs text-[#A7AFBE]">Foreground</label>
-          <input type="color" value={theme.foreground} onChange={(e) => { if (!e.target) return; setTheme((t) => ({ ...t, foreground: e.target.value })); }} className="h-10 w-full cursor-pointer rounded-xl border border-[#222731] bg-[#0F141D]" />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs text-[#A7AFBE]">Accent cyan</label>
-          <input type="color" value={theme.accentCyan} onChange={(e) => { if (!e.target) return; setTheme((t) => ({ ...t, accentCyan: e.target.value })); }} className="h-10 w-full cursor-pointer rounded-xl border border-[#222731] bg-[#0F141D]" />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs text-[#A7AFBE]">Accent pink</label>
-          <input type="color" value={theme.accentPink} onChange={(e) => { if (!e.target) return; setTheme((t) => ({ ...t, accentPink: e.target.value })); }} className="h-10 w-full cursor-pointer rounded-xl border border-[#222731] bg-[#0F141D]" />
-        </div>
+        <p className="mt-1 text-xs text-[#A7AFBE]">
+          {isLightMode ? 'Light mode' : 'Dark mode'}
+        </p>
       </div>
     </Modal>
   );

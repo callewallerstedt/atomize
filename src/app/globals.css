@@ -185,3 +185,72 @@ select {
     rgba(255, 45, 150, 0) 100%
   );
 }
+
+/* Light mode styles */
+.light-mode {
+  --background: #F8FAFC;
+  --foreground: #1E293B;
+  --accent-cyan: #0EA5E9;
+  --accent-pink: #EC4899;
+  --accent-grad: linear-gradient(90deg, #0EA5E9, #EC4899);
+}
+
+.light-mode body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Light mode specific adjustments for various components */
+.light-mode .lesson-content {
+  color: #1E293B;
+}
+
+.light-mode .lesson-content strong {
+  color: #0F172A;
+}
+
+.light-mode .lesson-content pre,
+.light-mode .lesson-content code {
+  background-color: #F1F5F9;
+  border-color: #E2E8F0;
+}
+
+.light-mode .lesson-content blockquote {
+  border-left-color: #CBD5E1;
+  color: #475569;
+}
+
+/* Adjust button colors for light mode */
+.light-mode button {
+  color: var(--foreground);
+}
+
+/* Light mode header and navigation */
+.light-mode {
+  background: #F8FAFC;
+  color: #1E293B;
+}
+
+/* Input fields in light mode */
+.light-mode input,
+.light-mode textarea,
+.light-mode select {
+  background-color: #F8FAFC;
+  border-color: #E2E8F0;
+  color: #1E293B;
+}
+
+/* Modal backgrounds in light mode */
+.light-mode .modal-backdrop {
+  background-color: rgba(241, 245, 249, 0.8);
+}
+
+/* Futuristic button gradient animation */
+@keyframes gradient-shift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}

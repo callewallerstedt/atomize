@@ -83,7 +83,7 @@ export default function Home() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#0F1216] px-6 py-10">
+    <div className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] px-6 py-10">
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
         <h1 className="text-xl font-semibold text-white">Your subjects</h1>
         <div className="flex items-center gap-3">

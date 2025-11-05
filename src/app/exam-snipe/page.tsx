@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { saveSubjectData, StoredSubjectData } from "@/utils/storage";
 
 export default function ExamSnipePage() {
   const router = useRouter();
@@ -9,8 +10,14 @@ export default function ExamSnipePage() {
   const [examAnalyzing, setExamAnalyzing] = useState(false);
   const [examResults, setExamResults] = useState<any>(null);
   const [expandedConcept, setExpandedConcept] = useState<number | null>(null);
+  const [selectedSubConcept, setSelectedSubConcept] = useState<{conceptIndex: number, subConceptIndex: number} | null>(null);
+  const [generatingLesson, setGeneratingLesson] = useState(false);
   const [progress, setProgress] = useState(0);
   const [streamingText, setStreamingText] = useState<string>("");
+  const [showTextInput, setShowTextInput] = useState(false);
+  const [manualTexts, setManualTexts] = useState<Array<{name: string, text: string}>>([]);
+  const [currentTextName, setCurrentTextName] = useState("");
+  const [currentTextContent, setCurrentTextContent] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamContainerRef = useRef<HTMLDivElement>(null);
 
@@ -24,37 +31,16 @@ export default function ExamSnipePage() {
   async function handleExamSnipe() {
     if (examFiles.length === 0) return;
     
-    let progressInterval: NodeJS.Timeout | null = null;
-    let inchInterval: NodeJS.Timeout | null = null;
-    
+    let animationId: number | null = null;
+    let shimmerAnimation: number | null = null;
+
     try {
       setExamAnalyzing(true);
       setProgress(0);
       setStreamingText("");
-      
-      // Start progress bar animation - reach 95% in 35 seconds
-      progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev >= 95) {
-            if (progressInterval) clearInterval(progressInterval);
-            return 95;
-          }
-          return prev + (95 / 350); // 95% over 35 seconds (350 steps of 100ms)
-        });
-      }, 100);
-      
-      // After 35 seconds, inch up slowly
-      const inchTimeout = setTimeout(() => {
-        inchInterval = setInterval(() => {
-          setProgress(prev => {
-            if (prev >= 99) {
-              if (inchInterval) clearInterval(inchInterval);
-              return 99;
-            }
-            return prev + 1; // Inch up by 1% every 3 seconds
-          });
-        }, 3000);
-      }, 35000);
+
+      // Dynamic progress based on streaming data
+      let streamStartTime: number | null = null;
       
       console.log('=== FRONTEND: SENDING FILES ===');
       console.log(`Sending ${examFiles.length} files:`);
@@ -80,23 +66,27 @@ export default function ExamSnipePage() {
         throw new Error('Failed to analyze exams');
       }
 
+      // PDF parsing complete, AI processing starting
+      setProgress(20);
+
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
       let fullText = '';
+      let chunkCount = 0;
 
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          
+
           const chunk = decoder.decode(value);
           const lines = chunk.split('\n');
-          
+
           for (const line of lines) {
             if (line.startsWith('data: ')) {
               const data = line.slice(6);
               if (data === '[DONE]') continue;
-              
+
               try {
                 const parsed = JSON.parse(data);
                 console.log('=== FRONTEND RECEIVED ===');
@@ -104,12 +94,43 @@ export default function ExamSnipePage() {
                 if (parsed.type === 'text') {
                   console.log('Content:', parsed.content);
                   fullText += parsed.content;
+                  chunkCount++;
                   setStreamingText(fullText);
                   console.log('Streaming text updated:', fullText.length, 'chars');
+
+                  // Structured progress based on AI response phases
+                  // 0-20%: PDF parsing complete
+                  // 20-40%: Reading and analyzing exam content
+                  // 40-60%: Identifying patterns and grade requirements
+                  // 60-80%: Extracting and categorizing concepts
+                  // 80-95%: Generating detailed breakdowns
+                  // 95-100%: Finalizing results
+
+                  let streamProgress = 20; // Base after parsing
+                  const content = fullText.toLowerCase();
+
+                  if (content.includes('grade') || content.includes('requirement')) {
+                    streamProgress = 45; // Found grade analysis
+                  } else if (content.includes('pattern') || content.includes('consistent')) {
+                    streamProgress = 50; // Found pattern analysis
+                  } else if (content.includes('concept') || content.includes('method')) {
+                    streamProgress = 65; // Started concept extraction
+                  } else if (content.includes('frequency') || content.includes('points')) {
+                    streamProgress = 80; // Analyzing frequencies/points
+                  } else if (content.includes('detail') || content.includes('breakdown')) {
+                    streamProgress = 90; // Creating detailed breakdowns
+                  } else {
+                    // Incremental progress based on chunk count
+                    streamProgress = Math.min(40, 20 + (chunkCount * 1.5));
+                  }
+
+                  setProgress(Math.min(95, streamProgress));
+
                 } else if (parsed.type === 'done') {
                   console.log('Analysis complete! Data keys:', Object.keys(parsed.data || {}));
                   console.log('Concepts found:', parsed.data?.concepts?.length || 0);
                   setExamResults(parsed.data);
+                  setProgress(100);
                 } else if (parsed.type === 'error') {
                   console.error('AI returned error:', parsed.error);
                   throw new Error(parsed.error || 'Analysis failed');
@@ -123,33 +144,32 @@ export default function ExamSnipePage() {
         }
       }
       
-      // Clean up intervals
-      if (progressInterval) clearInterval(progressInterval);
-      if (inchInterval) clearInterval(inchInterval);
-      clearTimeout(inchTimeout);
+      // Clean up animations
+      if (animationId) cancelAnimationFrame(animationId);
+      if (shimmerAnimation) cancelAnimationFrame(shimmerAnimation);
       setProgress(100);
     } catch (err: any) {
       console.error('Exam analysis error:', err);
       alert(err?.message || 'Failed to analyze exams');
       
-      // Clean up intervals on error
-      if (progressInterval) clearInterval(progressInterval);
-      if (inchInterval) clearInterval(inchInterval);
+      // Clean up animations on error
+      if (animationId) cancelAnimationFrame(animationId);
+      if (shimmerAnimation) cancelAnimationFrame(shimmerAnimation);
     } finally {
       setExamAnalyzing(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-[#0F1216] text-white">
+    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
       <div className="mx-auto max-w-4xl px-6 py-20">
         {!examResults ? (
           <>
             {!examAnalyzing ? (
               <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8">
                 <div className="text-center max-w-2xl">
-                  <h2 className="text-3xl font-bold text-white mb-4">Exam Snipe</h2>
-                  <p className="text-lg text-[#A7AFBE] leading-relaxed">
+                  <h2 className="text-3xl font-bold text-[var(--foreground)] mb-4">Exam Snipe</h2>
+                  <p className="text-lg text-[var(--foreground)]/70 leading-relaxed">
                     Upload your old exams and let AI analyze them to find the highest-value concepts to study.
                     Discover which topics appear most frequently and give you the best return on study time.
                   </p>
@@ -177,14 +197,14 @@ export default function ExamSnipePage() {
                     className="hidden"
                   />
                   {examFiles.length === 0 ? (
-                    <div className="text-[#A7AFBE] text-lg">
+                    <div className="text-[var(--foreground)]/70 text-lg">
                       Click here or drop all the old exams
                     </div>
                   ) : (
                     <div className="space-y-3">
                       <div className="text-[#00E5FF] font-semibold text-lg mb-4">{examFiles.length} file(s) selected</div>
                       {examFiles.map((f, i) => (
-                        <div key={i} className="text-[#E5E7EB] text-sm">
+                        <div key={i} className="text-[var(--foreground)] text-sm">
                           {f.name}
                         </div>
                       ))}
@@ -212,45 +232,43 @@ export default function ExamSnipePage() {
                   </div>
                 </div>
                 
-                <div className="text-center space-y-4">
-                  <div className="text-lg font-semibold text-white mb-1">
-                    {progress >= 100 ? 'Worth the wait... probably 🐌' : 
-                     progress >= 95 ? 'Almost there...' : 
-                     'Analyzing Exams...'}
-                  </div>
-                  <div className="text-sm text-[#A7AFBE]">
-                    {progress >= 100 ? 'Taking its sweet time, aren\'t we?' :
-                     'AI is reading your PDFs and finding patterns'}
-                  </div>
-                  
-                  {/* Progress bar */}
-                  <div className="w-80 mx-auto">
-                    <div className="h-2 rounded-full bg-[#1A1F2E] overflow-hidden">
-                      <div 
-                        className="h-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] transition-all duration-300 ease-out"
-                        style={{ width: `${progress}%` }}
-                      />
-                    </div>
-                    <div className="text-xs text-[#6B7280] mt-2">{Math.round(progress)}%</div>
-                  </div>
+                  <div className="text-center space-y-4">
+                    <div className="text-lg font-semibold text-[var(--foreground)] mb-1">Analyzing Exams...</div>
+                    <div className="text-sm text-[var(--foreground)]/70">This can take up to 1 minute</div>
                   
                   {/* Streaming AI output */}
                   {streamingText && (
-                    <div className="mt-6 w-full max-w-2xl mx-auto">
-                      <div className="text-xs font-semibold text-[#A7AFBE] mb-2 text-center">Raw output:</div>
-                      <div className="relative rounded-lg bg-[#0B0E12] p-4 overflow-hidden">
-                        {/* Neon gradient glow border */}
-                        <div className="absolute inset-0 rounded-lg bg-gradient-to-r from-[#00E5FF] via-[#FF2D96] to-[#00E5FF] opacity-30 blur-sm"></div>
-                        <div className="absolute inset-[2px] rounded-lg bg-[#0B0E12]"></div>
-                        
-                        {/* Scrolling text container */}
-                        <div ref={streamContainerRef} className="relative h-32 overflow-y-auto overflow-x-hidden">
-                          <div className="p-3">
-                            <div className="text-sm font-mono text-[#00E5FF] whitespace-pre-wrap break-words leading-relaxed">
-                              {streamingText}
-                              <span className="inline-block w-1.5 h-3 bg-[#00E5FF] animate-pulse ml-1"></span>
-                            </div>
+                    <div className="mt-6 w-[28rem] mx-auto">
+                      <div className="text-xs font-semibold text-[var(--foreground)]/70 mb-2 text-center">AI Processing:</div>
+                      <div className="relative rounded-lg overflow-hidden h-20 bg-gradient-to-b from-[var(--background)] via-[var(--background)]/80 to-[var(--background)]">
+                        {/* Content */}
+                        <div className="relative p-4 h-full flex flex-col justify-end">
+                          <div className="text-sm font-mono whitespace-pre-wrap break-words leading-relaxed text-left">
+                            {(() => {
+                              const lines = streamingText.split('\n').filter(line => line.trim());
+                              const recentLines = lines.slice(-3); // Show only last 3 lines
+
+                              return recentLines.map((line, i) => {
+                                const isCurrentLine = i === recentLines.length - 1;
+                                // Always render gradient text
+                                const gradientText = 'bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] bg-clip-text text-transparent';
+
+                                return (
+                                  <div key={i} className={gradientText}>
+                                    {line}
+                                    {isCurrentLine && (
+                                      <span className="inline-block w-1.5 h-3 bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-pulse ml-1"></span>
+                                    )}
+                                  </div>
+                                );
+                              });
+                            })()}
                           </div>
+                        </div>
+                        {/* Fixed blur overlay */}
+                        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[var(--background)] pointer-events-none">
+                          <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[var(--background)] to-transparent blur-[1px] opacity-60"></div>
+                          <div className="absolute bottom-0 left-0 right-0 h-4 bg-gradient-to-t from-[var(--background)] to-transparent blur-[2px] opacity-40"></div>
                         </div>
                       </div>
                     </div>
@@ -261,132 +279,323 @@ export default function ExamSnipePage() {
           </>
         ) : (
           <>
-            {/* Summary Header */}
-            <div className="mb-6 rounded-xl border border-[#222731] bg-[#0B0E12] p-6">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-xl font-bold text-white">📊 Analysis Results</h2>
+            {/* Analysis Results Header */}
+            <div className="mb-6 rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 backdrop-blur-sm p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-[var(--foreground)]">Analysis Results</h2>
                 <button
                   onClick={() => {
                     setExamResults(null);
                     setExamFiles([]);
                   }}
-                  className="rounded-lg bg-[#1A1F2E] px-4 py-2 text-sm text-[#E5E7EB] hover:bg-[#2B3140] transition-colors"
+                  className="rounded-lg bg-[var(--background)]/60 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/80 transition-colors border border-[var(--accent-cyan)]/20"
                 >
                   Analyze New Exams
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-4 mb-4">
+
+              <div className="grid grid-cols-2 gap-4 mb-6">
                 <div>
-                  <div className="text-xs text-[#A7AFBE] mb-1">Exams Analyzed</div>
-                  <div className="text-2xl font-bold text-[#00E5FF]">{examResults.totalExams}</div>
+                  <div className="text-xs text-[var(--foreground)]/70 mb-1">Exams Analyzed</div>
+                  <div className="text-2xl font-bold text-[var(--foreground)]">{examResults.totalExams}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-[#A7AFBE] mb-1">Concepts Found</div>
-                  <div className="text-2xl font-bold text-[#FF2D96]">{examResults.concepts.length}</div>
+                  <div className="text-xs text-[var(--foreground)]/70 mb-1">Concepts Found</div>
+                  <div className="text-2xl font-bold text-[var(--foreground)]">{examResults.concepts.length}</div>
                 </div>
               </div>
 
               {examResults.gradeInfo && (
-                <div className="rounded-lg bg-[#1A1F2E] p-4 border border-[#2B3140]">
-                  <div className="text-sm font-semibold text-white mb-2">📈 Grade Requirements:</div>
-                  <div className="text-sm text-[#E5E7EB]">{examResults.gradeInfo}</div>
+                <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--accent-cyan)]/20 mb-4">
+                  <div className="text-sm font-semibold text-[var(--foreground)] mb-2">Grade Requirements</div>
+                  <div className="text-sm text-[var(--foreground)]">{examResults.gradeInfo}</div>
                 </div>
               )}
-            </div>
 
-            {/* Pattern Analysis */}
-            {examResults.patternAnalysis && (
-              <div className="mb-6 rounded-xl border border-[#2B3140] bg-[#1A1F2E] p-6">
-                <h3 className="text-base font-semibold text-white mb-2">🔍 Pattern Analysis</h3>
-                <p className="text-sm text-[#E5E7EB] leading-relaxed">
-                  {examResults.patternAnalysis}
-                </p>
-              </div>
-            )}
-
-            {/* Study Strategy */}
-            <div className="mb-6 rounded-xl border border-[#2B3140] bg-[#1A1F2E] p-6">
-              <h3 className="text-base font-semibold text-white mb-2">💡 Study Strategy</h3>
-              <p className="text-sm text-[#E5E7EB] mb-3">
-                Focus on concepts with the highest <span className="font-semibold text-white">Points/Hour</span> ratio. 
-                These give you the best return on your study time investment. Concepts appearing in early exams are boosted in priority.
-              </p>
-              <div className="text-sm text-[#A7AFBE]">
-                <strong>Top 3 priorities:</strong> Start with concepts ranked 1-3 below. 
-                These appear frequently, especially in recent exams, making them the most efficient targets.
-              </div>
+              {examResults.patternAnalysis && (
+                <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--accent-cyan)]/20">
+                  <div className="text-sm font-semibold text-[var(--foreground)] mb-2">Pattern Analysis</div>
+                  <div className="text-sm text-[var(--foreground)] leading-relaxed">
+                    {examResults.patternAnalysis}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Results List */}
             <div className="space-y-3">
               {examResults.concepts.map((concept: any, i: number) => (
-                <div key={i} className="rounded-xl border border-[#2B3140] bg-[#1A1F2E] overflow-hidden">
-                  <div 
-                    className="flex items-center gap-4 p-4 cursor-pointer hover:bg-[#222833] transition-colors"
+                <div key={i} className="rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 overflow-hidden">
+                  <div
+                    className="flex items-center gap-4 p-4 cursor-pointer hover:bg-[var(--background)]/80 transition-colors"
                     onClick={() => setExpandedConcept(expandedConcept === i ? null : i)}
                   >
-                    <span className={`flex-shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${
-                      i === 0 ? 'bg-[#2B3140] text-[#FFD700]' :
-                      i === 1 ? 'bg-[#2B3140] text-[#C0C0C0]' :
-                      i === 2 ? 'bg-[#2B3140] text-[#CD7F32]' :
-                      'bg-[#2B3140] text-[#6B7280]'
+                    <span className={`flex-shrink-0 inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold border ${
+                      i === 0 ? 'bg-[var(--background)]/80 text-[#FFD700] border-yellow-500/50' :
+                      i === 1 ? 'bg-[var(--background)]/80 text-[#C0C0C0] border-gray-400/50' :
+                      i === 2 ? 'bg-[var(--background)]/80 text-[#CD7F32] border-orange-500/50' :
+                      'bg-[var(--background)]/80 text-[var(--foreground)]/70 border-[var(--accent-cyan)]/30'
                     }`}>
                       {i + 1}
                     </span>
                     
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-white text-sm">{concept.name}</div>
-                      <div className="text-xs text-[#A7AFBE] mt-1">
+                      <div className="font-medium text-[var(--foreground)] text-sm">{concept.name}</div>
+                      <div className="text-xs text-[var(--foreground)]/70 mt-1">
                         {concept.frequency}/{examResults.totalExams} exams • {concept.estimatedTime} study time • {concept.avgPoints}
                       </div>
                     </div>
                     
-                    <div className="flex-shrink-0 text-right">
-                      <div className="text-lg font-bold text-white">{concept.pointsPerHour}</div>
-                      <div className="text-xs text-[#A7AFBE]">pts/hr</div>
-                    </div>
                     
-                    <div className="flex-shrink-0 text-[#6B7280]">
+                    <div className="flex-shrink-0 text-[var(--foreground)]/50">
                       {expandedConcept === i ? '▼' : '▶'}
                     </div>
                   </div>
                   
                   {expandedConcept === i && concept.details && (
-                    <div className="border-t border-[#2B3140] bg-[#141821] p-4">
-                      <div className="text-xs font-semibold text-[#A7AFBE] mb-2">Specific Questions/Topics Found:</div>
-                      <ul className="space-y-2">
+                    <div className="border-t border-[var(--accent-cyan)]/20 bg-[var(--background)]/40 p-4">
+                      <div className="text-xs font-semibold text-[var(--foreground)]/70 mb-3">Key Concepts to Learn:</div>
+                      <div className="grid gap-3">
                         {concept.details.map((detail: any, di: number) => (
-                          <li key={di} className="text-sm text-[#E5E7EB] flex items-start gap-2">
-                            <span className="text-[#6B7280] mt-0.5">•</span>
-                            <div className="flex-1">
-                              <div>{detail.topic}</div>
-                              {detail.points && (
-                                <div className="text-xs text-[#A7AFBE] mt-0.5">
-                                  {detail.points} • {detail.exam}
+                          <div
+                            key={di}
+                            className="bg-[var(--background)]/50 rounded-lg p-3 border border-[var(--accent-cyan)]/20 hover:bg-[var(--background)]/70 cursor-pointer transition-colors"
+                            onClick={() => setSelectedSubConcept({ conceptIndex: i, subConceptIndex: di })}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-[var(--foreground)] text-sm mb-1">{detail.name}</div>
+                                <div className="text-xs text-[var(--foreground)] leading-relaxed mb-2">{detail.description}</div>
+                                <div className="text-xs text-[var(--foreground)]/70 italic">
+                                  Example: {detail.example}
                                 </div>
-                              )}
+                              </div>
+                              <div className="flex flex-col items-end gap-1">
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                  detail.difficulty === 'beginner' ? 'bg-green-500/20 text-green-400' :
+                                  detail.difficulty === 'intermediate' ? 'bg-yellow-500/20 text-yellow-400' :
+                                  'bg-red-500/20 text-red-400'
+                                }`}>
+                                  {detail.difficulty}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                  detail.priority === 'high' ? 'bg-blue-500/20 text-blue-400' :
+                                  detail.priority === 'medium' ? 'bg-gray-500/20 text-gray-400' :
+                                  'bg-purple-500/20 text-purple-400'
+                                }`}>
+                                  {detail.priority} priority
+                                </span>
+                              </div>
                             </div>
-                          </li>
+                          </div>
                         ))}
-                      </ul>
+                      </div>
                     </div>
                   )}
                 </div>
               ))}
             </div>
 
+            {/* Study Strategy */}
+            <div className="mt-6 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 p-6">
+              <h3 className="text-base font-semibold text-[var(--foreground)] mb-3">Study Strategy</h3>
+              <p className="text-sm text-[var(--foreground)] mb-4">
+                Focus on concepts that appear frequently across exams.
+                These are the most important topics to master for your course.
+              </p>
+              <div className="text-sm text-[var(--foreground)]/70">
+                <strong>Top 3 priorities:</strong> Start with concepts ranked 1-3 above.
+                These appear frequently, especially in recent exams, making them the most efficient targets.
+              </div>
+            </div>
+
             {/* Footer Tips */}
-            <div className="mt-6 rounded-lg bg-[#1A1F2E] border border-[#2B3140] p-4">
-              <div className="text-xs text-[#A7AFBE]">
-                <strong className="text-[#E5E7EB]">💡 Pro Tips:</strong><br/>
-                • Start with gold/silver/bronze ranked concepts for maximum efficiency<br/>
-                • High frequency = more likely to appear again<br/>
-                • Balance high Points/Hour with concepts you find challenging
+            <div className="mt-4 rounded-lg bg-[var(--background)]/60 border border-[var(--accent-cyan)]/20 p-4">
+              <div className="text-xs text-[var(--foreground)]/70">
+                <strong className="text-[var(--foreground)]">Pro Tips:</strong><br/>
+                • Start with top-ranked concepts for maximum efficiency<br/>
+                • High frequency concepts are more likely to appear again<br/>
+                • Balance concept frequency with your current knowledge level
               </div>
             </div>
           </>
         )}
       </div>
+
+      {/* Sub-Concept Details Modal */}
+      {selectedSubConcept && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/95 backdrop-blur-sm p-6">
+            {(() => {
+              const concept = examResults.concepts[selectedSubConcept.conceptIndex];
+              const subConcept = concept.details[selectedSubConcept.subConceptIndex];
+
+              return (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-[var(--foreground)]">{subConcept.name}</h3>
+                    <button
+                      onClick={() => setSelectedSubConcept(null)}
+                      className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] text-xl"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex gap-2">
+                      <span className={`px-3 py-1 rounded text-sm font-medium ${
+                        subConcept.difficulty === 'beginner' ? 'bg-green-500/20 text-green-400' :
+                        subConcept.difficulty === 'intermediate' ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-red-500/20 text-red-400'
+                      }`}>
+                        {subConcept.difficulty}
+                      </span>
+                      <span className={`px-3 py-1 rounded text-sm font-medium ${
+                        subConcept.priority === 'high' ? 'bg-blue-500/20 text-blue-400' :
+                        subConcept.priority === 'medium' ? 'bg-gray-500/20 text-gray-400' :
+                        'bg-purple-500/20 text-purple-400'
+                      }`}>
+                        {subConcept.priority} priority
+                      </span>
+                    </div>
+
+                    <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--accent-cyan)]/20">
+                      <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">What to Learn:</h4>
+                      <p className="text-sm text-[var(--foreground)] leading-relaxed">{subConcept.description}</p>
+                    </div>
+
+                    <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--accent-cyan)]/20">
+                      <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Example:</h4>
+                      <p className="text-sm text-[var(--foreground)]/70 italic">{subConcept.example}</p>
+                    </div>
+
+                    <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--accent-cyan)]/20">
+                      <h4 className="text-sm font-semibold text-[var(--foreground)] mb-3">Technical Components:</h4>
+                      <div className="space-y-3">
+                        <div className="text-sm text-[var(--foreground)] leading-relaxed">
+                          {subConcept.description}
+                        </div>
+
+                        <div>
+                          <div className="text-xs font-medium text-[var(--foreground)]/70 mb-2">Key Skills to Master:</div>
+                          <div className="flex flex-wrap gap-1">
+                            {(subConcept.components || 'implementation, application, problem-solving').split(', ').map((component, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-1 bg-[#00E5FF]/10 border border-[#00E5FF]/30 rounded text-xs text-[#00E5FF] font-medium"
+                              >
+                                {component.trim()}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Difficulty/Priority already shown in header, avoid duplication */}
+
+                        {subConcept.learning_objectives && (
+                          <div>
+                            <div className="text-xs font-medium text-[#FFD700] mb-2">Learning Objectives:</div>
+                            <ul className="text-xs text-[var(--foreground)] space-y-1 list-disc list-inside">
+                              {subConcept.learning_objectives.split(', ').map((objective, idx) => (
+                                <li key={idx}>{objective}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {subConcept.common_pitfalls && (
+                          <div>
+                            <div className="text-xs font-medium text-[#FF6B6B] mb-2">Common Pitfalls:</div>
+                            <ul className="text-xs text-[var(--foreground)] space-y-1 list-disc list-inside">
+                              {subConcept.common_pitfalls.split(', ').map((pitfall, idx) => (
+                                <li key={idx}>{pitfall}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        <div className="text-xs text-[var(--foreground)]/70">
+                          Exam frequency: appeared in {examResults.totalExams} exam(s)
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-4 border-t border-[var(--accent-cyan)]/20">
+                      <button
+                        onClick={() => setSelectedSubConcept(null)}
+                        className="rounded-lg border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/80"
+                      >
+                        Close
+                      </button>
+                      <button
+                        disabled={generatingLesson}
+                        onClick={async () => {
+                          if (!selectedSubConcept) return;
+                          try {
+                            setGeneratingLesson(true);
+                            const concept = examResults.concepts[selectedSubConcept.conceptIndex];
+                            const sub = concept.details[selectedSubConcept.subConceptIndex];
+
+                            const res = await fetch('/api/exam-generate-lesson', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                conceptName: concept.name,
+                                subConceptName: sub.name,
+                                description: sub.description,
+                                example: sub.example,
+                                components: sub.components,
+                                learning_objectives: sub.learning_objectives,
+                                common_pitfalls: sub.common_pitfalls,
+                              })
+                            });
+
+                            const json = await res.json();
+                            if (!res.ok || !json?.ok) throw new Error(json?.error || 'Failed to generate lesson');
+
+                            // Create temporary subject and navigate to familiar lesson page
+                            const slug = `exam-lesson-${Date.now()}`;
+                            const topic = sub.name;
+                            const data: StoredSubjectData = {
+                              subject: 'Exam Snipe Lessons',
+                              course_context: '',
+                              combinedText: '',
+                              topics: [],
+                              nodes: {
+                                [topic]: {
+                                  overview: `Lesson generated from Exam Snipe analysis for: ${topic}`,
+                                  symbols: [],
+                                  lessonsMeta: [{ type: 'Generated Lesson', title: topic }],
+                                  lessons: [{ title: topic, body: json.data.body || '', quiz: json.data.quiz || [] }],
+                                  rawLessonJson: [JSON.stringify(json.data)]
+                                }
+                              },
+                              files: [],
+                              progress: {},
+                            };
+
+                            saveSubjectData(slug, data);
+                            setSelectedSubConcept(null);
+                            router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}`);
+                          } catch (e: any) {
+                            alert(e?.message || 'Failed to generate lesson');
+                          } finally {
+                            setGeneratingLesson(false);
+                          }
+                        }}
+                        className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
+                      >
+                        {generatingLesson ? 'Generating…' : 'Start Learning'}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
