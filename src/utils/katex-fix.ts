@@ -100,7 +100,9 @@ export async function fixLaTeXWithAI(latex: string, errorMessage: string | null 
       // Limit cache size to prevent memory issues (keep last 100 entries)
       if (fixCache.size > 100) {
         const firstKey = fixCache.keys().next().value;
-        fixCache.delete(firstKey);
+        if (firstKey) {
+          fixCache.delete(firstKey);
+        }
       }
       return data.fixed;
     }
