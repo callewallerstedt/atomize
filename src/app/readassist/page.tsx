@@ -76,9 +76,6 @@ export default function ReadAssistPage() {
     const rect = (e.target as HTMLElement).getBoundingClientRect();
     setPopoverWord(word);
     setPopoverPos({ x: rect.left, y: rect.bottom + window.scrollY });
-    setPopoverLoading(true);
-    setPopoverError(null);
-    setPopoverContent("");
   };
 
   const handleSimplify = async () => {
@@ -102,26 +99,48 @@ export default function ReadAssistPage() {
 
   useEffect(() => {
     // Load quick explanation when a word is selected
+    if (!popoverWord) {
+      setPopoverLoading(false);
+      setPopoverError(null);
+      setPopoverContent("");
+      return;
+    }
+
+    let isMounted = true;
+
     (async () => {
-      if (!popoverWord) return;
       try {
+        if (!isMounted) return;
         setPopoverLoading(true);
         setPopoverError(null);
         setPopoverContent("");
+
         const res = await fetch('/api/quick-explain', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ word: popoverWord })
         });
+
+        if (!isMounted) return;
+
         const json = await res.json().catch(() => ({}));
         if (!res.ok || !json?.ok) throw new Error(json?.error || `Explain failed (${res.status})`);
+
+        if (!isMounted) return;
         setPopoverContent(json.data?.content || `No explanation available for "${popoverWord}".`);
       } catch (err: any) {
+        if (!isMounted) return;
         setPopoverError(err?.message || 'Failed to load explanation');
       } finally {
-        setPopoverLoading(false);
+        if (isMounted) {
+          setPopoverLoading(false);
+        }
       }
     })();
+
+    return () => {
+      isMounted = false;
+    };
   }, [popoverWord]);
 
   useEffect(() => {
