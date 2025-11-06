@@ -477,7 +477,7 @@ export default function ExamSnipePage() {
                         <div>
                           <div className="text-xs font-medium text-[var(--foreground)]/70 mb-2">Key Skills to Master:</div>
                           <div className="flex flex-wrap gap-1">
-                            {(subConcept.components || 'implementation, application, problem-solving').split(', ').map((component, idx) => (
+                            {(subConcept.components || 'implementation, application, problem-solving').split(', ').map((component: string, idx: number) => (
                               <span
                                 key={idx}
                                 className="px-2 py-1 bg-[#00E5FF]/10 border border-[#00E5FF]/30 rounded text-xs text-[#00E5FF] font-medium"
@@ -494,7 +494,7 @@ export default function ExamSnipePage() {
                           <div>
                             <div className="text-xs font-medium text-[#FFD700] mb-2">Learning Objectives:</div>
                             <ul className="text-xs text-[var(--foreground)] space-y-1 list-disc list-inside">
-                              {subConcept.learning_objectives.split(', ').map((objective, idx) => (
+                              {subConcept.learning_objectives.split(', ').map((objective: string, idx: number) => (
                                 <li key={idx}>{objective}</li>
                               ))}
                             </ul>
@@ -505,7 +505,7 @@ export default function ExamSnipePage() {
                           <div>
                             <div className="text-xs font-medium text-[#FF6B6B] mb-2">Common Pitfalls:</div>
                             <ul className="text-xs text-[var(--foreground)] space-y-1 list-disc list-inside">
-                              {subConcept.common_pitfalls.split(', ').map((pitfall, idx) => (
+                              {subConcept.common_pitfalls.split(', ').map((pitfall: string, idx: number) => (
                                 <li key={idx}>{pitfall}</li>
                               ))}
                             </ul>
