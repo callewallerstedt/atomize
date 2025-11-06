@@ -154,9 +154,9 @@ For each concept/method, provide:
    - example: A more detailed example showing the concept in action (5-15 words, e.g., "Using wait() to block a thread and signal() to wake it up", "Producer adds items to buffer, consumer removes them safely")
    - difficulty: "beginner", "intermediate", or "advanced"
    - priority: "high", "medium", or "low" based on how fundamental it is
-   - components: Comma-separated list of specific technical components/skills to master (e.g., "Pid ! message, receive pattern matching, message queues, process linking, error handling")
-   - learning_objectives: 3-5 specific learning objectives (e.g., "Send messages between Erlang processes using Pid ! Message, Implement receive blocks with pattern matching, Handle process failures with linking")
-   - common_pitfalls: 2-3 common mistakes students make (e.g., "Forgetting to handle all message patterns in receive, Not understanding message delivery is asynchronous, Ignoring process monitoring")
+   - components: Comma-separated list of specific technical components/skills to master (e.g., "wait() method, signal() method, condition variables, mutual exclusion")
+   - learning_objectives: 3-5 specific learning objectives (e.g., "Implement wait() and signal() operations correctly, Understand condition variable semantics, Prevent race conditions")
+   - common_pitfalls: 2-3 common mistakes students make (e.g., "Calling signal() before wait(), Forgetting to recheck conditions after waking")
 
 IMPORTANT:
 - Go through ALL questions in ALL exams - don't miss any
@@ -166,7 +166,7 @@ IMPORTANT:
 - Calculate Points/Hour CORRECTLY with recency bonus
 - Sort concepts by pointsPerHour in DESCENDING order (highest first)
 - Provide detailed breakdown in the "details" array so users can see exactly what questions fall under each concept
-- CRITICAL COVERAGE RULE: Include ALL concepts that appear in at least two-thirds (\u2265 2/3) of the exams (ceil(2/3 * totalExams)). Do NOT cap the number of concepts returned. If many concepts meet this threshold, return them all.
+- CRITICAL COVERAGE RULE: Include ALL concepts that appear in at least ONE exam (frequency >= 1). Do NOT cap the number of concepts returned. Return ALL concepts from ALL exams.
 
 Return JSON in this EXACT format:
 {
@@ -191,21 +191,21 @@ Return JSON in this EXACT format:
           "common_pitfalls": "Calling signal() before wait(), Forgetting to recheck conditions after waking, Not understanding monitor mutual exclusion"
         },
         {
-          "name": "Erlang Messaging",
-          "description": "Erlang uses message passing between lightweight processes for concurrency and fault tolerance.",
-          "example": "Process sends message to another process and waits for response using pattern matching",
+          "name": "Thread Communication",
+          "description": "Threads communicate and coordinate through shared memory and synchronization primitives.",
+          "example": "Producer thread adds items to shared buffer, consumer thread safely removes them",
           "difficulty": "intermediate",
           "priority": "high",
-          "components": "Pid ! message, receive pattern matching, message queues, process linking, error handling, spawn() function",
-          "learning_objectives": "Send messages between Erlang processes using Pid ! Message syntax, Implement receive blocks with proper pattern matching, Handle process failures with linking and monitoring, Understand asynchronous message delivery",
-          "common_pitfalls": "Forgetting to handle all message patterns in receive blocks, Not understanding that message delivery is asynchronous, Ignoring process monitoring for fault tolerance"
+          "components": "shared memory, producer-consumer pattern, thread-safe queues, synchronization barriers",
+          "learning_objectives": "Implement producer-consumer patterns with thread-safe queues, Use synchronization barriers for thread coordination, Handle race conditions in shared memory",
+          "common_pitfalls": "Accessing shared data without proper synchronization, Deadlock from incorrect lock ordering, Missing memory barriers"
         }
       ]
     }
   ]
 }
 
-The concepts array MUST be sorted by pointsPerHour descending. Ensure all concepts meeting the 2/3 coverage threshold are included in the array.`
+The concepts array MUST be sorted by pointsPerHour descending. Return ALL concepts that appear in any exam.`
             },
             {
               role: 'user',
@@ -213,7 +213,7 @@ The concepts array MUST be sorted by pointsPerHour descending. Ensure all concep
             }
           ],
           stream: true,
-          max_tokens: 4000,
+          max_tokens: 8000,
           temperature: 0.3
         });
 
