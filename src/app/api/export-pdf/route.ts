@@ -4,17 +4,17 @@ import MarkdownIt from "markdown-it";
 
 export async function POST(request: NextRequest) {
   let browser;
-  let title: string;
-  let content: string;
-  let subject: string;
-  let topic: string;
+  let title: string = '';
+  let content: string = '';
+  let subject: string = '';
+  let topic: string = '';
 
   try {
     const requestData = await request.json();
-    title = requestData.title;
-    content = requestData.content;
-    subject = requestData.subject;
-    topic = requestData.topic;
+    title = requestData.title || '';
+    content = requestData.content || '';
+    subject = requestData.subject || '';
+    topic = requestData.topic || '';
 
     console.log('PDF Export request:', { title: title?.substring(0, 50), contentLength: content?.length, subject, topic });
 
