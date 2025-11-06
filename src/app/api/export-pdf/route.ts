@@ -4,9 +4,17 @@ import MarkdownIt from "markdown-it";
 
 export async function POST(request: NextRequest) {
   let browser;
+  let title: string;
+  let content: string;
+  let subject: string;
+  let topic: string;
 
   try {
-    const { title, content, subject, topic } = await request.json();
+    const requestData = await request.json();
+    title = requestData.title;
+    content = requestData.content;
+    subject = requestData.subject;
+    topic = requestData.topic;
 
     console.log('PDF Export request:', { title: title?.substring(0, 50), contentLength: content?.length, subject, topic });
 
@@ -238,7 +246,7 @@ export async function POST(request: NextRequest) {
           <head><title>${title || 'Lesson'}</title></head>
           <body>
             <h1>${title || 'Lesson'}</h1>
-            <pre>${content || 'No content'}</pre>
+            <pre>${content || 'PDF generation failed. Please try again.'}</pre>
           </body>
         </html>
       `;
