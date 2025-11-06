@@ -4,6 +4,14 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { saveSubjectData, StoredSubjectData } from "@/utils/storage";
 
+// Import PDF.js for client-side text extraction
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure PDF.js worker
+if (typeof window !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+}
+
 export default function ExamSnipePage() {
   const router = useRouter();
   const [examFiles, setExamFiles] = useState<File[]>([]);
@@ -20,6 +28,30 @@ export default function ExamSnipePage() {
   const [currentTextContent, setCurrentTextContent] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamContainerRef = useRef<HTMLDivElement>(null);
+
+  // Extract text from PDF file client-side
+  async function extractTextFromPdf(file: File): Promise<string> {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      const pdf = await pdfjsLib.getDocument({ data: uint8Array }).promise;
+
+      let fullText = '';
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items
+          .map((item: any) => item.str)
+          .join(' ');
+        fullText += pageText + '\n';
+      }
+
+      return fullText.trim();
+    } catch (error) {
+      console.error(`Error extracting text from ${file.name}:`, error);
+      return `Error extracting text from ${file.name}: ${error}`;
+    }
+  }
 
   // Auto-scroll to bottom when streaming text updates
   useEffect(() => {
@@ -42,19 +74,44 @@ export default function ExamSnipePage() {
       // Dynamic progress based on streaming data
       let streamStartTime: number | null = null;
       
-      console.log('=== FRONTEND: SENDING FILES ===');
-      console.log(`Sending ${examFiles.length} files:`);
+      console.log('=== FRONTEND: EXTRACTING TEXT FROM FILES ===');
+      console.log(`Processing ${examFiles.length} files:`);
       examFiles.forEach((file, i) => {
         console.log(`  File ${i + 1}: ${file.name} (${file.size} bytes, ${file.type})`);
       });
 
-      const formData = new FormData();
-      examFiles.forEach((file) => formData.append('exams', file));
+      // Extract text from all PDFs client-side
+      console.log('Starting client-side text extraction...');
+      const examTexts: Array<{name: string, text: string}> = [];
 
-      console.log('Sending request to /api/exam-snipe-stream...');
+      for (let i = 0; i < examFiles.length; i++) {
+        const file = examFiles[i];
+        console.log(`Extracting text from ${file.name}...`);
+
+        let extractedText = '';
+        if (file.type === 'application/pdf') {
+          extractedText = await extractTextFromPdf(file);
+        } else if (file.type.startsWith('text/')) {
+          extractedText = await file.text();
+        } else {
+          extractedText = `Unsupported file type: ${file.name}`;
+        }
+
+        examTexts.push({
+          name: file.name,
+          text: extractedText
+        });
+
+        console.log(`✓ Extracted ${extractedText.length} characters from ${file.name}`);
+      }
+
+      console.log(`=== FRONTEND: SENDING EXTRACTED TEXT ===`);
+      console.log(`Sending ${examTexts.length} text entries to API...`);
+
       const res = await fetch('/api/exam-snipe-stream', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ examsText: examTexts }),
       });
 
       console.log(`Response status: ${res.status}`);
