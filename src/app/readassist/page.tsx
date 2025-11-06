@@ -16,6 +16,9 @@ export default function ReadAssistPage() {
   const [error, setError] = useState<string | null>(null);
   const [popoverWord, setPopoverWord] = useState<string | null>(null);
   const [popoverPos, setPopoverPos] = useState({ x: 0, y: 0 });
+  const [popoverLoading, setPopoverLoading] = useState<boolean>(false);
+  const [popoverError, setPopoverError] = useState<string | null>(null);
+  const [popoverContent, setPopoverContent] = useState<string>("");
   const [simplifyingText, setSimplifyingText] = useState<string | null>(null);
   const [simplifiedResult, setSimplifiedResult] = useState<string | null>(null);
   const [selectedText, setSelectedText] = useState<string>("");
@@ -73,6 +76,9 @@ export default function ReadAssistPage() {
     const rect = (e.target as HTMLElement).getBoundingClientRect();
     setPopoverWord(word);
     setPopoverPos({ x: rect.left, y: rect.bottom + window.scrollY });
+    setPopoverLoading(true);
+    setPopoverError(null);
+    setPopoverContent("");
   };
 
   const handleSimplify = async () => {
@@ -93,6 +99,30 @@ export default function ReadAssistPage() {
       console.error('Failed to simplify:', err);
     }
   };
+
+  useEffect(() => {
+    // Load quick explanation when a word is selected
+    (async () => {
+      if (!popoverWord) return;
+      try {
+        setPopoverLoading(true);
+        setPopoverError(null);
+        setPopoverContent("");
+        const res = await fetch('/api/quick-explain', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ word: popoverWord })
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || !json?.ok) throw new Error(json?.error || `Explain failed (${res.status})`);
+        setPopoverContent(json.data?.content || `No explanation available for "${popoverWord}".`);
+      } catch (err: any) {
+        setPopoverError(err?.message || 'Failed to load explanation');
+      } finally {
+        setPopoverLoading(false);
+      }
+    })();
+  }, [popoverWord]);
 
   useEffect(() => {
     const handleSelection = () => {
@@ -284,8 +314,12 @@ export default function ReadAssistPage() {
 
       {popoverWord && (
         <WordPopover
-          word={popoverWord}
-          position={popoverPos}
+          open={!!popoverWord}
+          x={popoverPos.x}
+          y={popoverPos.y}
+          loading={popoverLoading}
+          error={popoverError}
+          content={popoverContent}
           onClose={() => setPopoverWord(null)}
         />
       )}
