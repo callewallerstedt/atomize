@@ -4,16 +4,27 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { saveSubjectData, StoredSubjectData } from "@/utils/storage";
 
-// Import PDF.js for client-side text extraction
-import * as pdfjsLib from 'pdfjs-dist';
-
-// Configure PDF.js worker
-if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-}
+// PDF.js will be dynamically imported only on client-side
 
 export default function ExamSnipePage() {
   const router = useRouter();
+
+  // Prevent SSR to avoid PDF.js DOMMatrix issues
+  const [isClient, setIsClient] = useState(false);
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  if (!isClient) {
+    return (
+      <div className="min-h-screen bg-[#0F1216] text-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00E5FF] mx-auto mb-4"></div>
+          <p>Loading Exam Snipe...</p>
+        </div>
+      </div>
+    );
+  }
   const [examFiles, setExamFiles] = useState<File[]>([]);
   const [examAnalyzing, setExamAnalyzing] = useState(false);
   const [examResults, setExamResults] = useState<any>(null);
@@ -32,6 +43,14 @@ export default function ExamSnipePage() {
   // Extract text from PDF file client-side
   async function extractTextFromPdf(file: File): Promise<string> {
     try {
+      // Dynamically import PDF.js only on client-side
+      const pdfjsLib = await import('pdfjs-dist');
+
+      // Configure worker only on client-side
+      if (typeof window !== 'undefined') {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+      }
+
       const arrayBuffer = await file.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
       const pdf = await pdfjsLib.getDocument({ data: uint8Array }).promise;
