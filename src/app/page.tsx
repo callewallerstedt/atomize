@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import CourseCreateModal from "@/components/CourseCreateModal";
 import { saveSubjectData, StoredSubjectData, loadSubjectData } from "@/utils/storage";
