@@ -335,7 +335,7 @@ export default function LessonPage() {
                       .replace(/\\\)/g, '$');
                     return processed;
                   })()}
-                </AutoFixMarkdown>
+                </ReactMarkdown>
                 <style jsx global>{`
                   .lesson-content p{ margin: 0.45rem 0 !important; }
                   .lesson-content ul, .lesson-content ol{ margin: 0.4rem 0 !important; }
