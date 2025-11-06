@@ -138,7 +138,9 @@ export async function fixKaTeXErrors(text: string): Promise<string> {
     // Limit cache size
     if (textFixCache.size > 50) {
       const firstKey = textFixCache.keys().next().value;
-      textFixCache.delete(firstKey);
+      if (firstKey) {
+        textFixCache.delete(firstKey);
+      }
     }
     return text;
   }
@@ -161,7 +163,9 @@ export async function fixKaTeXErrors(text: string): Promise<string> {
   // Limit cache size
   if (textFixCache.size > 50) {
     const firstKey = textFixCache.keys().next().value;
-    textFixCache.delete(firstKey);
+    if (firstKey) {
+      textFixCache.delete(firstKey);
+    }
   }
 
   return fixedText;
