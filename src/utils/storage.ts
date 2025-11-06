@@ -148,6 +148,7 @@ export function markLessonReviewed(
       ease: newEase,
       reviews: existingSchedule.reviews + 1
     };
+    data.reviewSchedules = data.reviewSchedules || {};
     data.reviewSchedules[key] = updatedSchedule;
   }
   
