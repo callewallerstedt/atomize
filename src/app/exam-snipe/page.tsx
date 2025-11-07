@@ -9,7 +9,7 @@ import { saveSubjectData, StoredSubjectData } from "@/utils/storage";
 export default function ExamSnipePage() {
   const router = useRouter();
 
-  // Prevent SSR to avoid PDF.js DOMMatrix issues
+  const [isClient, setIsClient] = useState(false);
   const [examFiles, setExamFiles] = useState<File[]>([]);
   const [examAnalyzing, setExamAnalyzing] = useState(false);
   const [examResults, setExamResults] = useState<any>(null);
@@ -25,11 +25,17 @@ export default function ExamSnipePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamContainerRef = useRef<HTMLDivElement>(null);
 
-  const [isClient, setIsClient] = useState(false);
   useEffect(() => {
     setIsClient(true);
   }, []);
 
+  useEffect(() => {
+    if (streamContainerRef.current) {
+      streamContainerRef.current.scrollTop = streamContainerRef.current.scrollHeight;
+    }
+  }, [streamingText]);
+
+  // Prevent SSR to avoid PDF.js DOMMatrix issues
   if (!isClient) {
     return (
       <div className="min-h-screen bg-[#0F1216] text-white flex items-center justify-center">
@@ -72,13 +78,6 @@ export default function ExamSnipePage() {
       return `Error extracting text from ${file.name}: ${error}`;
     }
   }
-
-  // Auto-scroll to bottom when streaming text updates
-  useEffect(() => {
-    if (streamContainerRef.current) {
-      streamContainerRef.current.scrollTop = streamContainerRef.current.scrollHeight;
-    }
-  }, [streamingText]);
 
   async function handleExamSnipe() {
     if (examFiles.length === 0) return;
