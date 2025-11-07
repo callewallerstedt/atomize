@@ -89,10 +89,10 @@ function LoadingScreen({ onComplete }: { onComplete: () => void }) {
           {displayedText}
         </span>
 
-        {/* Studying Optimized subtitle */}
+        {/* Studying, Optimized. subtitle */}
         {showSubtitle && (
           <div className="text-lg font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider font-mono animate-fade-in">
-            Studying Optimized
+            Studying, Optimized.
           </div>
         )}
       </div>
@@ -929,6 +929,16 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                                      hover:bg-[var(--background)]/80 transition-colors text-sm"
                         >
                           Exam Snipe
+                        </button>
+                        <button
+                          onClick={() => {
+                            router.push('/?quickLesson=1');
+                            setToolsDropdownOpen(false);
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-lg bg-[var(--background)]/60 text-[var(--foreground)]
+                                     hover:bg-[var(--background)]/80 transition-colors text-sm"
+                        >
+                          Quick Lesson
                         </button>
                         <button
                           onClick={() => {

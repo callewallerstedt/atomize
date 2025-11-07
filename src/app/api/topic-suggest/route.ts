@@ -18,6 +18,7 @@ export async function POST(req: Request) {
     const course_context = String(body.course_context || "");
     const combinedText = String(body.combinedText || "");
     const tree: { subject: string; topics: TreeNode[] } = body.tree || { subject, topics: [] };
+    const fileIds: string[] = Array.isArray(body.fileIds) ? body.fileIds : [];
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -31,19 +32,30 @@ export async function POST(req: Request) {
       "- insertPath: array of ancestor topic names from root to the parent where this topic should be placed. Use existing names from the provided tree. Return [] to place at top-level.",
     ].join("\n");
 
-    const user = [
-      `Subject: ${subject}`,
-      course_context ? `Course summary: ${course_context}` : "",
-      "Existing topic tree (names only):",
-      JSON.stringify(tree.topics || []),
-      "Prompt for new topic (user text):",
-      prompt,
-      "Relevant material (truncated):",
-      combinedText.slice(0, 120000),
-    ].filter(Boolean).join("\n\n");
+    // Build Responses API input with files + text
+    const blocks = [
+      {
+        type: "input_text",
+        text: [
+          `Subject: ${subject}`,
+          course_context ? `Course summary: ${course_context}` : "",
+          "Existing topic tree (names only):",
+          JSON.stringify(tree.topics || []),
+          "Prompt for new topic (user text):",
+          prompt,
+          "Relevant material (truncated):",
+          combinedText.slice(0, 120000),
+        ].filter(Boolean).join("\n\n"),
+      },
+      ...fileIds.slice(0, 3).map((fileId) => ({ type: "input_file", file_id: fileId })),
+    ];
 
-    const completion = await client.chat.completions.create({
+    const resp = await client.responses.create({
       model: "gpt-4o-mini",
+      instructions: system,
+      input: [ { role: "user", content: blocks } ],
+      temperature: 0.3,
+      max_output_tokens: 700,
       response_format: {
         type: "json_schema",
         json_schema: {
@@ -61,15 +73,9 @@ export async function POST(req: Request) {
           strict: true,
         },
       },
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      temperature: 0.3,
-      max_tokens: 800,
     });
 
-    const content = completion.choices[0]?.message?.content || "{}";
+    const content = resp.output_text || "{}";
     let data: any = {};
     try { data = JSON.parse(content); } catch { data = {}; }
     return NextResponse.json({ ok: true, data });

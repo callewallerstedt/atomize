@@ -29,31 +29,38 @@ export async function POST(req: Request) {
       "- Learning objectives and competencies",
       "Be comprehensive but organized. Use bullet points and clear headings. Focus on WHAT students need to LEARN and MASTER from the material, not just what the course is about.",
     ].join("\n");
-    const userContent: any[] = [
-      { type: "text", text: [
-        subject ? `Subject: ${subject}` : "",
-        syllabus ? `User syllabus: ${syllabus.slice(0, 5000)}` : "",
-        text ? `Course materials (extracted text): ${text.slice(0, 8000)}` : "",
-        "Create a comprehensive learning guide that captures all key concepts, methods, and skills to master from these materials.",
-      ].filter(Boolean).join("\n\n") }
+
+    // Use Responses API: pass system prompt via `instructions`, and the rest as input blocks
+    const userBlocks = [
+      {
+        type: "input_text",
+        text: [
+          subject ? `Subject: ${subject}` : "",
+          syllabus ? `User syllabus: ${syllabus.slice(0, 5000)}` : "",
+          text ? `Course materials (extracted text): ${text.slice(0, 8000)}` : "",
+          "Create a comprehensive learning guide that captures all key concepts, methods, and skills to master from these materials.",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      },
+      // Fewer files speeds up processing significantly; keep highest-signal few
+      ...fileIds.slice(0, 3).map((fileId) => ({ type: "input_file", file_id: fileId })),
     ];
 
-    // Add uploaded files for analysis
-    for (const fileId of fileIds.slice(0, 5)) { // Limit to 5 files to avoid token limits
-      userContent.push({ type: "file", file_id: fileId });
-    }
-
-    const completion = await client.chat.completions.create({
+    const resp = await client.responses.create({
       model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: userContent },
+      instructions: system,
+      input: [
+        {
+          role: "user",
+          content: userBlocks,
+        },
       ],
       temperature: 0.2,
-      max_tokens: 1500,
+      max_output_tokens: 900,
     });
 
-    const course_context = completion.choices[0]?.message?.content?.trim() || "";
+    const course_context = resp.output_text?.trim() || "";
     return NextResponse.json({ ok: true, course_context });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err?.message || "Unknown error" }, { status: 500 });

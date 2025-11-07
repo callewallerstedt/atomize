@@ -775,7 +775,7 @@ export default function NodePage() {
                           };
 
                           const codeContent = extractTextContent(children);
-                          const lines = codeContent.split('\n');
+                          // Note: line numbers will be driven by Prism tokens to avoid off-by-one
 
                           // Extract language from className (e.g., "language-javascript" -> "javascript")
                           const className = (props as any).className || '';
@@ -787,46 +787,40 @@ export default function NodePage() {
 
                           return (
                             <div className="relative bg-[#0F141D] border border-[#2B3140] rounded-lg overflow-hidden my-3">
-                              <div className="flex font-mono text-sm">
-                                
-                                <div className="bg-[#0A0E14] px-2 py-3 text-[10px] text-[#6B7280] select-none border-r border-[#2B3140] leading-[1.5] min-w-[2.5rem]">
-                                  {lines.map((_, index) => (
-                                    <div key={index} className="h-[21px] flex items-start justify-end pr-1">
-                                      {index + 1}
-                                    </div>
-                                  ))}
-                                </div>
-                                
-                                <div className="flex-1 py-3 pl-4 overflow-x-auto">
-                                  <Highlight
-                                    code={codeContent.trim()}
-                                    language={language || 'javascript'}
-                                    theme={themes.vsDark}
-                                  >
-                                    {({ className, style, tokens, getLineProps, getTokenProps }) => (
-                                      <pre
-                                        style={{
-                                          ...style,
-                                          margin: 0,
-                                          padding: 0,
-                                          background: 'transparent',
-                                          fontSize: '14px',
-                                          lineHeight: '1.5',
-                                          fontFamily: 'var(--font-mono)',
-                                        }}
-                                        className={className}
-                                      >
-                                        {tokens.map((line, i) => (
-                                          <div key={i} {...getLineProps({ line })}>
+                              <div className="overflow-x-auto">
+                                <Highlight
+                                  code={codeContent}
+                                  language={language || 'javascript'}
+                                  theme={themes.vsDark}
+                                >
+                                  {({ tokens, getLineProps, getTokenProps }) => (
+                                    <div
+                                      className="font-mono"
+                                      style={{
+                                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                                        fontSize: '14px',
+                                        lineHeight: 1.5,
+                                        whiteSpace: 'pre',
+                                      }}
+                                    >
+                                      {tokens.map((line, i) => (
+                                        <div key={i} className="grid" style={{ gridTemplateColumns: 'auto 1fr', columnGap: '12px' }}>
+                                          <div
+                                            className="text-right select-none text-[#6B7280] pl-1 pr-1 pt-1"
+                                            style={{ fontVariantNumeric: 'tabular-nums' as any, marginTop: '1px' }}
+                                          >
+                                            {i + 1}
+                                          </div>
+                                          <div {...getLineProps({ line })}>
                                             {line.map((token, key) => (
                                               <span key={key} {...getTokenProps({ token })} />
                                             ))}
                                           </div>
-                                        ))}
-                                      </pre>
-                                    )}
-                                  </Highlight>
-                                </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </Highlight>
                               </div>
                             </div>
                           );

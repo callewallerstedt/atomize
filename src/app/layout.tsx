@@ -14,8 +14,25 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Atomic Studying",
-  description: "Study efficiently by organizing subjects and materials.",
+  title: "Synapse",
+  description: "Studying, Optimized.",
+  manifest: "/manifest.webmanifest",
+  themeColor: "#0F1216",
+  icons: {
+    icon: [
+      { url: "/Logo.jpg", type: "image/jpeg" },
+      { url: "/Logo.jpg", sizes: "192x192", type: "image/jpeg" },
+      { url: "/Logo.jpg", sizes: "512x512", type: "image/jpeg" },
+    ],
+    apple: [
+      { url: "/Logo.jpg" },
+    ],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Synapse",
+  },
 };
 
 export default function RootLayout({

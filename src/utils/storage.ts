@@ -36,6 +36,7 @@ export type StoredSubjectData = {
   course_notes?: string; // freeform notes for the course
   topic_notes?: { [topicName: string]: string }; // freeform notes per topic
   course_icon?: string; // emoji or short icon text
+  course_quick_summary?: string; // fast AI read of course context
   reviewSchedules?: { [key: string]: ReviewSchedule }; // key: "topicName-lessonIndex"
 };
 

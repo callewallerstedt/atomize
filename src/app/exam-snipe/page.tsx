@@ -51,12 +51,7 @@ export default function ExamSnipePage() {
   async function extractTextFromPdf(file: File): Promise<string> {
     try {
       // Dynamically import PDF.js only on client-side
-      const pdfjsLib = await import('pdfjs-dist');
-
-      // Configure worker only on client-side
-      if (typeof window !== 'undefined') {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-      }
+      const pdfjsLib: any = await import('pdfjs-dist/webpack');
 
       const arrayBuffer = await file.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
@@ -341,8 +336,17 @@ export default function ExamSnipePage() {
                             })()}
                           </div>
                         </div>
-                        {/* Fixed blur overlay - now blurs the TOP */}
-                        <div className="absolute top-0 left-0 right-0 h-12 pointer-events-none backdrop-blur-md"></div>
+                        {/* Blur overlay - strong at top, fades at 2/3 */}
+                        <div 
+                          className="absolute top-0 left-0 right-0 pointer-events-none"
+                          style={{
+                            height: '70%',
+                            backdropFilter: 'blur(16px)',
+                            WebkitBackdropFilter: 'blur(16px)',
+                            maskImage: 'linear-gradient(to bottom, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.7) 35%, rgba(0,0,0,0.3) 65%, rgba(0,0,0,0) 100%)',
+                            WebkitMaskImage: 'linear-gradient(to bottom, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.7) 35%, rgba(0,0,0,0.3) 65%, rgba(0,0,0,0) 100%)'
+                          }}
+                        />
                       </div>
                     </div>
                   )}
@@ -421,7 +425,7 @@ export default function ExamSnipePage() {
                     
                     
                     <div className="flex-shrink-0 text-[var(--foreground)]/50">
-                      {expandedConcept === i ? '▼' : '▶'}
+                      {expandedConcept === i ? '▲' : '▼'}
                     </div>
                   </div>
                   
