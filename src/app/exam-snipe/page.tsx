@@ -10,6 +10,21 @@ export default function ExamSnipePage() {
   const router = useRouter();
 
   // Prevent SSR to avoid PDF.js DOMMatrix issues
+  const [examFiles, setExamFiles] = useState<File[]>([]);
+  const [examAnalyzing, setExamAnalyzing] = useState(false);
+  const [examResults, setExamResults] = useState<any>(null);
+  const [expandedConcept, setExpandedConcept] = useState<number | null>(null);
+  const [selectedSubConcept, setSelectedSubConcept] = useState<{conceptIndex: number, subConceptIndex: number} | null>(null);
+  const [generatingLesson, setGeneratingLesson] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [streamingText, setStreamingText] = useState<string>("");
+  const [showTextInput, setShowTextInput] = useState(false);
+  const [manualTexts, setManualTexts] = useState<Array<{name: string, text: string}>>([]);
+  const [currentTextName, setCurrentTextName] = useState("");
+  const [currentTextContent, setCurrentTextContent] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const streamContainerRef = useRef<HTMLDivElement>(null);
+
   const [isClient, setIsClient] = useState(false);
   useEffect(() => {
     setIsClient(true);
@@ -25,20 +40,6 @@ export default function ExamSnipePage() {
       </div>
     );
   }
-  const [examFiles, setExamFiles] = useState<File[]>([]);
-  const [examAnalyzing, setExamAnalyzing] = useState(false);
-  const [examResults, setExamResults] = useState<any>(null);
-  const [expandedConcept, setExpandedConcept] = useState<number | null>(null);
-  const [selectedSubConcept, setSelectedSubConcept] = useState<{conceptIndex: number, subConceptIndex: number} | null>(null);
-  const [generatingLesson, setGeneratingLesson] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [streamingText, setStreamingText] = useState<string>("");
-  const [showTextInput, setShowTextInput] = useState(false);
-  const [manualTexts, setManualTexts] = useState<Array<{name: string, text: string}>>([]);
-  const [currentTextName, setCurrentTextName] = useState("");
-  const [currentTextContent, setCurrentTextContent] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const streamContainerRef = useRef<HTMLDivElement>(null);
 
   // Extract text from PDF file client-side
   async function extractTextFromPdf(file: File): Promise<string> {
