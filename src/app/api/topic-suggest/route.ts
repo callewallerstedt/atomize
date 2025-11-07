@@ -52,27 +52,10 @@ export async function POST(req: Request) {
 
     const resp = await client.responses.create({
       model: "gpt-4o-mini",
-      instructions: system,
+      instructions: system + "\nReturn STRICT JSON only: { name: string; overview: string; insertPath: string[] }.",
       input: [ { role: "user", content: blocks } ],
       temperature: 0.3,
       max_output_tokens: 700,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "NewTopic",
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              name: { type: "string" },
-              overview: { type: "string" },
-              insertPath: { type: "array", items: { type: "string" } },
-            },
-            required: ["name", "overview", "insertPath"],
-          },
-          strict: true,
-        },
-      },
     });
 
     const content = resp.output_text || "{}";
