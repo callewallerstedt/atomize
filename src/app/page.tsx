@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useRef } from "react";
+import { Suspense, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import CourseCreateModal from "@/components/CourseCreateModal";
 import { saveSubjectData, StoredSubjectData, loadSubjectData } from "@/utils/storage";
@@ -18,7 +18,15 @@ function readSubjects(): Subject[] {
   }
 }
 
-export default function Home() {
+export default function Page() {
+  return (
+    <Suspense fallback={null}>
+      <Home />
+    </Suspense>
+  );
+}
+
+function Home() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
   const router = useRouter();

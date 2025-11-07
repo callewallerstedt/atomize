@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Shell from "@/components/Shell";
@@ -17,7 +17,6 @@ export const metadata: Metadata = {
   title: "Synapse",
   description: "Studying, Optimized.",
   manifest: "/manifest.webmanifest",
-  themeColor: "#0F1216",
   icons: {
     icon: [
       { url: "/Logo.jpg", type: "image/jpeg" },
@@ -33,6 +32,10 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "Synapse",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0F1216",
 };
 
 export default function RootLayout({
