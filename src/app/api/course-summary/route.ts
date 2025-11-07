@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     // Use Responses API: pass system prompt via `instructions`, and the rest as input blocks
     const userBlocks = [
       {
-        type: "input_text",
+        type: "input_text" as const,
         text: [
           subject ? `Subject: ${subject}` : "",
           syllabus ? `User syllabus: ${syllabus.slice(0, 5000)}` : "",
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
           .join("\n\n"),
       },
       // Fewer files speeds up processing significantly; keep highest-signal few
-      ...fileIds.slice(0, 3).map((fileId) => ({ type: "input_file", file_id: fileId })),
+      ...fileIds.slice(0, 3).map((fileId) => ({ type: "input_file" as const, file_id: fileId })),
     ];
 
     const resp = await client.responses.create({

@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     // Build Responses API input with files + text
     const blocks = [
       {
-        type: "input_text",
+        type: "input_text" as const,
         text: [
           `Subject: ${subject}`,
           course_context ? `Course summary: ${course_context}` : "",
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
           combinedText.slice(0, 120000),
         ].filter(Boolean).join("\n\n"),
       },
-      ...fileIds.slice(0, 3).map((fileId) => ({ type: "input_file", file_id: fileId })),
+      ...fileIds.slice(0, 3).map((fileId) => ({ type: "input_file" as const, file_id: fileId })),
     ];
 
     const resp = await client.responses.create({
