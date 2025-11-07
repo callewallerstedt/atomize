@@ -11,18 +11,22 @@ async function generateNameFromText(text: string, fallbackTitle?: string) {
     return null;
   }
 
-  const prompt = `You are naming a university/college course based on its official materials.
-Rules:
-- Return ONLY the course title, max 6 words.
-- Prefer official course names present or clearly implied (e.g., "Linear Algebra", "Operating Systems").
-- Avoid filenames, semesters, extensions, or noise (e.g., ".pdf", "final", "v2", dates).
-- If multiple plausible names exist, pick the most general canonical title.
-${fallbackTitle ? `- Improve this working title if needed: ${fallbackTitle}` : ""}
+  const prompt = `Name a university/college course from its materials.
+Return ONLY the title.
 
-Context to analyze:
+Strict rules:
+- Keep it ultra-short: 1–3 words only.
+- Prefer broad, canonical field names (e.g., "Mathematics", "Linear Algebra", "Data Structures").
+- Remove qualifiers like level, audience, exam/system, semester, region, or format
+  (e.g., drop words such as: for, intro/introductory, basics, advanced, exam, abitur, AP, IB, final, practice, workbook, notes, v2, 2024).
+- Avoid filler (“for Beginners”, “Preparation”, “Course”, “Overview”).
+- If multiple plausible names exist, choose the most general canonical title.
+${fallbackTitle ? `- You may refine this working title if needed: ${fallbackTitle}` : ""}
+
+Context:
 ${trimmed.slice(0, 8000)}
 
-Course Title:`;
+Title:`;
 
   const completion = await client.responses.create({
     model: "gpt-4o-mini",

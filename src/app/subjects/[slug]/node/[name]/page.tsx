@@ -1149,13 +1149,14 @@ export default function NodePage() {
           <div className="relative mx-auto mt-24 flex max-w-md flex-col items-center justify-center">
             <div className="pointer-events-none absolute -inset-10 -z-10 rounded-full bg-[radial-gradient(circle_at_center,rgba(0,229,255,0.25),rgba(255,45,150,0.12)_60%,transparent_70%)] blur-2xl" />
             <div className="relative">
-              {/* Spinning gradient ring around button */}
-              <div className="absolute -inset-2 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-spin" 
-                   style={{ 
-                     WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 4px), white 0)',
-                     mask: 'radial-gradient(farthest-side, transparent calc(100% - 4px), white 0)'
-                   }}>
-              </div>
+              {/* Spinning gradient ring around button (thicker while loading) */}
+              <div
+                className="absolute -inset-2 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-spin"
+                style={{
+                  WebkitMask: `radial-gradient(farthest-side, transparent calc(100% - ${lessonLoading ? 12 : 4}px), white 0)`,
+                  mask: `radial-gradient(farthest-side, transparent calc(100% - ${lessonLoading ? 12 : 4}px), white 0)`
+                }}
+              />
               <button
                 className="relative inline-flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white font-semibold text-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity shadow-[0_4px_12px_rgba(0,0,0,0.5)]"
               onClick={async () => {
