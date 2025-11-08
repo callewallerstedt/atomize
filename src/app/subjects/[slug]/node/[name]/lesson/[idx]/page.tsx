@@ -10,6 +10,7 @@ import rehypeKatex from "rehype-katex";
 import {
   loadSubjectData,
   upsertNodeContent,
+  upsertNodeContentAsync,
   TopicGeneratedContent,
   TopicGeneratedLesson,
   StoredSubjectData,
