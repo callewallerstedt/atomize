@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 25565 -H 0.0.0.0",
+    "predev": "prisma generate",
     "build": "prisma generate && next build",
     "start": "next start -p 25565 -H 0.0.0.0",
     "postinstall": "prisma generate",
@@ -27,7 +28,7 @@
     "pdf2text": "^1.1.0",
     "pdfjs-dist": "^5.4.394",
     "prism-react-renderer": "^2.4.1",
-    "prisma": "^5.20.0",
+    "prisma": "^5.22.0",
     "puppeteer": "^24.28.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
