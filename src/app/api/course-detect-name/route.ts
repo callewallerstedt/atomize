@@ -21,6 +21,7 @@ Strict rules:
   (e.g., drop words such as: for, intro/introductory, basics, advanced, exam, abitur, AP, IB, final, practice, workbook, notes, v2, 2024).
 - Avoid filler (“for Beginners”, “Preparation”, “Course”, “Overview”).
 - If multiple plausible names exist, choose the most general canonical title.
+- IMPORTANT: Write the title in the SAME LANGUAGE as the provided materials.
 ${fallbackTitle ? `- You may refine this working title if needed: ${fallbackTitle}` : ""}
 
 Context:

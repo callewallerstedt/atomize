@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
     const prompt = `You are an AI that reads a course context and produces a fast study synopsis.
 Return 2-3 short bullet insights (max 180 characters total) highlighting the core focus, difficulty, and standout themes.
 Use plain text with bullets.
+Write in the SAME LANGUAGE as the Course Context.
 
 Course Context:
 ${context.slice(0, 8000)}
