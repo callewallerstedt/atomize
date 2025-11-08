@@ -9,7 +9,17 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import katex from "katex";
 import { Highlight, themes } from "prism-react-renderer";
-import { loadSubjectData, upsertNodeContent, upsertNodeContentAsync, TopicGeneratedContent, TopicGeneratedLesson, StoredSubjectData, markLessonReviewed, ReviewSchedule } from "@/utils/storage";
+import {
+  loadSubjectData,
+  upsertNodeContent,
+  upsertNodeContentAsync,
+  TopicGeneratedContent,
+  TopicGeneratedLesson,
+  StoredSubjectData,
+  markLessonReviewed,
+  ReviewSchedule,
+  LessonFlashcard,
+} from "@/utils/storage";
 import { AutoFixMarkdown } from "@/components/AutoFixMarkdown";
 import LarsCoach from "@/components/LarsCoach";
 
@@ -46,6 +56,16 @@ export default function NodePage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [larsOpen, setLarsOpen] = useState(false);
   const [practiceOpen, setPracticeOpen] = useState(false);
+  const [flashcardOptionsOpen, setFlashcardOptionsOpen] = useState(false);
+  const [flashcardModalOpen, setFlashcardModalOpen] = useState(false);
+  const [generatingFlashcards, setGeneratingFlashcards] = useState(false);
+  const [pendingFlashcardCount, setPendingFlashcardCount] = useState<number | null>(null);
+  const [flashcardError, setFlashcardError] = useState<string | null>(null);
+  const [flashcardFlipped, setFlashcardFlipped] = useState(false);
+  const [currentFlashcardIndex, setCurrentFlashcardIndex] = useState(0);
+  const flashcardCounts = [3, 5, 7, 9] as const;
+  const currentLesson = (content?.lessons?.[currentLessonIndex] ?? null) as TopicGeneratedLesson | null;
+  const lessonFlashcards: LessonFlashcard[] = currentLesson?.flashcards ?? [];
 
   async function readLesson() {
     if (isPlaying && audioRef.current) {
@@ -130,7 +150,92 @@ export default function NodePage() {
     return Array.from(new Set(names)).slice(0, 200);
   }, [subjectData]);
 
+  const openFlashcardsViewer = (index = 0, total = lessonFlashcards.length) => {
+    if (!total) return;
+    const safeIndex = Math.min(Math.max(index, 0), total - 1);
+    setCurrentFlashcardIndex(safeIndex);
+    setFlashcardFlipped(false);
+    setFlashcardModalOpen(true);
+    setFlashcardOptionsOpen(false);
+  };
 
+  const handleCloseFlashcards = () => {
+    setFlashcardModalOpen(false);
+    setFlashcardFlipped(false);
+  };
+
+  useEffect(() => {
+    if (!lessonFlashcards.length) {
+      setFlashcardModalOpen(false);
+      setFlashcardFlipped(false);
+    }
+  }, [lessonFlashcards.length]);
+
+  useEffect(() => {
+    setFlashcardOptionsOpen(false);
+    setFlashcardError(null);
+    setPendingFlashcardCount(null);
+    setGeneratingFlashcards(false);
+    setFlashcardModalOpen(false);
+    setFlashcardFlipped(false);
+    setCurrentFlashcardIndex(0);
+  }, [currentLessonIndex]);
+
+  async function generateFlashcards(count: number) {
+    if (!currentLesson?.body) {
+      setFlashcardError("Generate the lesson first before creating flashcards.");
+      return;
+    }
+    try {
+      setGeneratingFlashcards(true);
+      setPendingFlashcardCount(count);
+      setFlashcardError(null);
+      const res = await fetch("/api/lesson-flashcards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: subjectData?.subject || slug,
+          topic: title,
+          lessonTitle: currentLesson.title,
+          lessonBody: currentLesson.body,
+          courseContext: subjectData?.course_context || "",
+          languageName: subjectData?.course_language_name || "",
+          count,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || `Failed to generate flashcards (${res.status})`);
+      }
+      const cards: LessonFlashcard[] = Array.isArray(json.flashcards) ? json.flashcards : [];
+      if (!cards.length) {
+        throw new Error("No flashcards were returned. Please try again.");
+      }
+      let updatedContent: TopicGeneratedContent | null = null;
+      setContent((prev) => {
+        if (!prev) return prev;
+        const nextLessons = Array.isArray(prev.lessons) ? [...prev.lessons] : [];
+        const existing = nextLessons[currentLessonIndex];
+        if (!existing) return prev;
+        const updatedLesson: TopicGeneratedLesson = { ...(existing as TopicGeneratedLesson), flashcards: cards };
+        nextLessons[currentLessonIndex] = updatedLesson;
+        updatedContent = { ...prev, lessons: nextLessons };
+        return updatedContent;
+      });
+      if (updatedContent) {
+        upsertNodeContent(slug, title, updatedContent);
+      }
+      openFlashcardsViewer(0, cards.length);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to generate flashcards";
+      setFlashcardError(message);
+    } finally {
+      setGeneratingFlashcards(false);
+      setPendingFlashcardCount(null);
+    }
+  }
+
+  
   function wrapTextNode(str: string, parentFull?: string) {
     return str.split(/(\b[\p{L}\p{N}][\p{L}\p{N}\-]*\b)/u).map((token, idx) => {
       const isWord = /^(\b[\p{L}\p{N}][\p{L}\p{N}\-]*\b)$/u.test(token);
@@ -1125,10 +1230,73 @@ export default function NodePage() {
                 )}
               </div>
 
-                {/* Lars item */}
-                <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden">
+              {/* Flashcards item */}
+              <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden">
+                {flashcardOptionsOpen ? (
+                  <div className="px-4 py-4 space-y-4">
+                    <div className="text-sm font-medium text-[var(--foreground)]">
+                      Choose how many flashcards to generate
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      {flashcardCounts.map((count) => (
+                        <button
+                          key={count}
+                          onClick={() => generateFlashcards(count)}
+                          disabled={generatingFlashcards}
+                          className={`h-9 rounded-full border border-[var(--accent-cyan)]/20 bg-[var(--background)]/70 text-sm font-medium text-[var(--foreground)] transition-colors ${generatingFlashcards ? 'opacity-60 cursor-wait' : 'hover:bg-[var(--background)]/50'}`}
+                        >
+                          {generatingFlashcards && pendingFlashcardCount === count ? 'Generating…' : `${count} cards`}
+                        </button>
+                      ))}
+                    </div>
+                    {flashcardError && (
+                      <div className="text-xs text-[#FFC0DA]">{flashcardError}</div>
+                    )}
+                    <div className="flex items-center justify-between text-xs text-[var(--foreground)]/70">
+                      {lessonFlashcards.length > 0 ? (
+                        <button
+                          onClick={() => openFlashcardsViewer(0, lessonFlashcards.length)}
+                          className="hover:underline"
+                        >
+                          View saved flashcards ({lessonFlashcards.length})
+                        </button>
+                      ) : (
+                        <span />
+                      )}
+                      <button
+                        onClick={() => {
+                          if (generatingFlashcards) return;
+                          setFlashcardOptionsOpen(false);
+                          setFlashcardError(null);
+                        }}
+                        className="hover:underline"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
                   <button
-                    onClick={() => setLarsOpen(true)}
+                    onClick={() => {
+                      setFlashcardOptionsOpen(true);
+                      setFlashcardError(null);
+                    }}
+                    disabled={!currentLesson?.body}
+                    className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors rounded-xl disabled:opacity-60 disabled:cursor-not-allowed"
+                    title="Generate flashcards from this lesson"
+                  >
+                    <span>Flashcards</span>
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 6h16v12H4z" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              {/* Lars item */}
+              <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden">
+                <button
+                  onClick={() => setLarsOpen(true)}
                     className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors rounded-xl"
                     title="Open Lars"
                   >
@@ -1276,6 +1444,71 @@ export default function NodePage() {
         )}
       </div>
     </div>
+    {flashcardModalOpen && lessonFlashcards.length > 0 && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+        <div className="relative w-full max-w-xl rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/95 p-6 shadow-2xl">
+          <button
+            onClick={handleCloseFlashcards}
+            className="absolute right-4 top-4 h-8 w-8 rounded-full border border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 flex items-center justify-center"
+            aria-label="Close flashcards"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+          <div className="mb-4 flex items-center justify-between text-sm text-[var(--foreground)]/70">
+            <span>
+              Flashcard {currentFlashcardIndex + 1} of {lessonFlashcards.length}
+            </span>
+            <span>{flashcardFlipped ? "Answer" : "Prompt"}</span>
+          </div>
+          <div className="relative flex items-center justify-center gap-3">
+            <button
+              onClick={() => {
+                if (currentFlashcardIndex === 0) return;
+                setCurrentFlashcardIndex((idx) => Math.max(idx - 1, 0));
+                setFlashcardFlipped(false);
+              }}
+              disabled={currentFlashcardIndex === 0}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--foreground)]/20 text-[var(--foreground)]/70 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Previous flashcard"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </button>
+            <div
+              className="relative h-72 w-full max-w-md cursor-pointer overflow-hidden rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/80 p-6 text-center shadow-inner"
+              onClick={() => setFlashcardFlipped((f) => !f)}
+            >
+              <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 ${flashcardFlipped ? 'opacity-0' : 'opacity-100'}`}>
+                <AutoFixMarkdown>{lessonFlashcards[currentFlashcardIndex]?.prompt || ""}</AutoFixMarkdown>
+              </div>
+              <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 ${flashcardFlipped ? 'opacity-100' : 'opacity-0'}`}>
+                <AutoFixMarkdown>{lessonFlashcards[currentFlashcardIndex]?.answer || ""}</AutoFixMarkdown>
+              </div>
+              <div className="absolute bottom-4 left-0 right-0 text-xs text-[var(--foreground)]/60">
+                {flashcardFlipped ? "Tap to view prompt" : "Tap to reveal answer"}
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                if (currentFlashcardIndex >= lessonFlashcards.length - 1) return;
+                setCurrentFlashcardIndex((idx) => Math.min(idx + 1, lessonFlashcards.length - 1));
+                setFlashcardFlipped(false);
+              }}
+              disabled={currentFlashcardIndex >= lessonFlashcards.length - 1}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--foreground)]/20 text-[var(--foreground)]/70 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Next flashcard"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 6l6 6-6 6" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     {/* Word explanation box - rendered as portal to avoid parent CSS transforms */}
     {showExplanation && createPortal(
       <div

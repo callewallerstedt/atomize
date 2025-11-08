@@ -1,5 +1,10 @@
 export type TopicMeta = { name: string; summary: string; coverage: number };
 export type QuizResult = { correct: boolean; explanation: string; hint?: string; fullSolution?: string };
+export type LessonFlashcard = {
+  prompt: string;
+  answer: string;
+};
+
 export type TopicGeneratedLesson = {
   title: string;
   body: string;
@@ -8,6 +13,7 @@ export type TopicGeneratedLesson = {
   userAnswers?: string[];
   quizResults?: { [index: number]: QuizResult };
   quizCompletedAt?: number; // timestamp when answers were checked
+  flashcards?: LessonFlashcard[];
 };
 export type TopicGeneratedContent = {
   overview: string;
