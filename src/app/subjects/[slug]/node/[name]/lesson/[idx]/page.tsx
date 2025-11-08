@@ -9,6 +9,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { loadSubjectData, upsertNodeContent, TopicGeneratedContent, StoredSubjectData } from "@/utils/storage";
 import { AutoFixMarkdown } from "@/components/AutoFixMarkdown";
+import LarsCoach from "@/components/LarsCoach";
 
 export default function LessonPage() {
   const params = useParams<{ slug: string; name: string; idx: string }>();
@@ -31,6 +32,8 @@ export default function LessonPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioLoading, setAudioLoading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [larsOpen, setLarsOpen] = useState(false);
+  const [practiceOpen, setPracticeOpen] = useState(false);
 
   async function readLesson() {
     if (isPlaying && audioRef.current) {
@@ -342,26 +345,60 @@ export default function LessonPage() {
                   .lesson-content h1, .lesson-content h2, .lesson-content h3{ margin-top: 0.6rem !important; margin-bottom: 0.35rem !important; }
                 `}</style>
               </div>
-              {(content?.lessons?.[lessonIndex]?.quiz?.length || 0) > 0 ? (
-                <div className="mt-6">
-                  <div className="mb-2 text-sm font-semibold text-[var(--foreground)]">Quick questions</div>
-                  <ol className="list-decimal space-y-2 pl-6 text-sm text-[var(--foreground)]">
-                    {content!.lessons![lessonIndex]!.quiz!.map((q, qi) => (
-                      <li key={qi} className="flex items-start justify-between gap-3">
-                        <span className="flex-1">
-                          <AutoFixMarkdown>{q.question}</AutoFixMarkdown>
-                        </span>
-                        <button
-                          className="ml-3 inline-flex h-8 shrink-0 items-center rounded-full border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 px-3 text-xs text-[var(--foreground)] hover:bg-[var(--background)]/80"
-                          onClick={() => setCheckedMap((m) => ({ ...m, [qi]: !m[qi] }))}
-                        >
-                          {checkedMap[qi] ? 'Checked' : 'Check'}
-                        </button>
-                      </li>
-                    ))}
-                  </ol>
+              {/* Testing features as dropdown list */}
+              <div className="mt-6 space-y-3">
+                {/* Practice Problems item */}
+                <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden">
+                  <button
+                    onClick={() => setPracticeOpen(!practiceOpen)}
+                    className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors ${practiceOpen ? 'rounded-t-xl' : 'rounded-xl'}`}
+                  >
+                    <span>Practice problems</span>
+                    <svg
+                      className={`h-4 w-4 transition-transform ${practiceOpen ? 'rotate-180' : ''}`}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path d="M19 9l-7 7-7-7"/>
+                    </svg>
+                  </button>
+                  {practiceOpen && (content?.lessons?.[lessonIndex]?.quiz?.length || 0) > 0 && (
+                    <div className="px-4 pt-6 pb-4">
+                      <ol className="list-decimal space-y-2 pl-6 text-sm text-[var(--foreground)]">
+                        {content!.lessons![lessonIndex]!.quiz!.map((q, qi) => (
+                          <li key={qi} className="flex items-start justify-between gap-3">
+                            <span className="flex-1">
+                              <AutoFixMarkdown>{q.question}</AutoFixMarkdown>
+                            </span>
+                            <button
+                              className="ml-3 inline-flex h-8 shrink-0 items-center rounded-full border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 px-3 text-xs text-[var(--foreground)] hover:bg-[var(--background)]/80"
+                              onClick={() => setCheckedMap((m) => ({ ...m, [qi]: !m[qi] }))}
+                            >
+                              {checkedMap[qi] ? 'Checked' : 'Check'}
+                            </button>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
                 </div>
-              ) : null}
+
+                {/* Lars item */}
+                <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden">
+                  <button
+                    onClick={() => setLarsOpen(true)}
+                    className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors rounded-xl"
+                    title="Open Lars"
+                  >
+                    <span>Explain for Lars</span>
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M9 18l6-6-6-6"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -402,6 +439,7 @@ export default function LessonPage() {
         </div>
       </div>
     , document.body)}
+    <LarsCoach open={larsOpen} onClose={() => setLarsOpen(false)} />
     </>
   );
 }

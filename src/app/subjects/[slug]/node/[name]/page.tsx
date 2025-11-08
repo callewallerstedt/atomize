@@ -11,6 +11,7 @@ import katex from "katex";
 import { Highlight, themes } from "prism-react-renderer";
 import { loadSubjectData, upsertNodeContent, TopicGeneratedContent, TopicGeneratedLesson, StoredSubjectData, markLessonReviewed, ReviewSchedule } from "@/utils/storage";
 import { AutoFixMarkdown } from "@/components/AutoFixMarkdown";
+import LarsCoach from "@/components/LarsCoach";
 
 // Regex patterns moved inside component to avoid any global scope issues
 
@@ -43,6 +44,8 @@ export default function NodePage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioLoading, setAudioLoading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [larsOpen, setLarsOpen] = useState(false);
+  const [practiceOpen, setPracticeOpen] = useState(false);
 
   async function readLesson() {
     if (isPlaying && audioRef.current) {
@@ -942,9 +945,31 @@ export default function NodePage() {
                     </div>
                   </div>
                 )}
-                {content.lessons[currentLessonIndex]?.quiz && content.lessons[currentLessonIndex].quiz.length > 0 && (
-                  <div className="mt-6">
-                    <h3 className="text-sm font-semibold text-[var(--foreground)] mb-4">Practice Problems</h3>
+              </div>
+            </div>
+
+            
+            {/* Testing features as dropdown list */}
+            <div className="mt-6 space-y-3">
+              {/* Practice Problems item */}
+              <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden">
+                <button
+                  onClick={() => setPracticeOpen(!practiceOpen)}
+                  className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors ${practiceOpen ? 'rounded-t-xl' : 'rounded-xl'}`}
+                >
+                  <span>Practice problems</span>
+                  <svg
+                    className={`h-4 w-4 transition-transform ${practiceOpen ? 'rotate-180' : ''}`}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M19 9l-7 7-7-7"/>
+                  </svg>
+                </button>
+                {practiceOpen && content.lessons[currentLessonIndex]?.quiz && content.lessons[currentLessonIndex].quiz.length > 0 && (
+                  <div className="px-4 pt-6 pb-4">
                     <div className="space-y-6">
                       {content.lessons[currentLessonIndex].quiz.map((q, qi) => (
                         <div key={qi} className="space-y-3 p-4 rounded-lg bg-[var(--background)]/60 border border-[var(--foreground)]/10">
@@ -957,7 +982,6 @@ export default function NodePage() {
                               onChange={(e) => {
                                 const nextVal = e.target.value;
                                 setUserAnswers(prev => ({ ...prev, [qi]: nextVal }));
-                                // Persist immediately
                                 try {
                                   if (!content) return;
                                   const next = { ...(content as TopicGeneratedContent) } as any;
@@ -971,10 +995,7 @@ export default function NodePage() {
                                   upsertNodeContent(slug, title, next);
                                 } catch {}
                               }}
-                              onTouchStart={(e) => {
-                                // Ensure focus works on iOS PWA
-                                e.currentTarget.focus();
-                              }}
+                              onTouchStart={(e) => { e.currentTarget.focus(); }}
                               className={
                                 quizResults?.[qi]
                                   ? quizResults[qi].correct
@@ -991,12 +1012,7 @@ export default function NodePage() {
                               autoCorrect="off"
                               autoCapitalize="off"
                               spellCheck={false}
-                              style={{
-                                WebkitUserSelect: 'text',
-                                WebkitTouchCallout: 'none',
-                                WebkitAppearance: 'none',
-                                touchAction: 'manipulation'
-                              }}
+                              style={{ WebkitUserSelect: 'text', WebkitTouchCallout: 'none', WebkitAppearance: 'none', touchAction: 'manipulation' }}
                             />
                             {quizResults?.[qi] && (
                               <div className="space-y-2">
@@ -1070,8 +1086,8 @@ export default function NodePage() {
                                 topic: title,
                                 lessonContent: currentLesson.body,
                                 courseContext: subjectData?.course_context || "",
-            answers,
-            languageName: subjectData?.course_language_name || ""
+                                answers,
+                                languageName: subjectData?.course_language_name || ""
                               })
                             });
 
@@ -1080,7 +1096,6 @@ export default function NodePage() {
 
                             const results = json.results || {};
                             setQuizResults(results);
-                            // Persist results and answers onto the lesson
                             try {
                               const next = { ...(content as TopicGeneratedContent) } as any;
                               next.lessons = Array.isArray(next.lessons) ? [...next.lessons] : [];
@@ -1109,64 +1124,22 @@ export default function NodePage() {
                   </div>
                 )}
               </div>
+
+                {/* Lars item */}
+                <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden">
+                  <button
+                    onClick={() => setLarsOpen(true)}
+                    className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors rounded-xl"
+                    title="Open Lars"
+                  >
+                    <span>Explain for Lars</span>
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M9 18l6-6-6-6"/>
+                    </svg>
+                  </button>
+                </div>
             </div>
 
-            
-            <div className="flex items-center justify-center mb-4">
-              <button
-                onClick={async () => {
-                  if (!content?.lessons?.[currentLessonIndex]?.body) return;
-
-                  try {
-                    const lesson = content.lessons[currentLessonIndex];
-                    const res = await fetch('/api/export-pdf', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        title: lesson.title,
-                        content: lesson.body,
-                        subject: subjectData?.subject || slug,
-                        topic: title,
-                      })
-                    });
-
-                    if (!res.ok) throw new Error('Failed to generate PDF');
-
-                    // Download the PDF
-                    const blob = await res.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    // Simple filename sanitization without regex
-                    let filename = lesson.title.toLowerCase();
-                    const invalidChars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
-                    for (const char of invalidChars) {
-                      filename = filename.split(char).join('_');
-                    }
-                    a.download = `${filename}.pdf`;
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    document.body.removeChild(a);
-                  } catch (err: any) {
-                    alert('Failed to export PDF: ' + err.message);
-                  }
-                }}
-                className="inline-flex h-9 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 text-sm font-medium text-white hover:opacity-95 transition-opacity"
-                title="Export lesson to PDF"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="mr-2">
-                  <path d="M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  <polyline points="14,2 14,8 20,8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  <polyline points="10,9 9,9 8,9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-                Export PDF
-              </button>
-            </div>
-
-            
             <div className="flex flex-col items-center gap-4 mt-8">
               {/* Review Rating */}
               {!reviewedThisSession.has(currentLessonIndex) ? (
@@ -1338,6 +1311,57 @@ export default function NodePage() {
         </div>
       </div>
     , document.body)}
+    {/* Bottom utilities: subtle Export PDF */}
+    {content && content.lessons && content.lessons[currentLessonIndex]?.body && (
+      <div className="mx-auto w-full max-w-3xl px-6 pb-10">
+        <div className="flex items-center justify-center mt-4">
+          <button
+            onClick={async () => {
+              try {
+                const lesson = content.lessons[currentLessonIndex];
+                const res = await fetch('/api/export-pdf', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    title: lesson.title,
+                    content: lesson.body,
+                    subject: subjectData?.subject || slug,
+                    topic: title,
+                  })
+                });
+                if (!res.ok) throw new Error('Failed to generate PDF');
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                let filename = lesson.title.toLowerCase();
+                const invalidChars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
+                for (const char of invalidChars) { filename = filename.split(char).join('_'); }
+                a.download = `${filename}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+              } catch (err: any) {
+                alert('Failed to export PDF: ' + err.message);
+              }
+            }}
+            className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-[var(--foreground)] bg-[var(--background)]/70 border border-[var(--foreground)]/15 hover:bg-[var(--background)]/80 transition-colors"
+            title="Export lesson to PDF"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="mr-2">
+              <path d="M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <polyline points="14,2 14,8 20,8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <polyline points="10,9 9,9 8,9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Export PDF
+          </button>
+        </div>
+      </div>
+    )}
+    <LarsCoach open={larsOpen} onClose={() => setLarsOpen(false)} />
     </>
   );
 }

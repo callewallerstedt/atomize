@@ -788,23 +788,29 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [uiZoom, setUiZoom] = useState<number>(1.4);
   const [isIOSStandalone, setIsIOSStandalone] = useState<boolean>(false);
   const infoMarkdown = `
-# Welcome to Synapse
-
-Synapse helps you turn course materials into study-friendly lessons with:
-
-- Lessons with clear structure and practice quizzes
-- Topic extraction from uploaded files
-- Quick explanations on any word or paragraph
-- Language-aware generation that follows your course language
-- Quick Learn for rapid lessons on any query
-- Export to PDF and spaced repetition review scheduling
-
-Tips:
-- Drop files on the home page to auto-create a course
-- Open a topic to generate a comprehensive lesson
-- Use the chat (bottom-right) to ask questions with page context
-- Toggle hints/solutions after checking quiz answers
-`.trim();
+  # Welcome to Synapse
+  
+  Synapse turns your course materials into an adaptive learning system.
+  
+  ## What it does
+  - Reads and analyzes **uploaded files** — lecture slides, old exams, syllabuses, or notes.
+  - **Extracts core topics and concepts** that define each course.
+  - Builds **structured lessons** that teach every concept from the ground up.
+  - Adds **context-aware explanations** — click on any word or formula to get a clear, relevant definition.
+  - Generates **interactive quizzes** at the end of each lesson for active recall and mastery.
+  - Supports **multiple languages**, following the language used in your materials.
+  - Provides **PDF export** and **spaced repetition** scheduling for long-term retention.
+  
+  ## How to use it
+  1. **Upload files** on the home page to create a new course.
+  2. Synapse automatically extracts and organizes the main topics.
+  3. **Open a topic** to generate a full AI-driven lesson.
+  4. **Click any word or paragraph** to get instant, context-aware help.
+  5. **Take the quiz** at the end of each lesson to test your understanding.
+  6. Revisit topics through the **review planner** to keep knowledge fresh.
+  
+  Synapse helps you learn smarter — not longer.
+  `.trim();
 
   useEffect(() => {
     setSubjects(getSubjects());
