@@ -15,6 +15,7 @@ export async function POST(req: Request) {
     const syllabus = String(body.syllabus || "");
     const text = String(body.text || "");
     const fileIds: string[] = Array.isArray(body.fileIds) ? body.fileIds : [];
+    const preferredLanguage: string | undefined = body.preferredLanguage ? String(body.preferredLanguage) : undefined;
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const system = [
@@ -22,7 +23,9 @@ export async function POST(req: Request) {
       "If insufficient, return the single word INSUFFICIENT and list what is missing.",
       "Return JSON only: { subject: string; topics: { name: string; summary: string; coverage: number }[] }",
       "8–16 concise topics. coverage sums ≈ 100 and never exceeds it. No external knowledge.",
-      "IMPORTANT: Use the SAME LANGUAGE as the provided text for all names and summaries.",
+      preferredLanguage
+        ? `CRITICAL: Write all names and summaries in ${preferredLanguage}.`
+        : "IMPORTANT: Use the SAME LANGUAGE as the provided text for all names and summaries.",
     ].join("\n");
 
     // Build input_text blocks by inlining text from provided documents (preferred path)

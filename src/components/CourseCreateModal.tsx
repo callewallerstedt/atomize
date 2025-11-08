@@ -3,22 +3,24 @@
 import { useRef, useState } from "react";
 import Modal from "@/components/Modal";
 
-export default function CourseCreateModal({ open, onClose, onCreate }: { open: boolean; onClose: () => void; onCreate: (name: string, syllabus: string, files: File[]) => void }) {
+export default function CourseCreateModal({ open, onClose, onCreate }: { open: boolean; onClose: () => void; onCreate: (name: string, syllabus: string, files: File[], preferredLanguage?: string) => void }) {
   const [name, setName] = useState("");
   const [syllabus, setSyllabus] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [preferredLanguage, setPreferredLanguage] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    onCreate(name.trim(), syllabus, files);
+    onCreate(name.trim(), syllabus, files, preferredLanguage.trim() || undefined);
     // Reset form
     setName("");
     setSyllabus("");
     setFiles([]);
     setIsDragging(false);
+    setPreferredLanguage("");
   }
 
   return (
@@ -50,6 +52,24 @@ export default function CourseCreateModal({ open, onClose, onCreate }: { open: b
             tabIndex={0}
             style={{ WebkitUserSelect: 'text', WebkitTouchCallout: 'none', WebkitAppearance: 'none' }}
           />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-[#A7AFBE]">Preferred language (optional)</label>
+          <input
+            value={preferredLanguage}
+            onChange={(e) => { if (!e.target) return; setPreferredLanguage(e.target.value); }}
+            onTouchStart={(e) => { (e.currentTarget as HTMLInputElement).focus(); }}
+            className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+            placeholder="e.g., English, Svenska, Español"
+            inputMode="text"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            tabIndex={0}
+            style={{ WebkitUserSelect: 'text', WebkitTouchCallout: 'none', WebkitAppearance: 'none' }}
+          />
+          <div className="mt-1 text-[10px] text-[#9AA3B2]">If empty, the language will be inferred from your files.</div>
         </div>
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Syllabus (optional)</label>

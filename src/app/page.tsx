@@ -123,7 +123,7 @@ function Home() {
     }
   };
 
-  const createCourse = async (name: string, syllabus: string, files: File[]) => {
+  const createCourse = async (name: string, syllabus: string, files: File[], preferredLanguage?: string) => {
     let effectiveName = name;
     let contextSource: string | null = null;
     try {
@@ -151,7 +151,7 @@ function Home() {
       }
       const combinedText = textParts.join("\n\n");
 
-      const initData: StoredSubjectData = { subject: effectiveName, files: storedFiles, combinedText, tree: null, topics: [], nodes: {}, progress: {}, course_context: syllabus };
+      const initData: StoredSubjectData = { subject: effectiveName, files: storedFiles, combinedText, tree: null, topics: [], nodes: {}, progress: {}, course_context: syllabus, course_language_name: preferredLanguage || undefined };
       saveSubjectData(unique, initData);
 
       let documents: Array<{ name: string; text: string }> = [];
@@ -174,6 +174,7 @@ function Home() {
             syllabus,
             text: combinedText,
             documents,
+            preferredLanguage: preferredLanguage || undefined,
           }),
         });
         if (summaryRes.ok) {
@@ -199,7 +200,7 @@ function Home() {
           const renameRes = await fetch('/api/course-detect-name', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ context: contextSource, fallbackTitle: effectiveName }),
+            body: JSON.stringify({ context: contextSource, fallbackTitle: effectiveName, preferredLanguage: preferredLanguage || undefined }),
           });
           if (renameRes.ok) {
             const renameJson = await renameRes.json().catch(() => ({}));
@@ -223,7 +224,7 @@ function Home() {
           const quickRes = await fetch('/api/course-quick-summary', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ context: quickContext }),
+            body: JSON.stringify({ context: quickContext, preferredLanguage: preferredLanguage || undefined }),
           });
           if (!quickRes.ok) return;
           const quickJson = await quickRes.json().catch(() => ({}));
@@ -412,10 +413,10 @@ function Home() {
       <CourseCreateModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreate={(name, syllabus, files) => {
+        onCreate={(name, syllabus, files, preferredLanguage) => {
           (async () => {
             setCreateOpen(false);
-            await createCourse(name, syllabus, files);
+            await createCourse(name, syllabus, files, preferredLanguage);
           })();
         }}
       />

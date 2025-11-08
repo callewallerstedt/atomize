@@ -7,8 +7,9 @@ export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => null) as { context?: string } | null;
+    const body = await req.json().catch(() => null) as { context?: string; preferredLanguage?: string } | null;
     const context = body?.context?.trim();
+    const preferredLanguage = body?.preferredLanguage?.trim();
 
     if (!context) {
       return new Response(JSON.stringify({ ok: false, error: "Missing context" }), { status: 400 });
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest) {
     const prompt = `You are an AI that reads a course context and produces a fast study synopsis.
 Return 2-3 short bullet insights (max 180 characters total) highlighting the core focus, difficulty, and standout themes.
 Use plain text with bullets.
-Write in the SAME LANGUAGE as the Course Context.
+${preferredLanguage ? `Write in ${preferredLanguage}.` : `Write in the SAME LANGUAGE as the Course Context.`}
 
 Course Context:
 ${context.slice(0, 8000)}
