@@ -168,18 +168,35 @@ export async function POST(req: Request) {
 
     const system = [
       "Read ONLY the attached files and any provided text. Do not use external knowledge.",
-      "If the attached material is insufficient, return the JSON with topics: [].",
-      "Extract the most relevant topics and core concepts students must learn from THESE materials.",
-      "Return STRICT JSON with this exact shape:",
+      "If the attached material is insufficient for topic extraction, return JSON with topics: [].",
+      "Task: Extract the most relevant learning topics and core skills from THESE materials.",
+      "Output STRICT JSON with this exact shape and key order:",
       "{ subject: string; topics: { name: string; summary: string; coverage: number }[] }",
-      "Rules:",
-      "- Use 8-16 concise topics (2-6 words) that together cover the course.",
-      "- Topics must be informed by the provided material ONLY.",
-      "- Include both conceptual areas and essential methods/skills (e.g., 'Gradient Descent', 'Markov Decision Processes').",
-      "- summary: 1–2 sentences explaining what a student will learn in this topic.",
-      "- coverage: integer 0–100 estimating how much of the total content this topic covers; topics should roughly sum close to 100 but must not exceed it.",
-      "- No subtopics, no markdown, no code fences. JSON only.",
-    ].join("\n");
+      "Inclusion criteria:",
+      "- Keep only explainable concepts, principles, models, theorems, laws, algorithms, procedures, or lab skills.",
+      "- If it cannot be taught or practiced as a standalone mini lesson, exclude it.",
+      "Exclusion criteria:",
+      "- Exclude metadata, logistics, and admin: einsendeaufgabe, aufgabenstellung, studienheft, code, persönl, personal data, syllabus, grading, schedule, deadlines, instructions, file names, section headers with no conceptual content.",
+      "- Exclude section numbers, page numbers, figure/table captions without substance, references, and acknowledgements.",
+      "Topic requirements:",
+      "- Produce 8–16 concise topics, each 2–6 words, covering the course material.",
+      "- Include both conceptual areas and essential methods or skills found in the files.",
+      "- Names must be specific and teachable, e.g., 'Heat Capacity', 'Calorific Value', 'Efficiency Analysis', 'Power Plant Balance'.",
+      "- No duplicates or near duplicates. Prefer the most general useful phrasing.",
+      "Summaries:",
+      "- 1–2 sentences stating what the student will learn or be able to do. Must reflect the provided material.",
+      "Coverage:",
+      "- Integer 0–100 per topic, estimating portion of total content. Sum should be 95–105. Never exceed 105. Never return a topic with 0.",
+      "Language and formatting:",
+      "- Use the same language as the source materials. Capitalize like a title. No quotes.",
+      "- No subtopics, bullets, markdown, or code fences. JSON only.",
+      "Quality controls before returning:",
+      "- Remove any item that matches the exclusion criteria or is not teachable.",
+      "- Merge or rename overlapping items to avoid duplication.",
+      "- If fewer than 8 valid topics remain, prefer broader conceptual groupings found in the files rather than inventing new content.",
+      "If any rule cannot be satisfied, return topics: []."
+    ].join('\\n');
+    
 
     const inputContent: any[] = [
       { type: "input_text", text: `Subject: ${subject}\nTask: Read all provided materials and extract the full set of topics and core concepts students need to learn.` },
