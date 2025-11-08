@@ -1,5 +1,9 @@
 "use client";
 
+import Link from "next/link";
+import { useState } from "react";
+import GlowSpinner from "@/components/GlowSpinner";
+
 type TreeNode = {
   name: string;
   subtopics?: TreeNode[];
@@ -24,13 +28,11 @@ export default function Tree({ data, hrefBase, onGenerate, generatedNames = [], 
   );
 }
 
-import Link from "next/link";
-import { useState } from "react";
-
 function Node({ name, childrenNodes, depth, hrefBase, path, onGenerate, generatedNames = [], generatingNames = [] }: { name: string; childrenNodes?: TreeNode[]; depth: number; hrefBase: string; path: string[]; onGenerate?: (name: string, path: string[]) => void; generatedNames?: string[]; generatingNames?: string[] }) {
   const hasChildren = (childrenNodes?.length || 0) > 0;
   const isRoot = depth === 0;
   const topicKey = name; // flat uniqueness by name
+  const spinnerId = `tree-${topicKey.toLowerCase().replace(/[^a-z0-9]/g, "-") || "root"}-${depth}`;
   const isGenerated = generatedNames.includes(topicKey);
   const isGenerating = generatingNames.includes(topicKey);
   const [expanded, setExpanded] = useState(true);
@@ -74,7 +76,8 @@ function Node({ name, childrenNodes, depth, hrefBase, path, onGenerate, generate
             )}
             {isGenerating && (
               <span className="inline-flex items-center gap-2 rounded-full border border-[#2B3140] bg-[#0F141D] px-2 py-0.5 text-[11px] text-[#9AA3B2]">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" /> Generating…
+                <GlowSpinner size={28} padding={0} inline className="shrink-0" ariaLabel="Generating topic" idSuffix={spinnerId} />
+                Generating…
               </span>
             )}
             {onGenerate && isGenerated && !isGenerating && (
@@ -96,5 +99,3 @@ function Node({ name, childrenNodes, depth, hrefBase, path, onGenerate, generate
     </div>
   );
 }
-
-

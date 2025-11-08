@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, Rajdhani } from "next/font/google";
+import { Geist, Geist_Mono, Rajdhani, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import Shell from "@/components/Shell";
 
@@ -17,6 +17,12 @@ const rajdhani = Rajdhani({
   variable: "--font-rajdhani",
   subsets: ["latin"],
   weight: "600", // Semibold
+});
+
+const ibmPlexMono = IBM_Plex_Mono({
+  variable: "--font-ibm-plex-mono",
+  subsets: ["latin"],
+  weight: "400",
 });
 
 export const metadata: Metadata = {
@@ -51,7 +57,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} ${rajdhani.variable} antialiased`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} ${rajdhani.variable} ${ibmPlexMono.variable} antialiased`}>
         <Shell>{children}</Shell>
       </body>
     </html>

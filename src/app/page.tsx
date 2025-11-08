@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useEffect, useState, useRef } from "react";
+import React, { Suspense, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import GlowSpinner from "@/components/GlowSpinner";
 import CourseCreateModal from "@/components/CourseCreateModal";
 import LoginPage from "@/components/LoginPage";
 import { saveSubjectData, StoredSubjectData, loadSubjectData } from "@/utils/storage";
@@ -55,10 +56,12 @@ function Home() {
           try {
             const subjectsRes = await fetch("/api/subjects", { credentials: "include" });
             const subjectsJson = await subjectsRes.json().catch(() => ({}));
-            if (subjectsRes.ok && Array.isArray(subjectsJson?.subjects)) {
+              if (subjectsRes.ok && Array.isArray(subjectsJson?.subjects)) {
+              // Filter out quicklearn from homepage
+              const filteredSubjects = subjectsJson.subjects.filter((s: Subject) => s.slug !== "quicklearn");
               // Update localStorage with server subjects
               localStorage.setItem("atomicSubjects", JSON.stringify(subjectsJson.subjects));
-              setSubjects(subjectsJson.subjects);
+              setSubjects(filteredSubjects);
               
               // Also sync subject data from server
               for (const subject of subjectsJson.subjects) {
@@ -90,7 +93,10 @@ function Home() {
   const searchParams = useSearchParams();
   const [isDragging, setIsDragging] = useState(false);
   useEffect(() => {
-    setSubjects(readSubjects());
+    const allSubjects = readSubjects();
+    // Filter out quicklearn from homepage
+    const filteredSubjects = allSubjects.filter((s) => s.slug !== "quicklearn");
+    setSubjects(filteredSubjects);
   }, []);
 
   // Close dropdown when clicking outside
@@ -114,20 +120,9 @@ function Home() {
   }, [searchParams]);
 
   // Show login page if not authenticated
+  // Don't show spinner while checking auth - let Shell's LoadingScreen handle it
   if (checkingAuth) {
-    return (
-      <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--background)]">
-        <div className="relative w-24 h-24">
-          <div
-            className="absolute inset-0 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-spin"
-            style={{
-              WebkitMask: "radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)",
-              mask: "radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)",
-            }}
-          />
-        </div>
-      </div>
-    );
+    return null; // Return null to let Shell render and show LoadingScreen
   }
 
   if (!isAuthenticated) {
@@ -149,36 +144,49 @@ function Home() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
 
-      // Create a temporary subject for the quick learn lesson
-      const tempSubjectSlug = `quick-learn-${Date.now()}`;
-      const tempSubjectData: StoredSubjectData = {
-        subject: "Quick Lesson",
-        course_context: "",
-        combinedText: "",
-        topics: [],
-        nodes: {
-          [quickLearnQuery]: {
-            overview: `Quick lesson on: ${quickLearnQuery}`,
-            symbols: [],
-            lessonsMeta: [{ type: "Quick Lesson", title: quickLearnQuery }],
-            lessons: [{
-              title: quickLearnQuery,
-              body: json.data.body,
-              quiz: json.data.quiz || []
-            }],
-            rawLessonJson: [json.raw || JSON.stringify(json.data)]
-          }
-        },
-        files: [],
-        progress: {},
+      // Load or create the quicklearn subject
+      const quickLearnSlug = "quicklearn";
+      let quickLearnData = loadSubjectData(quickLearnSlug) as StoredSubjectData | null;
+      
+      if (!quickLearnData) {
+        quickLearnData = {
+          subject: "Quick Learn",
+          course_context: "",
+          combinedText: "",
+          topics: [],
+          nodes: {},
+          files: [],
+          progress: {},
+        };
+      }
+
+      // Ensure nodes object exists
+      if (!quickLearnData.nodes) {
+        quickLearnData.nodes = {};
+      }
+
+      // Add the new quick learn lesson
+      const lessonTitle = json.data.title || quickLearnQuery;
+      quickLearnData.nodes[lessonTitle] = {
+        overview: `Quick lesson on: ${quickLearnQuery}`,
+        symbols: [],
+        lessonsMeta: [{ type: "Quick Lesson", title: lessonTitle }],
+        lessons: [{
+          title: lessonTitle,
+          body: json.data.body,
+          quiz: json.data.quiz || []
+        }],
+        rawLessonJson: [json.raw || JSON.stringify(json.data)]
       };
 
-      saveSubjectData(tempSubjectSlug, tempSubjectData);
+      // Save to server (await to ensure it's saved)
+      const { saveSubjectDataAsync } = await import("@/utils/storage");
+      await saveSubjectDataAsync(quickLearnSlug, quickLearnData);
 
       // Close modal and navigate to the lesson
       setQuickLearnOpen(false);
       router.replace('/');
-      router.push(`/subjects/${tempSubjectSlug}/node/${encodeURIComponent(quickLearnQuery)}`);
+      router.push(`/subjects/${quickLearnSlug}/node/${encodeURIComponent(lessonTitle)}`);
     } catch (err: any) {
       alert(err?.message || "Failed to generate quick learn lesson");
     } finally {
@@ -357,7 +365,7 @@ function Home() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] px-6 py-10">
+    <div className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] px-6 pt-10 pb-4">
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
         <h1 className="text-xl font-semibold text-[var(--foreground)]">Your subjects</h1>
         <div className="flex items-center gap-3">
@@ -372,7 +380,7 @@ function Home() {
       </div>
 
       <div className="mx-auto mt-6 grid w-full max-w-5xl grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {subjects.map((s) => (
+        {subjects.filter((s) => s.slug !== "quicklearn").map((s) => (
           <div
             key={s.slug}
             className={`relative rounded-2xl bg-[var(--background)] p-6 text-[var(--foreground)] transition-all duration-200 min-h-[80px] shadow-[0_2px_8px_rgba(0,0,0,0.7)] ${
@@ -525,6 +533,27 @@ function Home() {
         </div>
         {subjects.length === 0 && null}
       </div>
+
+      {/* Note from developer */}
+      <div className="mx-auto mt-8 w-full max-w-5xl relative">
+        {/* Animated gradient glow shadow behind the box */}
+        <div className="absolute -inset-2 rounded-2xl bg-gradient-to-r from-[var(--accent-cyan)]/60 via-[var(--accent-pink)]/60 to-[var(--accent-cyan)]/60 bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] blur-xl -z-10 pointer-events-none" />
+        {/* Dark box on top */}
+        <div className="relative rounded-2xl bg-[var(--background)] p-6 shadow-[0_2px_8px_rgba(0,0,0,0.7)] z-0">
+          <div className="text-sm text-[var(--foreground)] leading-relaxed space-y-2">
+            <p className="font-semibold">Hallo, Det som funkar är:</p>
+            <ul className="list-disc list-inside space-y-1 ml-2">
+              <li>lägga till kurser här.</li>
+              <li>quick learn sidan.</li>
+              <li>efter att du genererat en lektion så kan du klicka på valfritt ord för att få en förklaring.</li>
+              <li>Chatta med Lars är liksom meningen att du ska behöva förklara för honom</li>
+            </ul>
+            <p className="mt-3">mycket skit som inte funkar men aja</p>
+            <p className="mt-2">tack, adios</p>
+          </div>
+        </div>
+      </div>
+
       <CourseCreateModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
@@ -539,7 +568,13 @@ function Home() {
       {/* Quick Lesson Modal */}
       {quickLearnOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className={isIOSStandalone ? "w-full max-w-md rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)] p-6" : "w-full max-w-md rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md p-6"}>
+          <div className={isIOSStandalone ? "relative w-full max-w-md rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)] p-6" : "relative w-full max-w-md rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md p-6"}>
+            {quickLearnLoading && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl bg-[var(--background)]/95 backdrop-blur-md">
+                <GlowSpinner size={120} ariaLabel="Generating quick lesson" idSuffix="home-quicklesson" />
+                <div className="text-sm font-medium text-[var(--foreground)]/80">Generating lesson…</div>
+              </div>
+            )}
             <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Quick Lesson</h3>
             <div className="mb-4">
               <label className="mb-2 block text-xs text-[var(--foreground)]/70">What do you want to learn?</label>

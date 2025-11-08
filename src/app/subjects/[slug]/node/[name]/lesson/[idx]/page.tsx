@@ -17,6 +17,7 @@ import {
 } from "@/utils/storage";
 import { AutoFixMarkdown } from "@/components/AutoFixMarkdown";
 import LarsCoach from "@/components/LarsCoach";
+import GlowSpinner from "@/components/GlowSpinner";
 
 export default function LessonPage() {
   const params = useParams<{ slug: string; name: string; idx: string }>();
@@ -113,20 +114,25 @@ export default function LessonPage() {
       if (!cards.length) {
         throw new Error("No flashcards were returned. Please try again.");
       }
-      let updatedContent: TopicGeneratedContent | null = null;
-      setContent((prev) => {
-        if (!prev) return prev;
-        const nextLessons = Array.isArray(prev.lessons) ? [...prev.lessons] : [];
-        const existing = nextLessons[lessonIndex];
-        if (!existing) return prev;
-        const updatedLesson: TopicGeneratedLesson = { ...(existing as TopicGeneratedLesson), flashcards: cards };
-        nextLessons[lessonIndex] = updatedLesson;
-        updatedContent = { ...prev, lessons: nextLessons };
-        return updatedContent;
-      });
-      if (updatedContent) {
-        upsertNodeContent(slug, title, updatedContent);
+      // Compute next content immediately and persist before user can refresh
+      const prevContent = content;
+      if (!prevContent || !Array.isArray(prevContent.lessons)) {
+        throw new Error("Lesson content not available. Try again.");
       }
+      const nextLessons = [...prevContent.lessons];
+      const existing = nextLessons[lessonIndex];
+      if (!existing) {
+        throw new Error("Lesson not available. Try again.");
+      }
+      const updatedLesson: TopicGeneratedLesson = { ...(existing as TopicGeneratedLesson), flashcards: cards };
+      nextLessons[lessonIndex] = updatedLesson;
+      const updatedContent: TopicGeneratedContent = { ...prevContent, lessons: nextLessons };
+
+      // Update UI immediately
+      setContent(updatedContent);
+      // Persist to local storage and server (await server sync to guarantee durability)
+      await upsertNodeContentAsync(slug, title, updatedContent as TopicGeneratedContent);
+
       openFlashcardsViewer(0, cards.length);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to generate flashcards";
@@ -198,7 +204,75 @@ export default function LessonPage() {
     };
   }, []);
 
-  const subjectData = useMemo(() => loadSubjectData(slug), [slug]);
+  const [subjectData, setSubjectData] = useState<StoredSubjectData | null>(null);
+  
+  // Load subject data from localStorage and server
+  useEffect(() => {
+    // Load from localStorage first
+    const localData = loadSubjectData(slug);
+    setSubjectData(localData);
+    
+    // Then fetch from server if authenticated
+    (async () => {
+      try {
+        const meRes = await fetch("/api/me", { credentials: "include" });
+        const meJson = await meRes.json().catch(() => ({}));
+        if (meJson?.user) {
+          const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, { credentials: "include" });
+          const dataJson = await dataRes.json().catch(() => ({}));
+          if (dataRes.ok && dataJson?.data) {
+            // Merge server data with any richer local data (preserve locally generated flashcards)
+            const local = loadSubjectData(slug);
+            let merged = dataJson.data as StoredSubjectData;
+            try {
+              if (local && local.nodes && merged?.nodes) {
+                const localNode = local.nodes[title] as any;
+                const serverNode = merged.nodes[title] as any;
+                if (localNode && typeof localNode === "object") {
+                  const outNode = serverNode && typeof serverNode === "object"
+                    ? { ...serverNode }
+                    : { overview: "", symbols: [], lessons: [] as any[] };
+                  const localLessons = Array.isArray(localNode.lessons) ? localNode.lessons : [];
+                  const serverLessons = Array.isArray(outNode.lessons) ? outNode.lessons : [];
+                  const maxLen = Math.max(localLessons.length, serverLessons.length);
+                  const combinedLessons: any[] = new Array(maxLen);
+                  for (let i = 0; i < maxLen; i++) {
+                    const sl = serverLessons[i];
+                    const ll = localLessons[i];
+                    if (sl && ll) {
+                      combinedLessons[i] = {
+                        ...sl,
+                        flashcards: Array.isArray(sl.flashcards) && sl.flashcards.length > 0
+                          ? sl.flashcards
+                          : (Array.isArray(ll.flashcards) ? ll.flashcards : undefined),
+                      };
+                    } else if (sl) {
+                      combinedLessons[i] = sl;
+                    } else if (ll) {
+                      combinedLessons[i] = ll;
+                    } else {
+                      combinedLessons[i] = null;
+                    }
+                  }
+                  outNode.lessons = combinedLessons;
+                  merged = {
+                    ...merged,
+                    nodes: {
+                      ...merged.nodes,
+                      [title]: outNode,
+                    },
+                  };
+                }
+              }
+            } catch {}
+            localStorage.setItem(`atomicSubjectData:${slug}`, JSON.stringify(merged));
+            setSubjectData(merged);
+          }
+        }
+      } catch {}
+    })();
+  }, [slug]);
+  
   const courseTopics = useMemo(() => (subjectData?.topics || []).map((t: any) => String(t.name)), [subjectData]);
 
   useEffect(() => {
@@ -361,7 +435,7 @@ export default function LessonPage() {
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="flex flex-col items-center gap-5">
-              <div className="h-20 w-20 animate-pulse rounded-full bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)]" />
+              <GlowSpinner size={140} ariaLabel="Loading lesson" idSuffix="lesson-detail" />
               <div className="text-sm text-[var(--foreground)]/70">Generating lesson…</div>
             </div>
           </div>
@@ -450,10 +524,10 @@ export default function LessonPage() {
               {/* Testing features as dropdown list */}
               <div className="mt-6 space-y-3">
                 {/* Practice Problems item */}
-                <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden">
+                <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
                   <button
                     onClick={() => setPracticeOpen(!practiceOpen)}
-                    className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors ${practiceOpen ? 'rounded-t-xl' : 'rounded-xl'}`}
+                    className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors ${practiceOpen ? 'rounded-t-xl border-b border-[var(--foreground)]/10 !shadow-none' : 'rounded-xl'}`}
                   >
                     <span>Practice problems</span>
                     <svg
@@ -467,7 +541,7 @@ export default function LessonPage() {
                     </svg>
                   </button>
                   {practiceOpen && (content?.lessons?.[lessonIndex]?.quiz?.length || 0) > 0 && (
-                    <div className="px-4 pt-6 pb-4">
+                    <div className="px-4 pt-4 pb-4">
                       <ol className="list-decimal space-y-2 pl-6 text-sm text-[var(--foreground)]">
                         {content!.lessons![lessonIndex]!.quiz!.map((q, qi) => (
                           <li key={qi} className="flex items-start justify-between gap-3">
@@ -488,12 +562,33 @@ export default function LessonPage() {
                 </div>
 
                 {/* Flashcards item */}
-                <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden">
+                <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
                   {flashcardOptionsOpen ? (
-                    <div className="px-4 py-4 space-y-4">
-                      <div className="text-sm font-medium text-[var(--foreground)]">
-                        Choose how many flashcards to generate
-                      </div>
+                    <>
+                      <button
+                        onClick={() => {
+                          if (generatingFlashcards) return;
+                          setFlashcardOptionsOpen(false);
+                          setFlashcardError(null);
+                        }}
+                        className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors rounded-t-xl border-b border-[var(--foreground)]/10 !shadow-none`}
+                        title="Close flashcard options"
+                      >
+                        <span>Flashcards</span>
+                        <svg
+                          className={`h-4 w-4 transition-transform ${flashcardOptionsOpen ? 'rotate-180' : ''}`}
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path d="M19 9l-7 7-7-7"/>
+                        </svg>
+                      </button>
+                      <div className="px-4 pt-4 pb-4 space-y-4">
+                        <div className="text-sm font-medium text-[var(--foreground)]">
+                          Choose how many flashcards to generate
+                        </div>
                       <div className="grid grid-cols-4 gap-2">
                         {flashcardCounts.map((count) => (
                           <button
@@ -509,49 +604,45 @@ export default function LessonPage() {
                       {flashcardError && (
                         <div className="text-xs text-[#FFC0DA]">{flashcardError}</div>
                       )}
-                      <div className="flex items-center justify-between text-xs text-[var(--foreground)]/70">
-                        {lessonFlashcards.length > 0 ? (
+                      {lessonFlashcards.length > 0 && (
+                        <div className="text-xs text-[var(--foreground)]/70">
                           <button
                             onClick={() => openFlashcardsViewer(0, lessonFlashcards.length)}
-                            className="hover:underline"
+                            className="hover:underline !shadow-none"
                           >
                             View saved flashcards ({lessonFlashcards.length})
                           </button>
-                        ) : (
-                          <span />
-                        )}
-                        <button
-                          onClick={() => {
-                            if (generatingFlashcards) return;
-                            setFlashcardOptionsOpen(false);
-                            setFlashcardError(null);
-                          }}
-                          className="hover:underline"
-                        >
-                          Cancel
-                        </button>
+                        </div>
+                      )}
                       </div>
-                    </div>
+                    </>
                   ) : (
                     <button
                       onClick={() => {
-                        setFlashcardOptionsOpen(true);
+                        if (generatingFlashcards) return;
+                        setFlashcardOptionsOpen(!flashcardOptionsOpen);
                         setFlashcardError(null);
                       }}
                       disabled={!currentLesson?.body}
-                      className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors rounded-xl disabled:opacity-60 disabled:cursor-not-allowed"
+                      className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors ${flashcardOptionsOpen ? 'rounded-t-xl' : 'rounded-xl'} disabled:opacity-60 disabled:cursor-not-allowed`}
                       title="Generate flashcards from this lesson"
                     >
                       <span>Flashcards</span>
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M4 6h16v12H4z" />
+                      <svg
+                        className={`h-4 w-4 transition-transform ${flashcardOptionsOpen ? 'rotate-180' : ''}`}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M19 9l-7 7-7-7"/>
                       </svg>
                     </button>
                   )}
                 </div>
 
                 {/* Lars item */}
-                <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden">
+                <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
                   <button
                     onClick={() => setLarsOpen(true)}
                     className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors rounded-xl"
@@ -559,7 +650,7 @@ export default function LessonPage() {
                   >
                     <span>Explain for Lars</span>
                     <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M9 18l6-6-6-6"/>
+                      <path d="M19 9l-7 7-7-7"/>
                     </svg>
                   </button>
                 </div>
@@ -585,7 +676,6 @@ export default function LessonPage() {
             <span>
               Flashcard {currentFlashcardIndex + 1} of {lessonFlashcards.length}
             </span>
-            <span>{flashcardFlipped ? "Answer" : "Prompt"}</span>
           </div>
           <div className="relative flex items-center justify-center gap-3">
             <button

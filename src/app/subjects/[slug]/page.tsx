@@ -9,6 +9,7 @@ import { loadSubjectData, saveSubjectData, saveSubjectDataAsync, StoredSubjectDa
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import Modal from "@/components/Modal";
+import GlowSpinner from "@/components/GlowSpinner";
 // Tree view replaced by a simple topic list with actions
 
 type Subject = {
@@ -145,27 +146,46 @@ export default function SubjectPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
 
-      // Save the quick learn lesson
-      const data = loadSubjectData(slug) as StoredSubjectData | null;
-      if (data) {
-        if (!data.nodes) data.nodes = {};
-        data.nodes[tempTopicName] = {
-          overview: `Quick lesson on: ${quickLearnQuery}`,
-          symbols: [],
-          lessonsMeta: [{ type: "Quick Learn", title: tempTopicName }],
-          lessons: [{
-            title: tempTopicName,
-            body: json.data.body,
-            quiz: json.data.quiz || []
-          }],
-          rawLessonJson: [json.raw || JSON.stringify(json.data)]
+      // Save to the quicklearn subject instead of the current subject
+      const quickLearnSlug = "quicklearn";
+      let quickLearnData = loadSubjectData(quickLearnSlug) as StoredSubjectData | null;
+      
+      if (!quickLearnData) {
+        quickLearnData = {
+          subject: "Quick Learn",
+          course_context: "",
+          combinedText: "",
+          topics: [],
+          nodes: {},
+          files: [],
+          progress: {},
         };
-        saveSubjectData(slug, data);
       }
+
+      if (!quickLearnData.nodes) {
+        quickLearnData.nodes = {};
+      }
+
+      const lessonTitle = json.data.title || tempTopicName;
+      quickLearnData.nodes[lessonTitle] = {
+        overview: `Quick lesson on: ${quickLearnQuery}`,
+        symbols: [],
+        lessonsMeta: [{ type: "Quick Learn", title: lessonTitle }],
+        lessons: [{
+          title: lessonTitle,
+          body: json.data.body,
+          quiz: json.data.quiz || []
+        }],
+        rawLessonJson: [json.raw || JSON.stringify(json.data)]
+      };
+
+      // Save to server (await to ensure it's saved)
+      const { saveSubjectDataAsync } = await import("@/utils/storage");
+      await saveSubjectDataAsync(quickLearnSlug, quickLearnData);
 
       // Close modal and navigate to the lesson
       setQuickLearnOpen(false);
-      router.push(`/subjects/${slug}/node/${encodeURIComponent(tempTopicName)}`);
+      router.push(`/subjects/${quickLearnSlug}/node/${encodeURIComponent(lessonTitle)}`);
     } catch (err: any) {
       alert(err?.message || "Failed to generate quick learn lesson");
     } finally {
@@ -220,10 +240,10 @@ export default function SubjectPage() {
       <div className="mx-auto w-full max-w-3xl px-6 py-8">
         {(generatingBasics || loading) && (
           <div className="fixed inset-0 z-[9998] flex flex-col items-center justify-center bg-[var(--background)]/80 backdrop-blur-sm">
-            <div className="relative w-24 h-24">
-              <div className="absolute inset-0 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-spin" style={{ WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)', mask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)' }}></div>
+            <GlowSpinner size={160} ariaLabel="Extracting topics" idSuffix="subject-extract" />
+            <div className="mt-4 text-lg font-semibold text-[var(--foreground)]">
+              {generatingBasics ? 'Generating course basics…' : 'Extracting topics…'}
             </div>
-            <div className="mt-4 text-lg font-semibold text-[var(--foreground)]">Extracting Topics...</div>
           </div>
         )}
         {/* Reviews Due Banner */}
@@ -445,9 +465,19 @@ export default function SubjectPage() {
                               title="Generate AI"
                             />
                           )}
-                          {isGenerating && (
-                            <span className="inline-flex items-center gap-2 rounded-full border border-[var(--foreground)]/20 bg-[var(--background)] px-2 py-0.5 text-[11px] text-[var(--foreground)]/70"><span className="h-2 w-2 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" /> Generating…</span>
-                          )}
+                        {isGenerating && (
+                          <span className="inline-flex items-center gap-2 rounded-full border border-[var(--foreground)]/20 bg-[var(--background)] px-2 py-0.5 text-[11px] text-[var(--foreground)]/70">
+                            <GlowSpinner
+                              size={28}
+                              padding={0}
+                              inline
+                              className="shrink-0"
+                              ariaLabel="Generating topic"
+                              idSuffix={`topic-${i}`}
+                            />
+                            Generating…
+                          </span>
+                        )}
                         </div>
                       )}
                       </div>
@@ -735,7 +765,13 @@ export default function SubjectPage() {
         </Modal>
 
         <Modal open={quickLearnOpen} onClose={() => setQuickLearnOpen(false)}>
-          <div className="space-y-4">
+          <div className="relative space-y-4">
+            {quickLearnLoading && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl bg-[var(--background)]/95 backdrop-blur-md">
+                <GlowSpinner size={120} ariaLabel="Generating quick lesson" idSuffix="subject-quicklesson" />
+                <div className="text-sm font-medium text-[var(--foreground)]/80">Generating lesson…</div>
+              </div>
+            )}
             <h3 className="text-lg font-semibold text-[var(--foreground)]">Quick Learn</h3>
             <div>
               <label className="mb-2 block text-xs text-[var(--foreground)]/70">What do you want to learn?</label>
@@ -779,8 +815,8 @@ export default function SubjectPage() {
       </div>
       {loading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="flex flex-col items-center gap-6">
-            <div className="h-24 w-24 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
+          <div className="flex flex-col items-center gap-4">
+            <GlowSpinner size={160} ariaLabel="Analyzing files" idSuffix="subject-analyze" />
             <div className="text-base font-medium text-[var(--foreground)]">Analyzing files…</div>
           </div>
         </div>
@@ -788,5 +824,3 @@ export default function SubjectPage() {
     </div>
   );
 }
-
-

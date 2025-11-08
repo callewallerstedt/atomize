@@ -286,22 +286,15 @@ export default function ExamSnipePage() {
                 <button
                   onClick={handleExamSnipe}
                   disabled={examFiles.length === 0}
-                  className="relative inline-flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white font-semibold text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                  className="relative inline-flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] !text-white font-semibold text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                 >
                   Analyze
                 </button>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-32 space-y-6">
-                <div className="relative w-24 h-24">
-                  {/* Spinning gradient ring */}
-                  <div className="absolute inset-0 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-spin" 
-                       style={{ 
-                         WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)',
-                         mask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)'
-                       }}>
-                  </div>
-                </div>
+                {/* Unified glow spinner */}
+                {React.createElement(require('@/components/GlowSpinner').default, { size: 160, ariaLabel: 'Analyzing', idSuffix: 'exam' })}
                 
                   <div className="text-center space-y-4">
                     <div className="text-lg font-semibold text-[var(--foreground)] mb-1">Analyzing Exams...</div>

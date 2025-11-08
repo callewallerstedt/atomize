@@ -74,6 +74,18 @@ export async function syncSubjectDataToServer(slug: string, data: StoredSubjectD
     const meRes = await fetch("/api/me", { credentials: "include" });
     const meJson = await meRes.json().catch(() => ({}));
     if (meJson?.user) {
+      // Ensure subject exists in database (especially for quicklearn)
+      if (slug === "quicklearn") {
+        try {
+          await fetch("/api/subjects", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ name: data.subject || "Quick Learn", slug }),
+          }).catch(() => {}); // Ignore if already exists
+        } catch {}
+      }
+      
       await fetch("/api/subject-data", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },

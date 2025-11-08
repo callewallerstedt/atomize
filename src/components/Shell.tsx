@@ -9,6 +9,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import SettingsModal from "@/components/SettingsModal";
 import Modal from "@/components/Modal";
+import GlowSpinner from "@/components/GlowSpinner";
 
 // Generate stable dots that don't change on re-render
 function generateDots(count: number) {
@@ -38,7 +39,14 @@ function generateDots(count: number) {
 // Loading Screen Component
 function LoadingScreen({ onComplete }: { onComplete: () => void }) {
   const [isFadingOut, setIsFadingOut] = useState(false);
-  const loadingDots = useMemo(() => generateDots(80), []);
+  const [loadingDots, setLoadingDots] = useState<ReturnType<typeof generateDots>>([]);
+  
+  // Generate dots only on client side to avoid hydration mismatch
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setLoadingDots(generateDots(80));
+    }
+  }, []);
 
   // Play startup sound when component mounts
   useEffect(() => {
@@ -118,10 +126,10 @@ function LoadingScreen({ onComplete }: { onComplete: () => void }) {
               <circle cx="50" cy="50" r="38" fill="black" />
             </mask>
             <filter id="blur-soft-loading" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
-              <feGaussianBlur stdDeviation="4" />
+              <feGaussianBlur stdDeviation="4" edgeMode="duplicate" />
             </filter>
             <filter id="blur-wide-loading" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
-              <feGaussianBlur stdDeviation="8" />
+              <feGaussianBlur stdDeviation="8" edgeMode="duplicate" />
             </filter>
           </defs>
           {/* glow and crisp ring: rotate together */}
@@ -184,10 +192,11 @@ function LoadingScreen({ onComplete }: { onComplete: () => void }) {
       {/* Welcome text */}
       <div className="text-center">
         <h1
-          className="text-7xl font-semibold mb-4 text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite]"
+          className="text-7xl font-semibold mb-4 text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider relative inline-block"
           style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}
         >
-          Welcome
+          Welcome to Synapse
+          <sup className="text-xl text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] absolute -top-1 left-full ml-1" style={{ fontFamily: 'var(--font-ibm-plex-mono), monospace' }}>(ALPHA)</sup>
         </h1>
       </div>
     </div>
@@ -1041,26 +1050,27 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      {/* Loading Screen */}
-      {isLoading && isAuthenticated && <LoadingScreen onComplete={handleLoadingComplete} />}
+      {/* Loading Screen - show immediately when authenticated, or while checking auth (assumes will be authenticated after login) */}
+      {isLoading && (!authChecked || isAuthenticated) && <LoadingScreen onComplete={handleLoadingComplete} />}
     <div className="flex min-h-screen bg-[var(--background)] text-[var(--foreground)]" style={isIOSStandalone ? undefined : { zoom: uiZoom }}>
       {/* Main content */}
       <div className="flex min-h-screen w-full flex-col">
         {authChecked && isAuthenticated && (
-        <header className="sticky top-0 z-50 backdrop-blur supports-[backdrop-filter]:bg-[var(--background)]/70 bg-[var(--background)] border-b border-[#4A5568]" style={{ paddingTop: 'max(3px, calc(env(safe-area-inset-top, 0px) / 2))' }}>
+        <header className="sticky top-0 z-50 backdrop-blur supports-[backdrop-filter]:bg-[var(--background)]/70 bg-[var(--background)]" style={{ paddingTop: 'max(3px, calc(env(safe-area-inset-top, 0px) / 2))' }}>
           <nav className="relative flex h-14 items-center px-4">
+            {/* Logo and title */}
+            <button
+              onClick={() => router.push('/')}
+              className="flex items-center gap-2 mr-1 hover:opacity-80 transition-opacity !shadow-none pl-0 pr-15 py-2"
+            >
+              <GlowSpinner size={24} ariaLabel="Synapse" idSuffix="header" padding={10} />
+              <h1 className="text-lg font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider relative inline-block" style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}>
+                SYNAPSE
+                <sup className="text-xs text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] absolute -top-0.5 left-full ml-1" style={{ fontFamily: 'var(--font-ibm-plex-mono), monospace' }}>(ALPHA)</sup>
+              </h1>
+            </button>
             {/* Left side buttons */}
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => router.push('/')}
-                className="relative inline-flex items-center rounded-xl px-3 py-1.5
-                           text-white bg-[var(--background)]/90 backdrop-blur-md
-                           shadow-[0_2px_8px_rgba(0,0,0,0.7)]
-                           hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95
-                           transition-all duration-200 ease-out"
-              >
-                <span>Home</span>
-              </button>
               <div className="relative tools-dropdown">
                 <button
                   onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
@@ -1101,13 +1111,13 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                         </button>
                         <button
                           onClick={() => {
-                            router.push('/?quickLesson=1');
+                            router.push('/quicklearn');
                             setToolsDropdownOpen(false);
                           }}
                           className="w-full text-left px-3 py-2 rounded-lg bg-[var(--background)]/60 text-[var(--foreground)]
                                      hover:bg-[var(--background)]/80 transition-colors text-sm"
                         >
-                          Quick Lesson
+                          Quick Learn
                         </button>
                         <button
                           onClick={() => {
@@ -1184,6 +1194,13 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               </button>
             </div>
           </nav>
+          {/* Glowing gradient separator */}
+          <div className="relative h-[1px] overflow-hidden">
+            {/* Main line */}
+            <div className="relative h-[1px] bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] opacity-60 z-10" />
+            {/* Glow layer under the line */}
+            <div className="absolute left-0 right-0 h-[3px] top-[1px] bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] opacity-90 blur-sm" />
+          </div>
         </header>
         )}
         <main className="flex-1">{children}</main>

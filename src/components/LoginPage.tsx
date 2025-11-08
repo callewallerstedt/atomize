@@ -59,53 +59,77 @@ export default function LoginPage() {
     }
   };
 
-  // Generate stable dots that don't change on re-render
-  const checkingDots = useMemo(() => {
-    return Array.from({ length: 60 }).map((_, i) => {
-      const size = Math.random() * 2 + 1;
-      const isCyan = Math.random() > 0.5;
-      const color = isCyan ? '#00E5FF' : '#FF2D96';
-      const left = Math.random() * 100;
-      const top = Math.random() * 100;
-      const glowSize = Math.random() * 4 + 2;
-      const duration = Math.random() * 20 + 15;
-      const delay = Math.random() * 5;
-      return {
-        key: `checking-dot-${i}`,
-        size,
-        color,
-        left,
-        top,
-        glowSize,
-        duration,
-        delay,
-        animation: `float-${i % 3}`,
-      };
-    });
-  }, []);
-
-  const loginDots = useMemo(() => {
-    return Array.from({ length: 80 }).map((_, i) => {
-      const size = Math.random() * 2 + 1;
-      const isCyan = Math.random() > 0.5;
-      const color = isCyan ? '#00E5FF' : '#FF2D96';
-      const left = Math.random() * 100;
-      const top = Math.random() * 100;
-      const glowSize = Math.random() * 4 + 2;
-      const duration = Math.random() * 20 + 15;
-      const delay = Math.random() * 5;
-      return {
-        key: `dot-${i}`,
-        size,
-        color,
-        left,
-        top,
-        glowSize,
-        duration,
-        delay,
-        animation: `float-${i % 3}`,
-      };
-    });
+  // Generate dots only on client side to avoid hydration mismatch
+  const [checkingDots, setCheckingDots] = useState<Array<{
+    key: string;
+    size: number;
+    color: string;
+    left: number;
+    top: number;
+    glowSize: number;
+    duration: number;
+    delay: number;
+    animation: string;
+  }>>([]);
+  
+  const [loginDots, setLoginDots] = useState<Array<{
+    key: string;
+    size: number;
+    color: string;
+    left: number;
+    top: number;
+    glowSize: number;
+    duration: number;
+    delay: number;
+    animation: string;
+  }>>([]);
+  
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setCheckingDots(Array.from({ length: 60 }).map((_, i) => {
+        const size = Math.random() * 2 + 1;
+        const isCyan = Math.random() > 0.5;
+        const color = isCyan ? '#00E5FF' : '#FF2D96';
+        const left = Math.random() * 100;
+        const top = Math.random() * 100;
+        const glowSize = Math.random() * 4 + 2;
+        const duration = Math.random() * 20 + 15;
+        const delay = Math.random() * 5;
+        return {
+          key: `checking-dot-${i}`,
+          size,
+          color,
+          left,
+          top,
+          glowSize,
+          duration,
+          delay,
+          animation: `float-${i % 3}`,
+        };
+      }));
+      
+      setLoginDots(Array.from({ length: 80 }).map((_, i) => {
+        const size = Math.random() * 2 + 1;
+        const isCyan = Math.random() > 0.5;
+        const color = isCyan ? '#00E5FF' : '#FF2D96';
+        const left = Math.random() * 100;
+        const top = Math.random() * 100;
+        const glowSize = Math.random() * 4 + 2;
+        const duration = Math.random() * 20 + 15;
+        const delay = Math.random() * 5;
+        return {
+          key: `dot-${i}`,
+          size,
+          color,
+          left,
+          top,
+          glowSize,
+          duration,
+          delay,
+          animation: `float-${i % 3}`,
+        };
+      }));
+    }
   }, []);
 
   if (checkingAuth) {
@@ -151,10 +175,10 @@ export default function LoginPage() {
                 <circle cx="50" cy="50" r="38" fill="black" />
               </mask>
               <filter id="blur-soft-checking" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
-                <feGaussianBlur stdDeviation="4" />
+                <feGaussianBlur stdDeviation="4" edgeMode="duplicate" />
               </filter>
               <filter id="blur-wide-checking" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
-                <feGaussianBlur stdDeviation="8" />
+                <feGaussianBlur stdDeviation="8" edgeMode="duplicate" />
               </filter>
             </defs>
             {/* glow and crisp ring: rotate together */}
@@ -260,10 +284,10 @@ export default function LoginPage() {
               <circle cx="50" cy="50" r="38" fill="black" />
             </mask>
             <filter id="blur-soft-login" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
-              <feGaussianBlur stdDeviation="4" />
+              <feGaussianBlur stdDeviation="4" edgeMode="duplicate" />
             </filter>
             <filter id="blur-wide-login" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
-              <feGaussianBlur stdDeviation="8" />
+              <feGaussianBlur stdDeviation="8" edgeMode="duplicate" />
             </filter>
           </defs>
           {/* glow and crisp ring: rotate together */}
@@ -325,8 +349,9 @@ export default function LoginPage() {
 
       {/* SYNAPSE text */}
       <div className="mb-4 text-center">
-        <h1 className="text-7xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider" style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}>
+        <h1 className="text-7xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider relative inline-block" style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}>
           SYNAPSE
+          <sup className="text-xl text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] absolute -top-1 left-full ml-1" style={{ fontFamily: 'var(--font-ibm-plex-mono), monospace' }}>(ALPHA)</sup>
         </h1>
         <p className="text-lg font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] mt-2">
           Studying, Optimized.
