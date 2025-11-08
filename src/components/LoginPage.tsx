@@ -14,11 +14,11 @@ export default function LoginPage() {
 
   // Check if already logged in
   useEffect(() => {
-    fetch("/api/me")
+    fetch("/api/me", { credentials: "include" })
       .then((r) => r.json().catch(() => ({})))
       .then((data) => {
         if (data?.user) {
-          router.replace("/");
+          window.location.href = "/";
         } else {
           setCheckingAuth(false);
         }
@@ -35,15 +35,26 @@ export default function LoginPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: username.trim(), password }),
+        credentials: "include", // Ensure cookies are sent/received
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.ok) throw new Error(json?.error || "Failed");
-      // Success - reload to pick up auth state
-      router.refresh();
-      router.replace("/");
+      
+      // Wait a moment for cookie to be set, then verify auth
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Verify auth is working
+      const verifyRes = await fetch("/api/me", { credentials: "include" });
+      const verifyData = await verifyRes.json().catch(() => ({}));
+      
+      if (verifyData?.user) {
+        // Success - do a full page reload to ensure everything is synced
+        window.location.href = "/";
+      } else {
+        throw new Error("Authentication verification failed");
+      }
     } catch (e: any) {
       setError(e?.message || "Something went wrong");
-    } finally {
       setLoading(false);
     }
   };

@@ -43,7 +43,7 @@ function Home() {
   
   // Check authentication and sync subjects from server
   useEffect(() => {
-    fetch("/api/me")
+    fetch("/api/me", { credentials: "include" })
       .then((r) => r.json().catch(() => ({})))
       .then(async (data) => {
         const authenticated = !!data?.user;
@@ -53,7 +53,7 @@ function Home() {
         // If authenticated, load subjects from server
         if (authenticated) {
           try {
-            const subjectsRes = await fetch("/api/subjects");
+            const subjectsRes = await fetch("/api/subjects", { credentials: "include" });
             const subjectsJson = await subjectsRes.json().catch(() => ({}));
             if (subjectsRes.ok && Array.isArray(subjectsJson?.subjects)) {
               // Update localStorage with server subjects
@@ -63,7 +63,7 @@ function Home() {
               // Also sync subject data from server
               for (const subject of subjectsJson.subjects) {
                 try {
-                  const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(subject.slug)}`);
+                  const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(subject.slug)}`, { credentials: "include" });
                   const dataJson = await dataRes.json().catch(() => ({}));
                   if (dataRes.ok && dataJson?.data) {
                     localStorage.setItem(`atomicSubjectData:${subject.slug}`, JSON.stringify(dataJson.data));
