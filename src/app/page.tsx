@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Suspense, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import CourseCreateModal from "@/components/CourseCreateModal";
+import LoginPage from "@/components/LoginPage";
 import { saveSubjectData, StoredSubjectData, loadSubjectData } from "@/utils/storage";
 
 type Subject = { name: string; slug: string };
@@ -37,6 +38,48 @@ function Home() {
   const [quickLearnLoading, setQuickLearnLoading] = useState(false);
   const [filesModalOpen, setFilesModalOpen] = useState<string | null>(null);
   const [isIOSStandalone, setIsIOSStandalone] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  
+  // Check authentication and sync subjects from server
+  useEffect(() => {
+    fetch("/api/me")
+      .then((r) => r.json().catch(() => ({})))
+      .then(async (data) => {
+        const authenticated = !!data?.user;
+        setIsAuthenticated(authenticated);
+        setCheckingAuth(false);
+        
+        // If authenticated, load subjects from server
+        if (authenticated) {
+          try {
+            const subjectsRes = await fetch("/api/subjects");
+            const subjectsJson = await subjectsRes.json().catch(() => ({}));
+            if (subjectsRes.ok && Array.isArray(subjectsJson?.subjects)) {
+              // Update localStorage with server subjects
+              localStorage.setItem("atomicSubjects", JSON.stringify(subjectsJson.subjects));
+              setSubjects(subjectsJson.subjects);
+              
+              // Also sync subject data from server
+              for (const subject of subjectsJson.subjects) {
+                try {
+                  const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(subject.slug)}`);
+                  const dataJson = await dataRes.json().catch(() => ({}));
+                  if (dataRes.ok && dataJson?.data) {
+                    localStorage.setItem(`atomicSubjectData:${subject.slug}`, JSON.stringify(dataJson.data));
+                  }
+                } catch {}
+              }
+            }
+          } catch {}
+        }
+      })
+      .catch(() => {
+        setIsAuthenticated(false);
+        setCheckingAuth(false);
+      });
+  }, []);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const ua = navigator.userAgent || '';
@@ -49,6 +92,27 @@ function Home() {
   useEffect(() => {
     setSubjects(readSubjects());
   }, []);
+
+  // Show login page if not authenticated
+  if (checkingAuth) {
+    return (
+      <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--background)]">
+        <div className="relative w-24 h-24">
+          <div
+            className="absolute inset-0 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-spin"
+            style={{
+              WebkitMask: "radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)",
+              mask: "radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)",
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
 
   useEffect(() => {
     if (searchParams.get("quickLesson") === "1") {
@@ -136,6 +200,17 @@ function Home() {
       localStorage.setItem("atomicSubjects", JSON.stringify(next));
       setSubjects(next);
       setPreparingSlug(unique);
+      // Persist subject to server if logged in
+      try {
+        const me = await fetch("/api/me").then(r => r.json().catch(() => ({})));
+        if (me?.user) {
+          await fetch("/api/subjects", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: effectiveName, slug: unique }),
+          }).catch(() => {});
+        }
+      } catch {}
 
       const storedFiles = files.map((f) => ({ name: f.name, type: f.type }));
 
