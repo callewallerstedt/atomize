@@ -10,12 +10,35 @@ import { usePathname, useRouter } from "next/navigation";
 import SettingsModal from "@/components/SettingsModal";
 import Modal from "@/components/Modal";
 
+// Generate stable dots that don't change on re-render
+function generateDots(count: number) {
+  return Array.from({ length: count }).map((_, i) => {
+    const size = Math.random() * 2 + 1;
+    const isCyan = Math.random() > 0.5;
+    const color = isCyan ? '#00E5FF' : '#FF2D96';
+    const left = Math.random() * 100;
+    const top = Math.random() * 100;
+    const glowSize = Math.random() * 4 + 2;
+    const duration = Math.random() * 20 + 15;
+    const delay = Math.random() * 5;
+    return {
+      key: `loading-dot-${i}`,
+      size,
+      color,
+      left,
+      top,
+      glowSize,
+      duration,
+      delay,
+      animation: `float-${i % 3}`,
+    };
+  });
+}
+
 // Loading Screen Component
 function LoadingScreen({ onComplete }: { onComplete: () => void }) {
   const [isFadingOut, setIsFadingOut] = useState(false);
-  const [displayedText, setDisplayedText] = useState('');
-  const [showSubtitle, setShowSubtitle] = useState(false);
-  const fullText = 'SYNAPSE';
+  const loadingDots = useMemo(() => generateDots(80), []);
 
   // Play startup sound when component mounts
   useEffect(() => {
@@ -33,38 +56,17 @@ function LoadingScreen({ onComplete }: { onComplete: () => void }) {
   }, []);
 
   useEffect(() => {
-    // Typewriter effect with random timing
-    let currentIndex = 0;
-    let typeTimeout: NodeJS.Timeout;
-
-    const typeNextChar = () => {
-      if (currentIndex < fullText.length) {
-        setDisplayedText(fullText.slice(0, currentIndex + 1));
-        currentIndex++;
-        // Random timing between 50-120ms for more natural feel
-        const randomDelay = Math.random() * 70 + 50;
-        typeTimeout = setTimeout(typeNextChar, randomDelay);
-      } else {
-        // SYNAPSE typing complete - show subtitle immediately
-        setShowSubtitle(true);
-      }
-    };
-
-    // Start typing immediately
-    typeTimeout = setTimeout(typeNextChar, 100);
-
-    // Start fade-out animation 500ms before completion (2 seconds after subtitle appears)
+    // Start fade-out animation after 2.5 seconds
     const fadeTimer = setTimeout(() => {
       setIsFadingOut(true);
-    }, 2800); // Start fading at 2.8 seconds
+    }, 2500);
 
     // Complete loading after animation
     const completeTimer = setTimeout(() => {
       onComplete();
-    }, 3300); // Show for 3.3 seconds total
+    }, 3000); // Show for 3 seconds total
 
     return () => {
-      clearTimeout(typeTimeout);
       clearTimeout(fadeTimer);
       clearTimeout(completeTimer);
     };
@@ -74,28 +76,119 @@ function LoadingScreen({ onComplete }: { onComplete: () => void }) {
     <div className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--background)] transition-all duration-500 ease-out ${
       isFadingOut ? 'opacity-0 scale-95' : 'opacity-100 scale-100'
     }`}>
-      {/* Spinning gradient ring - same as Exam Snipe */}
-      <div className="relative w-24 h-24">
-        <div className="absolute inset-0 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-spin"
-             style={{
-               WebkitMask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)',
-               mask: 'radial-gradient(farthest-side, transparent calc(100% - 8px), white 0)'
-             }}>
-        </div>
+      {/* Animated background dots */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {loadingDots.map((dot) => (
+          <div
+            key={dot.key}
+            className="absolute rounded-full opacity-40"
+            style={{
+              width: `${dot.size}px`,
+              height: `${dot.size}px`,
+              left: `${dot.left}%`,
+              top: `${dot.top}%`,
+              background: dot.color,
+              boxShadow: `0 0 ${dot.glowSize}px ${dot.color}`,
+              animation: `${dot.animation} ${dot.duration}s linear infinite`,
+              animationDelay: `${dot.delay}s`,
+            }}
+          />
+        ))}
       </div>
 
-      {/* SYNAPSE text below the ring with typewriter effect */}
-      <div className="mt-6 text-center space-y-2">
-        <span className="text-7xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider font-mono">
-          {displayedText}
-        </span>
 
-        {/* Studying, Optimized. subtitle */}
-        {showSubtitle && (
-          <div className="text-lg font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider font-mono animate-fade-in">
-            Studying, Optimized.
-          </div>
-        )}
+      {/* Spinning gradient ring - same as login page */}
+      <div className="logo-wrap mb-8" style={{ width: 200, aspectRatio: "1 / 1", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <svg viewBox="0 0 100 100" role="img" aria-label="Spinning logo" width="160" height="160" overflow="visible" style={{ overflow: "visible" }}>
+          <defs>
+            <linearGradient id="grad-loading" x1="0%" y1="0%" x2="100%" y2="0%" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#00E5FF" />
+              <stop offset="100%" stopColor="#FF2D96" />
+              <animateTransform
+                attributeName="gradientTransform"
+                type="rotate"
+                from="0 50 50"
+                to="360 50 50"
+                dur="6s"
+                repeatCount="indefinite"
+              />
+            </linearGradient>
+            <mask id="outer-only-loading" maskUnits="userSpaceOnUse">
+              <rect x="-1000" y="-1000" width="3000" height="3000" fill="white" />
+              <circle cx="50" cy="50" r="38" fill="black" />
+            </mask>
+            <filter id="blur-soft-loading" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
+              <feGaussianBlur stdDeviation="4" />
+            </filter>
+            <filter id="blur-wide-loading" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
+              <feGaussianBlur stdDeviation="8" />
+            </filter>
+          </defs>
+          {/* glow and crisp ring: rotate together */}
+          <g style={{ transformOrigin: "50% 50%", animation: "spin 6s linear infinite" }}>
+            <path
+              d="M50,12 A38,38 0 1,1 49.99,12"
+              fill="none"
+              stroke="url(#grad-loading)"
+              strokeWidth={12}
+              strokeLinecap="round"
+              filter="url(#blur-wide-loading)"
+              mask="url(#outer-only-loading)"
+              opacity="0.35"
+            />
+            <path
+              d="M50,12 A38,38 0 1,1 49.99,12"
+              fill="none"
+              stroke="url(#grad-loading)"
+              strokeWidth={10}
+              strokeLinecap="round"
+              filter="url(#blur-soft-loading)"
+              mask="url(#outer-only-loading)"
+              opacity="0.55"
+            />
+            <path
+              d="M50,12 A38,38 0 1,1 49.99,12"
+              fill="none"
+              stroke="url(#grad-loading)"
+              strokeWidth={7}
+              strokeLinecap="round"
+            />
+          </g>
+          <style>{`
+            @keyframes spin { to { transform: rotate(360deg); } }
+            @keyframes float-0 {
+              0% { transform: translate(0, 0) rotate(0deg); }
+              33% { transform: translate(30px, -50px) rotate(120deg); }
+              66% { transform: translate(-20px, 40px) rotate(240deg); }
+              100% { transform: translate(0, 0) rotate(360deg); }
+            }
+            @keyframes float-1 {
+              0% { transform: translate(0, 0) rotate(0deg); }
+              33% { transform: translate(-40px, 30px) rotate(-120deg); }
+              66% { transform: translate(50px, -30px) rotate(-240deg); }
+              100% { transform: translate(0, 0) rotate(-360deg); }
+            }
+            @keyframes float-2 {
+              0% { transform: translate(0, 0) rotate(0deg); }
+              50% { transform: translate(25px, 35px) rotate(180deg); }
+              100% { transform: translate(0, 0) rotate(360deg); }
+            }
+            @media (prefers-reduced-motion: reduce) { 
+              .logo-wrap g { animation: none !important }
+              [class*="float-"] { animation: none !important }
+            }
+          `}</style>
+        </svg>
+      </div>
+
+      {/* Welcome text */}
+      <div className="text-center">
+        <h1
+          className="text-7xl font-semibold mb-4 text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite]"
+          style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}
+        >
+          Welcome
+        </h1>
       </div>
     </div>
   );
@@ -657,7 +750,7 @@ function ChatDropdown() {
           <div className="relative flex items-center gap-2 justify-end mb-2 flex-shrink-0">
             <button
               onClick={startNewChat}
-              className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors"
+              className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
               title="New chat"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -666,7 +759,7 @@ function ChatDropdown() {
             </button>
             <button
               onClick={() => setShowHistory(!showHistory)}
-              className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors"
+              className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
               title="Chat history"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

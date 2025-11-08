@@ -59,6 +59,7 @@ export default function SettingsModal({
 }) {
   const [theme, setTheme] = useState<Theme>(DARK_DEFAULTS);
   const [isLightMode, setIsLightMode] = useState(false);
+  const [username, setUsername] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -72,7 +73,21 @@ export default function SettingsModal({
       setTheme(DARK_DEFAULTS);
       setIsLightMode(false);
     }
-  }, [open]);
+    
+    // Fetch user info if authenticated
+    if (isAuthenticated) {
+      fetch("/api/me", { credentials: "include" })
+        .then((r) => r.json().catch(() => ({})))
+        .then((data) => {
+          if (data?.user?.username) {
+            setUsername(data.user.username);
+          }
+        })
+        .catch(() => {});
+    } else {
+      setUsername(null);
+    }
+  }, [open, isAuthenticated]);
 
   function toggleLightMode() {
     const newMode = !isLightMode;
@@ -93,10 +108,19 @@ export default function SettingsModal({
       title="Settings"
       footer={
         <div className="flex justify-end">
-          <button onClick={onClose} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]">Close</button>
+          <button onClick={onClose} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium !text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]">Close</button>
         </div>
       }
     >
+      {/* Logged in user info */}
+      {isAuthenticated && username && (
+        <div className="mb-6 pb-6 border-b border-[var(--foreground)]/20">
+          <p className="text-sm text-[var(--foreground)]">
+            Logged in as: <span className="font-medium">{username}</span>
+          </p>
+        </div>
+      )}
+
       {/* Light/Dark Mode Toggle */}
       <div className="mb-6">
         <div className="flex items-center justify-between">
@@ -130,7 +154,7 @@ export default function SettingsModal({
               e.stopPropagation();
               onLogout();
             }}
-            className="w-full inline-flex h-8 items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white px-3 text-xs font-medium transition-colors"
+            className="w-full inline-flex h-8 items-center justify-center rounded-full bg-red-600 hover:bg-red-700 !text-white px-3 text-xs font-medium transition-colors"
           >
             Log out
           </button>

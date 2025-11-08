@@ -93,6 +93,19 @@ function Home() {
     setSubjects(readSubjects());
   }, []);
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!menuOpenFor) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('[data-menu-dropdown]') && !target.closest('[data-menu-button]')) {
+        setMenuOpenFor(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [menuOpenFor]);
+
   useEffect(() => {
     if (searchParams.get("quickLesson") === "1") {
       setQuickLearnQuery("");
@@ -377,26 +390,27 @@ function Home() {
               }
             }}
           >
-            <div className="flex items-center justify-between gap-3 h-full">
-              <span className="text-lg font-semibold flex-1 break-words whitespace-normal leading-snug">{s.name}</span>
-              <button
-                onClick={(e) => { e.stopPropagation(); setMenuOpenFor((cur) => (cur === s.slug ? null : s.slug)); }}
-                disabled={preparingSlug === s.slug}
-                className={`inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--accent-cyan)]/20 text-[var(--foreground)]/60 ${
-                  preparingSlug === s.slug
-                    ? 'bg-[var(--background)]/50 opacity-50 cursor-not-allowed'
-                    : 'bg-[var(--background)]/80 hover:bg-[var(--background)] cursor-pointer'
-                }`}
-                aria-label="More actions"
-                title="More actions"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="5" cy="12" r="2" fill="currentColor"/>
-                  <circle cx="12" cy="12" r="2" fill="currentColor"/>
-                  <circle cx="19" cy="12" r="2" fill="currentColor"/>
-                </svg>
-              </button>
+            <div className="flex items-center gap-3 h-full">
+              <span className="text-lg font-semibold flex-1 break-words whitespace-normal leading-snug pr-8">{s.name}</span>
             </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); setMenuOpenFor((cur) => (cur === s.slug ? null : s.slug)); }}
+              disabled={preparingSlug === s.slug}
+              data-menu-button
+              className={`absolute top-3 right-3 inline-flex items-center justify-center text-[var(--foreground)]/60 hover:text-[var(--foreground)]/80 transition-colors !shadow-none ${
+                preparingSlug === s.slug
+                  ? 'opacity-50 cursor-not-allowed'
+                  : 'cursor-pointer'
+              }`}
+              aria-label="More actions"
+              title="More actions"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="5" cy="12" r="2" fill="currentColor"/>
+                <circle cx="12" cy="12" r="2" fill="currentColor"/>
+                <circle cx="19" cy="12" r="2" fill="currentColor"/>
+              </svg>
+            </button>
             
             {preparingSlug === s.slug && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--background)]/80 backdrop-blur-sm rounded-2xl z-10">
@@ -406,7 +420,7 @@ function Home() {
               </div>
             )}
             {menuOpenFor === s.slug && (
-              <div className="absolute right-3 top-12 z-50 w-40 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)] p-1">
+              <div data-menu-dropdown className="absolute right-3 top-12 z-50 w-40 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-lg p-2 space-y-2">
                 <button
                   onClick={async (e) => {
                     e.stopPropagation();
@@ -416,7 +430,7 @@ function Home() {
                       await renameSubject(s.slug, name);
                     }
                   }}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-[#E5E7EB] hover:bg-[#121821]"
+                  className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
                 >
                   Rename
                 </button>
@@ -444,7 +458,7 @@ function Home() {
                     setSubjects(next);
                     setMenuOpenFor(null);
                   }}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-[#FFC0DA] hover:bg-[#20141A]"
+                  className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[#FFC0DA] hover:bg-[#FF2D96]/20 transition-colors"
                 >
                   Delete
                 </button>
@@ -454,7 +468,7 @@ function Home() {
                     setMenuOpenFor(null);
                     setFilesModalOpen(s.slug);
                   }}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-[#E5E7EB] hover:bg-[#121821]"
+                  className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
                 >
                   View Files
                 </button>
@@ -474,7 +488,7 @@ function Home() {
                       URL.revokeObjectURL(url);
                     } catch {}
                   }}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-[#E5E7EB] hover:bg-[#121821]"
+                  className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
                 >
                   Export
                 </button>

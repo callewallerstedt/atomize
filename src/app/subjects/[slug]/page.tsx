@@ -343,7 +343,8 @@ export default function SubjectPage() {
                   const isGenerating = !!nodeGenerating[name];
                   const isFirst = i === 0;
                   const isLast = i === tree.topics.length - 1;
-                  const roundedClass = isFirst ? "rounded-t-2xl" : isLast ? "rounded-b-2xl" : "";
+                  const isOnly = tree.topics.length === 1;
+                  const roundedClass = isOnly ? "rounded-t-2xl rounded-b-2xl" : isFirst ? "rounded-t-2xl" : isLast ? "rounded-b-2xl" : "";
                   // Determine if any lesson quiz is completed (has results for all questions)
                   let quizCompleted = false;
                   try {
@@ -366,7 +367,7 @@ export default function SubjectPage() {
                       router.push(`/subjects/${slug}/node/${encodeURIComponent(name)}`);
                     }}>
                       {isGen && (
-                        <div className="pointer-events-none absolute inset-0 opacity-20" style={{ backgroundImage: 'linear-gradient(90deg, #00E5FF, #FF2D96)', borderRadius: 'inherit' }} />
+                        <div className={`pointer-events-none absolute inset-0 opacity-20 ${roundedClass}`} style={{ backgroundImage: 'linear-gradient(90deg, #00E5FF, #FF2D96)' }} />
                       )}
                       <span className={`text-sm transition-colors ${isGen ? 'text-[var(--foreground)] hover:opacity-90' : 'text-[var(--foreground)]/70 hover:text-[var(--foreground)]'}`}>{name}</span>
                       <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>

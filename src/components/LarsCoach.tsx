@@ -263,29 +263,6 @@ export default function LarsCoach({ open, onClose }: { open: boolean; onClose: (
             <div className="h-6 w-6 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
             <div className="text-sm font-semibold">Lars</div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onMouseDown={(e) => {
-                setResizing(true);
-                setStart({ x: e.clientX, y: e.clientY, w: size.w, h: size.h });
-              }}
-              title="Resize"
-              className="max-sm:hidden text-[var(--foreground)]/60 hover:text-[var(--foreground)] transition-colors"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M20 14v6h-6M10 4H4v6" />
-              </svg>
-            </button>
-            <button
-              onClick={onClose}
-              className="text-[var(--foreground)]/60 hover:text-[var(--foreground)] transition-colors"
-              title="Close"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
         </div>
 
         {/* Messages */}
