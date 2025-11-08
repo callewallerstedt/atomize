@@ -130,7 +130,7 @@ export default function SettingsModal({
               e.stopPropagation();
               onLogout();
             }}
-            className="w-full inline-flex h-10 items-center justify-center rounded-full bg-gradient-to-r from-[#FF2D96] to-[#FF2D96]/80 px-4 text-sm font-medium text-white hover:opacity-95 transition-opacity"
+            className="w-full inline-flex h-8 items-center justify-center rounded-full bg-red-600 hover:bg-red-700 text-white px-3 text-xs font-medium transition-colors"
           >
             Log out
           </button>

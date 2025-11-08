@@ -27,4 +27,25 @@ export async function POST(req: Request) {
   }
 }
 
+export async function PUT(req: Request) {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  try {
+    const body = await req.json().catch(() => ({}));
+    const name = String(body.name || "");
+    const slug = String(body.slug || "");
+    if (!name || !slug) return NextResponse.json({ ok: false, error: "Missing fields" }, { status: 400 });
+    const updated = await prisma.subject.updateMany({
+      where: { userId: user.id, slug },
+      data: { name },
+    });
+    if (updated.count === 0) {
+      return NextResponse.json({ ok: false, error: "Subject not found" }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message || "Failed to update subject" }, { status: 500 });
+  }
+}
+
 

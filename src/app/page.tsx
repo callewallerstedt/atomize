@@ -173,7 +173,7 @@ function Home() {
     }
   }
 
-  const renameSubject = (slug: string, newName: string) => {
+  const renameSubject = async (slug: string, newName: string) => {
     if (!newName.trim()) return;
     const list = readSubjects();
     const updated = list.map((s) => (s.slug === slug ? { ...s, name: newName } : s));
@@ -185,6 +185,19 @@ function Home() {
       data.subject = newName;
       saveSubjectData(slug, data);
     }
+
+    // Sync to server if authenticated
+    try {
+      const me = await fetch("/api/me", { credentials: "include" }).then(r => r.json().catch(() => ({})));
+      if (me?.user) {
+        await fetch("/api/subjects", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ slug, name: newName }),
+        }).catch(() => {});
+      }
+    } catch {}
   };
 
   const createCourse = async (name: string, syllabus: string, files: File[], preferredLanguage?: string) => {
@@ -395,13 +408,13 @@ function Home() {
             {menuOpenFor === s.slug && (
               <div className="absolute right-3 top-12 z-50 w-40 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)] p-1">
                 <button
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation();
                     setMenuOpenFor(null);
                     const name = window.prompt("Rename course", s.name) || s.name;
-                    const next = subjects.map((t) => (t.slug === s.slug ? { ...t, name } : t));
-                    localStorage.setItem("atomicSubjects", JSON.stringify(next));
-                    setSubjects(next);
+                    if (name !== s.name) {
+                      await renameSubject(s.slug, name);
+                    }
                   }}
                   className="block w-full rounded-lg px-3 py-2 text-left text-sm text-[#E5E7EB] hover:bg-[#121821]"
                 >
