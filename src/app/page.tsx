@@ -93,6 +93,13 @@ function Home() {
     setSubjects(readSubjects());
   }, []);
 
+  useEffect(() => {
+    if (searchParams.get("quickLesson") === "1") {
+      setQuickLearnQuery("");
+      setQuickLearnOpen(true);
+    }
+  }, [searchParams]);
+
   // Show login page if not authenticated
   if (checkingAuth) {
     return (
@@ -113,13 +120,6 @@ function Home() {
   if (!isAuthenticated) {
     return <LoginPage />;
   }
-
-  useEffect(() => {
-    if (searchParams.get("quickLesson") === "1") {
-      setQuickLearnQuery("");
-      setQuickLearnOpen(true);
-    }
-  }, [searchParams]);
 
   async function handleQuickLearn() {
     try {
