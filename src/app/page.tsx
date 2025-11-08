@@ -421,10 +421,23 @@ function Home() {
                   Rename
                 </button>
                 <button
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation();
                     const ok = window.confirm("Delete this subject and all saved data?");
                     if (!ok) return;
+                    
+                    // Delete from server if authenticated
+                    try {
+                      const me = await fetch("/api/me", { credentials: "include" }).then(r => r.json().catch(() => ({})));
+                      if (me?.user) {
+                        await fetch(`/api/subjects?slug=${encodeURIComponent(s.slug)}`, {
+                          method: "DELETE",
+                          credentials: "include",
+                        }).catch(() => {});
+                      }
+                    } catch {}
+                    
+                    // Delete from local storage
                     const next = subjects.filter((t) => t.slug !== s.slug);
                     localStorage.setItem("atomicSubjects", JSON.stringify(next));
                     try { localStorage.removeItem("atomicSubjectData:" + s.slug); } catch {}

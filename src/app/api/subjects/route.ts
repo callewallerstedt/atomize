@@ -48,4 +48,32 @@ export async function PUT(req: Request) {
   }
 }
 
+export async function DELETE(req: Request) {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  try {
+    const { searchParams } = new URL(req.url);
+    const slug = searchParams.get("slug");
+    if (!slug) return NextResponse.json({ ok: false, error: "Missing slug" }, { status: 400 });
+    
+    // Delete subject and its data (cascade will handle subjectData)
+    const deleted = await prisma.subject.deleteMany({
+      where: { userId: user.id, slug },
+    });
+    
+    if (deleted.count === 0) {
+      return NextResponse.json({ ok: false, error: "Subject not found" }, { status: 404 });
+    }
+    
+    // Also delete subject data
+    await prisma.subjectData.deleteMany({
+      where: { userId: user.id, slug },
+    });
+    
+    return NextResponse.json({ ok: true });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message || "Failed to delete subject" }, { status: 500 });
+  }
+}
+
 
