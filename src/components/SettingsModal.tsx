@@ -46,7 +46,17 @@ function applyTheme(t: Theme) {
   }
 }
 
-export default function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function SettingsModal({ 
+  open, 
+  onClose, 
+  onLogout,
+  isAuthenticated 
+}: { 
+  open: boolean; 
+  onClose: () => void;
+  onLogout?: () => void;
+  isAuthenticated?: boolean;
+}) {
   const [theme, setTheme] = useState<Theme>(DARK_DEFAULTS);
   const [isLightMode, setIsLightMode] = useState(false);
 
@@ -111,6 +121,21 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
           {isLightMode ? 'Light mode' : 'Dark mode'}
         </p>
       </div>
+
+      {/* Logout Button */}
+      {isAuthenticated && onLogout && (
+        <div className="mb-6 pt-6 border-t border-[var(--foreground)]/20">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onLogout();
+            }}
+            className="w-full inline-flex h-10 items-center justify-center rounded-full bg-gradient-to-r from-[#FF2D96] to-[#FF2D96]/80 px-4 text-sm font-medium text-white hover:opacity-95 transition-opacity"
+          >
+            Log out
+          </button>
+        </div>
+      )}
     </Modal>
   );
 }

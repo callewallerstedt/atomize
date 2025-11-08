@@ -897,7 +897,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
   async function handleLogout() {
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     } catch {}
     try {
       // Clear client cache of user data
@@ -908,8 +908,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       }
       keys.forEach(k => localStorage.removeItem(k));
     } catch {}
-    router.replace("/");
-    router.refresh();
+    // Redirect to login page with full reload
+    window.location.href = "/";
   }
 
   const crumbs = useMemo(() => {
@@ -1040,24 +1040,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
             {/* Right side - Chat + Settings */}
             <div className="absolute right-4 top-1/2 transform -translate-y-1/2 flex items-center gap-2">
-              {/* Logout when authenticated; else Account modal opener */}
-              {isAuthenticated ? (
-                <button
-                  onClick={handleLogout}
-                  onMouseDown={(e) => { e.preventDefault(); e.currentTarget.blur(); }}
-                  className="relative inline-flex h-10 items-center rounded-xl px-3 py-1.5 text-white bg-[var(--background)]/90 shadow-[0_2px_8px_rgba(0,0,0,0.7)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95 transition-all duration-200 ease-out"
-                >
-                  Log out
-                </button>
-              ) : (
-                <button
-                  onClick={() => setAccountOpen(true)}
-                  onMouseDown={(e) => { e.preventDefault(); e.currentTarget.blur(); }}
-                  className="relative inline-flex h-10 items-center rounded-xl px-3 py-1.5 text-white bg-[var(--background)]/90 shadow-[0_2px_8px_rgba(0,0,0,0.7)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95 transition-all duration-200 ease-out"
-                >
-                  Account
-                </button>
-              )}
               {/* Chat dropdown */}
               <ChatDropdown />
               {/* Info button */}
@@ -1114,7 +1096,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <main className="flex-1">{children}</main>
       </div>
       <div className="settings-modal">
-        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <SettingsModal 
+          open={settingsOpen} 
+          onClose={() => setSettingsOpen(false)}
+          onLogout={handleLogout}
+          isAuthenticated={isAuthenticated}
+        />
       </div>
       <Modal
         open={accountOpen}
