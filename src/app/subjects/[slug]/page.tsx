@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { loadSubjectData, saveSubjectData, StoredSubjectData, TopicMeta, getLessonsDueForReview, getUpcomingReviews } from "@/utils/storage";
+import { loadSubjectData, saveSubjectData, saveSubjectDataAsync, StoredSubjectData, TopicMeta, getLessonsDueForReview, getUpcomingReviews } from "@/utils/storage";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import Modal from "@/components/Modal";
@@ -428,7 +428,7 @@ export default function SubjectPage() {
                                       }],
                                       rawLessonJson: [typeof lessonJson.raw === 'string' ? lessonJson.raw : JSON.stringify(lessonData)],
                                     } as any;
-                                    saveSubjectData(slug, data);
+                                    await saveSubjectDataAsync(slug, data);
                                     setNodes({ ...data.nodes });
                                   }
                                 } catch (e: any) {

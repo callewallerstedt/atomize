@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { saveSubjectData, StoredSubjectData } from "@/utils/storage";
+import { saveSubjectData, saveSubjectDataAsync, StoredSubjectData } from "@/utils/storage";
 
 // PDF.js will be dynamically imported only on client-side
 
@@ -652,7 +652,7 @@ export default function ExamSnipePage() {
                               progress: {},
                             };
 
-                            saveSubjectData(slug, data);
+                            await saveSubjectDataAsync(slug, data);
                             setSelectedSubConcept(null);
                             router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}`);
                           } catch (e: any) {

@@ -185,6 +185,58 @@ export default function LarsCoach({ open, onClose }: { open: boolean; onClose: (
     }
   }
 
+  async function askNewQuestion() {
+    if (sending) return;
+    // Send a message asking Lars to switch topics
+    const switchMessage = "Can you ask me about something else from this lesson?";
+    const updatedMessages = [...messages, { role: "user" as const, content: switchMessage }];
+    setMessages(updatedMessages);
+    try {
+      setSending(true);
+      const context = await gatherContext();
+      // placeholder for streaming assistant response
+      setMessages((m) => [...m, { role: "assistant", content: "" }]);
+      const idx = updatedMessages.length; // index of the assistant message we just pushed
+      const res = await fetch("/api/lars/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+          context,
+          messages: updatedMessages,
+          path: typeof window !== "undefined" ? window.location.pathname : ""
+        })
+      });
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value);
+          chunk.split("\n").forEach((line) => {
+            if (!line.startsWith("data: ")) return;
+            const payload = line.slice(6);
+            if (!payload) return;
+            try {
+              const obj = JSON.parse(payload);
+              if (obj.type === "text") {
+                setMessages((m) => {
+                  const copy = [...m];
+                  copy[idx] = { role: "assistant", content: (copy[idx]?.content || "") + obj.content } as any;
+                  return copy;
+                });
+              }
+            } catch {}
+          });
+        }
+      }
+    } catch (e: any) {
+      setMessages((m) => [...m, { role: "assistant", content: "Error asking new question." }]);
+    } finally {
+      setSending(false);
+    }
+  }
+
   if (!open) return null;
 
   return (
@@ -269,6 +321,16 @@ export default function LarsCoach({ open, onClose }: { open: boolean; onClose: (
             placeholder="Explain it to Lars…"
             className="flex-1 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
           />
+          <button
+            onClick={askNewQuestion}
+            disabled={sending}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-[var(--foreground)] hover:bg-[var(--background)]/90 disabled:opacity-60 transition-colors"
+            title="Ask about something else"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M5 12h14M12 5l7 7-7 7"/>
+            </svg>
+          </button>
           <button
             onClick={sendMessage}
             disabled={sending}

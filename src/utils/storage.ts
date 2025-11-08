@@ -61,10 +61,32 @@ export function loadSubjectData(slug: string): StoredSubjectData | null {
   }
 }
 
+// Async function to sync data to server (awaits completion)
+export async function syncSubjectDataToServer(slug: string, data: StoredSubjectData): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    const meRes = await fetch("/api/me", { credentials: "include" });
+    const meJson = await meRes.json().catch(() => ({}));
+    if (meJson?.user) {
+      await fetch("/api/subject-data", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ slug, data }),
+      });
+    }
+  } catch (err) {
+    // Silently fail - local storage is still saved
+    console.warn("Failed to sync subject data to server:", err);
+  }
+}
+
 export function saveSubjectData(slug: string, data: StoredSubjectData) {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(PREFIX + slug, JSON.stringify(data));
+    // Best-effort async sync to server if logged in (fire and forget for non-critical saves)
+    syncSubjectDataToServer(slug, data).catch(() => {});
   } catch (err) {
     try {
       const slim: StoredSubjectData = { ...data } as any;
@@ -89,6 +111,38 @@ export function saveSubjectData(slug: string, data: StoredSubjectData) {
   }
 }
 
+// Async version that awaits server sync (use for critical saves like lesson generation)
+export async function saveSubjectDataAsync(slug: string, data: StoredSubjectData): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(PREFIX + slug, JSON.stringify(data));
+    await syncSubjectDataToServer(slug, data);
+  } catch (err) {
+    try {
+      const slim: StoredSubjectData = { ...data } as any;
+      // Drop heavy fields if quota exceeded
+      if (Array.isArray(slim.files)) {
+        slim.files = slim.files.map((f) => ({ name: f.name, type: f.type }));
+      }
+      if (typeof slim.combinedText === 'string' && slim.combinedText.length > 200_000) {
+        slim.combinedText = slim.combinedText.slice(0, 200_000);
+      }
+      // Trim rawLessonJson if present
+      if (slim.nodes) {
+        for (const k of Object.keys(slim.nodes)) {
+          const v: any = (slim.nodes as any)[k];
+          if (v && Array.isArray(v.rawLessonJson) && v.rawLessonJson.length > 0) {
+            v.rawLessonJson = [];
+          }
+        }
+      }
+      localStorage.setItem(PREFIX + slug, JSON.stringify(slim));
+      // Try to sync the slimmed version
+      await syncSubjectDataToServer(slug, slim);
+    } catch {}
+  }
+}
+
 export function upsertNodeContent(slug: string, nodeName: string, content: string | TopicGeneratedContent) {
   const existing = loadSubjectData(slug) || {
     subject: slug,
@@ -100,6 +154,20 @@ export function upsertNodeContent(slug: string, nodeName: string, content: strin
   } as StoredSubjectData;
   existing.nodes[nodeName] = content as any;
   saveSubjectData(slug, existing);
+}
+
+// Async version that awaits server sync (use for critical updates like lesson generation)
+export async function upsertNodeContentAsync(slug: string, nodeName: string, content: string | TopicGeneratedContent): Promise<void> {
+  const existing = loadSubjectData(slug) || {
+    subject: slug,
+    files: [],
+    combinedText: "",
+    tree: null,
+    topics: [],
+    nodes: {},
+  } as StoredSubjectData;
+  existing.nodes[nodeName] = content as any;
+  await saveSubjectDataAsync(slug, existing);
 }
 
 // Spaced Repetition Functions

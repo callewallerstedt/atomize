@@ -9,7 +9,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import katex from "katex";
 import { Highlight, themes } from "prism-react-renderer";
-import { loadSubjectData, upsertNodeContent, TopicGeneratedContent, TopicGeneratedLesson, StoredSubjectData, markLessonReviewed, ReviewSchedule } from "@/utils/storage";
+import { loadSubjectData, upsertNodeContent, upsertNodeContentAsync, TopicGeneratedContent, TopicGeneratedLesson, StoredSubjectData, markLessonReviewed, ReviewSchedule } from "@/utils/storage";
 import { AutoFixMarkdown } from "@/components/AutoFixMarkdown";
 import LarsCoach from "@/components/LarsCoach";
 
@@ -1260,7 +1260,7 @@ export default function NodePage() {
                   };
 
                   setContent(normalized);
-                  upsertNodeContent(slug, title, normalized as any);
+                  await upsertNodeContentAsync(slug, title, normalized as any);
                 } catch (err: any) {
                   setError(err?.message || "Failed to start topic");
                 } finally {
