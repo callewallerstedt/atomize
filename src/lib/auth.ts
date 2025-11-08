@@ -1,6 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
-import { prisma } from "./db";
+import { prisma } from "@/lib/db";
 
 const COOKIE_NAME = "atom_auth";
 const SECRET = process.env.AUTH_SECRET || "dev-secret-change-me";
