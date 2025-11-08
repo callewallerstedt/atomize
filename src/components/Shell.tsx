@@ -781,12 +781,20 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [uiZoom, setUiZoom] = useState<number>(1.4);
   const [isIOSStandalone, setIsIOSStandalone] = useState<boolean>(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const infoMarkdown = `
   # Welcome to Synapse
   
@@ -873,6 +881,37 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [settingsOpen, toolsDropdownOpen]);
 
+  // Determine auth state (used to hide chrome on login page and show Logout)
+  useEffect(() => {
+    (async () => {
+      try {
+        const me = await fetch("/api/me").then(r => r.json().catch(() => ({})));
+        setIsAuthenticated(!!me?.user);
+      } catch {
+        setIsAuthenticated(false);
+      } finally {
+        setAuthChecked(true);
+      }
+    })();
+  }, [pathname]);
+
+  async function handleLogout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {}
+    try {
+      // Clear client cache of user data
+      const keys: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k === "atomicSubjects" || k.startsWith("atomicSubjectData:"))) keys.push(k);
+      }
+      keys.forEach(k => localStorage.removeItem(k));
+    } catch {}
+    router.replace("/");
+    router.refresh();
+  }
+
   const crumbs = useMemo(() => {
     const parts = (pathname || "/").split("/").filter(Boolean);
     const items: { label: string; href: string }[] = [];
@@ -910,10 +949,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   return (
     <>
       {/* Loading Screen */}
-      {isLoading && <LoadingScreen onComplete={handleLoadingComplete} />}
+      {isLoading && isAuthenticated && <LoadingScreen onComplete={handleLoadingComplete} />}
     <div className="flex min-h-screen bg-[var(--background)] text-[var(--foreground)]" style={isIOSStandalone ? undefined : { zoom: uiZoom }}>
       {/* Main content */}
       <div className="flex min-h-screen w-full flex-col">
+        {authChecked && isAuthenticated && (
         <header className="sticky top-0 z-50 backdrop-blur supports-[backdrop-filter]:bg-[var(--background)]/70 bg-[var(--background)] border-b border-[#4A5568]" style={{ paddingTop: 'max(3px, calc(env(safe-area-inset-top, 0px) / 2))' }}>
           <nav className="relative flex h-14 items-center px-4">
             {/* Left side buttons */}
@@ -1000,6 +1040,24 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
             {/* Right side - Chat + Settings */}
             <div className="absolute right-4 top-1/2 transform -translate-y-1/2 flex items-center gap-2">
+              {/* Logout when authenticated; else Account modal opener */}
+              {isAuthenticated ? (
+                <button
+                  onClick={handleLogout}
+                  onMouseDown={(e) => { e.preventDefault(); e.currentTarget.blur(); }}
+                  className="relative inline-flex h-10 items-center rounded-xl px-3 py-1.5 text-white bg-[var(--background)]/90 shadow-[0_2px_8px_rgba(0,0,0,0.7)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95 transition-all duration-200 ease-out"
+                >
+                  Log out
+                </button>
+              ) : (
+                <button
+                  onClick={() => setAccountOpen(true)}
+                  onMouseDown={(e) => { e.preventDefault(); e.currentTarget.blur(); }}
+                  className="relative inline-flex h-10 items-center rounded-xl px-3 py-1.5 text-white bg-[var(--background)]/90 shadow-[0_2px_8px_rgba(0,0,0,0.7)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95 transition-all duration-200 ease-out"
+                >
+                  Account
+                </button>
+              )}
               {/* Chat dropdown */}
               <ChatDropdown />
               {/* Info button */}
@@ -1052,11 +1110,93 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             </div>
           </nav>
         </header>
+        )}
         <main className="flex-1">{children}</main>
       </div>
       <div className="settings-modal">
         <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </div>
+      <Modal
+        open={accountOpen}
+        onClose={() => { if (!authLoading) { setAccountOpen(false); setAuthError(null); } }}
+        title={authMode === "login" ? "Sign in" : "Create account"}
+        footer={
+          <div className="flex items-center justify-between gap-2 w-full">
+            <div className="text-xs text-[var(--foreground)]/60">
+              {authMode === "login" ? (
+                <>No account? <button onClick={() => setAuthMode("signup")} className="underline">Sign up</button></>
+              ) : (
+                <>Have an account? <button onClick={() => setAuthMode("login")} className="underline">Sign in</button></>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setAccountOpen(false)}
+                disabled={authLoading}
+                className="inline-flex h-9 items-center rounded-full px-4 text-sm"
+                style={{ backgroundColor: '#141923', color: 'white' }}
+              >
+                Close
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    setAuthLoading(true);
+                    setAuthError(null);
+                    const res = await fetch(authMode === "login" ? "/api/auth/login" : "/api/auth/signup", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ username: authUsername.trim(), password: authPassword }),
+                    });
+                    const json = await res.json().catch(() => ({}));
+                    if (!res.ok || !json?.ok) throw new Error(json?.error || "Failed");
+                    setAccountOpen(false);
+                    setAuthUsername("");
+                    setAuthPassword("");
+                    // Reload to pick up server-synced state
+                    router.refresh();
+                  } catch (e: any) {
+                    setAuthError(e?.message || "Something went wrong");
+                  } finally {
+                    setAuthLoading(false);
+                  }
+                }}
+                disabled={authLoading || !authUsername.trim() || authPassword.length < 6}
+                className="inline-flex h-9 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 text-sm font-medium !text-white hover:opacity-95 disabled:opacity-60 disabled:!text-white"
+                style={{ color: 'white' }}
+              >
+                {authLoading ? (authMode === "login" ? "Signing in..." : "Creating...") : (authMode === "login" ? "Sign in" : "Sign up")}
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          {authError && <div className="text-sm text-[#FFC0DA]">{authError}</div>}
+          <div>
+            <label className="mb-1 block text-xs text-[var(--foreground)]/70">Username</label>
+            <input
+              value={authUsername}
+              onChange={(e) => setAuthUsername(e.target.value)}
+              className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
+              placeholder="yourname"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-[var(--foreground)]/70">Password</label>
+            <input
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+              type="password"
+              className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
+              placeholder="At least 6 characters"
+            />
+          </div>
+          <div className="text-[10px] text-[var(--foreground)]/60">
+            Your data will be saved securely to your account.
+          </div>
+        </div>
+      </Modal>
       <Modal
         open={infoOpen}
         onClose={() => setInfoOpen(false)}
