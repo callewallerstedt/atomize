@@ -17,6 +17,7 @@ export async function POST(req: Request) {
     const lessonContent = String(body.lessonContent || "");
     const courseContext = String(body.courseContext || "");
     const answers = Array.isArray(body.answers) ? body.answers : [];
+    const languageName = String(body.languageName || "");
 
     if (answers.length === 0) {
       return NextResponse.json({ error: "No answers provided" }, { status: 400 });
@@ -51,7 +52,8 @@ Rules:
 - CRITICAL: If using LaTeX math, use \\text{} for text (NOT \\t which is a tab character)
 - Use the lesson content and course context to determine correctness
 - Number keys starting from 0 for each question index
-- Return only valid JSON, no additional text`;
+- Return only valid JSON, no additional text
+${languageName ? `- IMPORTANT: Write all explanation, hint, and fullSolution in ${languageName}.` : ""}`;
 
     const userPrompt = `Subject: ${subject}
 Topic: ${topic}

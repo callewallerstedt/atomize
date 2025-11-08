@@ -17,6 +17,7 @@ export async function POST(req: Request) {
     const paragraph = String(body.paragraph || "").trim();
     const lessonContent = String(body.lessonContent || "");
     const courseContext = String(body.courseContext || "");
+    const languageName = String(body.languageName || "");
 
     if (!paragraph) {
       return NextResponse.json({ error: "No paragraph provided" }, { status: 400 });
@@ -37,6 +38,7 @@ export async function POST(req: Request) {
       "- Keep the same key facts, relationships, and conclusions - just express them simply",
       "- Use conversational, student-friendly language like you're explaining to a friend",
       "- Maintain the logical flow and structure of the original",
+      `Write in ${languageName || 'the same language as the original text'}.`,
       "CRITICAL LaTeX/Math rules:",
       "- ALL Greek letters MUST have backslash: \\eta \\alpha \\beta \\theta NOT eta alpha beta theta",
       "- Text in math: \\text{proper text} NOT \\t, NOT ext{text}, NEVER use \\t as it's a tab character",

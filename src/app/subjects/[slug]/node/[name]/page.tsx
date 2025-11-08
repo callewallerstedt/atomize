@@ -226,6 +226,7 @@ export default function NodePage() {
           paragraph: paragraphText,
           lessonContent: content?.lessons?.[currentLessonIndex]?.body || "",
           courseContext: subjectData?.course_context || "",
+          languageName: subjectData?.course_language_name || ""
         })
       });
       const json = await res.json().catch(() => ({}));
@@ -1069,7 +1070,8 @@ export default function NodePage() {
                                 topic: title,
                                 lessonContent: currentLesson.body,
                                 courseContext: subjectData?.course_context || "",
-                                answers
+            answers,
+            languageName: subjectData?.course_language_name || ""
                               })
                             });
 

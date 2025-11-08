@@ -676,7 +676,7 @@ function ChatDropdown() {
             
             {/* History panel - absolute positioned to overlay */}
             {showHistory && (
-              <div className="absolute top-full right-0 mt-1 w-64 p-2 rounded-lg bg-[var(--background)]/95 bg-gradient-to-br from-[#00E5FF]/20 to-[#FF2D96]/20 backdrop-blur-md border border-[var(--foreground)]/20 shadow-xl z-50 max-h-64 overflow-y-auto">
+              <div className="absolute top-full right-0 mt-1 w-64 p-2 rounded-lg bg-[var(--background)]/95 bg-gradient-to-br from-[#00E5FF]/20 to-[#FF2D96]/20 backdrop-blur-md border border-[var(--foreground)]/20 z-50 max-h-64 overflow-y-auto">
                 {chatHistory.length === 0 ? (
                   <div className="text-xs text-[var(--foreground)]/60 text-center py-4">No chat history</div>
                 ) : (

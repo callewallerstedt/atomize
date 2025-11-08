@@ -202,16 +202,12 @@ export default function SubjectPage() {
         nodes: {},
         progress: {},
         course_context: json.course_context || "",
+        course_language_code: json.detected_language_code || "en",
+        course_language_name: json.detected_language_name || "English",
       };
       saveSubjectData(slug, saveObj);
       setProgress({});
-      // Language detect and prompt if not English and not already set
-      const detectedCode = json.detected_language_code || "en";
-      const detectedName = json.detected_language_name || "English";
-      const already = (saveObj.course_language_code || "");
-      if (detectedCode && detectedCode !== "en" && !already) {
-        setLanguagePrompt({ code: detectedCode, name: detectedName });
-      }
+      // Language is now auto-set on first analyze; no prompt needed
     } catch (err: any) {
       setError(err?.message || "Failed to analyze files");
     } finally {
@@ -315,6 +311,11 @@ export default function SubjectPage() {
                       if (saved) {
                         saved.topics = gotTopics;
                         saved.tree = nextTree;
+                        // Save detected course language if provided
+                        if (json.detected_language_code && json.detected_language_name) {
+                          saved.course_language_code = json.detected_language_code;
+                          saved.course_language_name = json.detected_language_name;
+                        }
                         saveSubjectData(slug, saved);
                       }
                     } catch (e: any) {

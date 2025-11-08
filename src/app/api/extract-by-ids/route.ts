@@ -124,6 +124,46 @@ export async function POST(req: Request) {
       }
     }
 
+    // Optionally detect language from a small sample of file contents
+    async function detectLanguage(sample: string): Promise<{ code: string; name: string }> {
+      try {
+        const sys = [
+          "Detect the primary human language of the provided text.",
+          "Return STRICT JSON: { code: string; name: string } where code is ISO 639-1 if possible (e.g., 'en', 'sv', 'de').",
+          "If uncertain, default to { code: 'en', name: 'English' }.",
+        ].join("\n");
+        const resp = await client.chat.completions.create({
+          model: "gpt-4o-mini",
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: sys },
+            { role: "user", content: sample.slice(0, 4000) || "" },
+          ],
+          temperature: 0,
+          max_tokens: 50,
+        });
+        const content = resp.choices[0]?.message?.content || "{}";
+        const data = JSON.parse(content);
+        return { code: String(data.code || 'en'), name: String(data.name || 'English') };
+      } catch {
+        return { code: 'en', name: 'English' };
+      }
+    }
+
+    // Build a small text sample for language detection from first few files (best-effort)
+    let sampleText = "";
+    try {
+      const take = Math.min(3, fileIds.length);
+      for (let i = 0; i < take; i++) {
+        const out = await readRemoteFileAsText(fileIds[i]).catch(() => ({ text: "" } as any));
+        if (out?.text) {
+          sampleText += "\n\n" + out.text.slice(0, 4000);
+        }
+      }
+      if (!sampleText && contextText) sampleText = contextText.slice(0, 4000);
+    } catch {}
+    const lang = await detectLanguage(sampleText || contextText || "");
+
     // Revert: do NOT pre-concatenate file contents. Attach original uploaded files to the model.
 
     const system = [
@@ -166,7 +206,7 @@ export async function POST(req: Request) {
       if (s >= 0 && e > s) data = JSON.parse(out.slice(s, e + 1));
     }
     if (!data || !data.subject) data = { subject, topics: Array.isArray(data?.topics) ? data.topics : [] };
-    return NextResponse.json({ ok: true, data, debug: { fileIdsCount: fileIds.length } });
+    return NextResponse.json({ ok: true, data, detected_language_code: lang.code, detected_language_name: lang.name, debug: { fileIdsCount: fileIds.length } });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err?.message || "Unknown error" }, { status: 500 });
   }
