@@ -447,7 +447,6 @@ function Home() {
                   WebkitUserSelect: 'text',
                   WebkitTouchCallout: 'none',
                   WebkitAppearance: 'none',
-                  WebkitTouchAction: 'manipulation',
                   touchAction: 'manipulation'
                 }}
               />
