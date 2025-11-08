@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { saveSubjectData, saveSubjectDataAsync, StoredSubjectData } from "@/utils/storage";
+import GlowSpinner from "@/components/GlowSpinner";
 
 // PDF.js will be dynamically imported only on client-side
 
@@ -294,7 +295,7 @@ export default function ExamSnipePage() {
             ) : (
               <div className="flex flex-col items-center justify-center py-32 space-y-6">
                 {/* Unified glow spinner */}
-                {React.createElement(require('@/components/GlowSpinner').default, { size: 160, ariaLabel: 'Analyzing', idSuffix: 'exam' })}
+                <GlowSpinner size={160} ariaLabel="Analyzing" idSuffix="exam" />
                 
                   <div className="text-center space-y-4">
                     <div className="text-lg font-semibold text-[var(--foreground)] mb-1">Analyzing Exams...</div>
