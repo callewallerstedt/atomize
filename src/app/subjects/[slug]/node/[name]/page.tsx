@@ -254,6 +254,26 @@ export default function NodePage() {
     }
   }, [slug, title, subjectData]);
 
+  // Load any saved quiz state for the current lesson
+  useEffect(() => {
+    if (!content?.lessons?.[currentLessonIndex]) return;
+    const lesson = content.lessons[currentLessonIndex] as any;
+    // Load answers
+    if (Array.isArray(lesson?.userAnswers)) {
+      const map: { [k: number]: string } = {};
+      (lesson.userAnswers as string[]).forEach((v, i) => { map[i] = v || ""; });
+      setUserAnswers(map);
+    } else {
+      setUserAnswers({});
+    }
+    // Load results
+    if (lesson?.quizResults && typeof lesson.quizResults === 'object') {
+      setQuizResults(lesson.quizResults as any);
+    } else {
+      setQuizResults(null);
+    }
+  }, [content, currentLessonIndex]);
+
   // Build paragraph groups when lesson changes
   useEffect(() => {
     if (!content?.lessons?.[currentLessonIndex]?.body) {
@@ -934,26 +954,55 @@ export default function NodePage() {
                             <textarea
                               value={userAnswers[qi] || ""}
                               onChange={(e) => {
-                                if (!e.target) return;
-                                setUserAnswers(prev => ({ ...prev, [qi]: e.target.value }));
+                                const nextVal = e.target.value;
+                                setUserAnswers(prev => ({ ...prev, [qi]: nextVal }));
+                                // Persist immediately
+                                try {
+                                  if (!content) return;
+                                  const next = { ...(content as TopicGeneratedContent) } as any;
+                                  next.lessons = Array.isArray(next.lessons) ? [...next.lessons] : [];
+                                  const l = { ...(next.lessons[currentLessonIndex] as any) };
+                                  const answersArr: string[] = Array.isArray(l.userAnswers) ? [...l.userAnswers] : [];
+                                  while (answersArr.length < (content.lessons[currentLessonIndex]?.quiz?.length || 0)) answersArr.push("");
+                                  answersArr[qi] = nextVal;
+                                  l.userAnswers = answersArr;
+                                  next.lessons[currentLessonIndex] = l;
+                                  upsertNodeContent(slug, title, next);
+                                } catch {}
+                              }}
+                              onTouchStart={(e) => {
+                                // Ensure focus works on iOS PWA
+                                e.currentTarget.focus();
                               }}
                               className={
                                 quizResults?.[qi]
                                   ? quizResults[qi].correct
-                                    ? 'w-full rounded-lg border border-green-500 bg-green-500/10 text-green-700 dark:text-green-200 px-3 py-2 text-sm transition-colors resize-none'
-                                    : 'w-full rounded-lg border border-red-500 bg-red-500/10 text-red-700 dark:text-red-200 px-3 py-2 text-sm transition-colors resize-none'
-                                  : 'w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none px-3 py-2 text-sm transition-colors resize-none'
+                                    ? 'w-full rounded-lg border border-green-300 bg-green-50 text-green-800 dark:border-green-500/40 dark:bg-green-500/10 dark:text-green-200 px-3 py-2 text-sm transition-colors resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none'
+                                    : 'w-full rounded-lg border border-red-300 bg-red-50 text-red-800 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200 px-3 py-2 text-sm transition-colors resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none'
+                                  : 'w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none px-3 py-2 text-sm transition-colors resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none'
                               }
                               placeholder="Write your answer here..."
                               rows={3}
                               disabled={checkingAnswers}
+                              tabIndex={0}
+                              inputMode="text"
+                              autoComplete="off"
+                              autoCorrect="off"
+                              autoCapitalize="off"
+                              spellCheck={false}
+                              style={{
+                                WebkitUserSelect: 'text',
+                                WebkitTouchCallout: 'none',
+                                WebkitAppearance: 'none',
+                                touchAction: 'manipulation'
+                              }}
                             />
                             {quizResults?.[qi] && (
                               <div className="space-y-2">
                                 <div className={
                                   quizResults[qi].correct
-                                    ? 'text-xs p-3 rounded bg-green-500/20 text-green-700 dark:text-green-200 border border-green-500/30'
-                                    : 'text-xs p-3 rounded bg-red-500/20 text-red-700 dark:text-red-200 border border-red-500/30'
+                                    ? 'text-xs p-3 rounded bg-green-50 text-green-800 border border-green-200 dark:bg-green-500/10 dark:text-green-200 dark:border-green-500/30'
+                                    : 'text-xs p-3 rounded bg-red-50 text-red-800 border border-red-200 dark:bg-red-500/10 dark:text-red-200 dark:border-red-500/30'
                                 }>
                                   <div className="font-semibold mb-1">{quizResults[qi].correct ? '✓ Correct!' : '✗ Not quite'}</div>
                                   <AutoFixMarkdown>{quizResults[qi].explanation}</AutoFixMarkdown>
@@ -963,12 +1012,12 @@ export default function NodePage() {
                                   <div className="space-y-1">
                                     <button
                                       onClick={() => setShowHints(prev => ({ ...prev, [qi]: !prev[qi] }))}
-                                      className="text-xs text-[#60A5FA] hover:text-[#93C5FD] hover:underline transition-colors"
+                                      className="text-xs text-[#2563EB] hover:text-[#1D4ED8] hover:underline transition-colors dark:text-[#60A5FA] dark:hover:text-[#93C5FD]"
                                     >
                                       {showHints[qi] ? '▼ Hide hint' : '▶ Show hint'}
                                     </button>
                                     {showHints[qi] && (
-                                      <div className="text-xs p-3 rounded bg-blue-50 dark:bg-[#1E3A5F]/30 text-blue-900 dark:text-[#E0F2FE] border border-blue-200 dark:border-[#60A5FA]/20">
+                                      <div className="text-xs p-3 rounded bg-blue-50 text-blue-900 border border-blue-200 dark:bg-[#1E3A5F]/30 dark:text-[#E0F2FE] dark:border-[#60A5FA]/20">
                                         💡 <AutoFixMarkdown>{quizResults[qi].hint}</AutoFixMarkdown>
                                       </div>
                                     )}
@@ -979,12 +1028,12 @@ export default function NodePage() {
                                   <div className="space-y-1">
                                     <button
                                       onClick={() => setShowSolutions(prev => ({ ...prev, [qi]: !prev[qi] }))}
-                                      className="text-xs text-[#C084FC] hover:text-[#D8B4FE] hover:underline transition-colors"
+                                      className="text-xs text-[#7C3AED] hover:text-[#6D28D9] hover:underline transition-colors dark:text-[#C084FC] dark:hover:text-[#D8B4FE]"
                                     >
                                       {showSolutions[qi] ? '▼ Hide solution' : '▶ Show step-by-step solution'}
                                     </button>
                                     {showSolutions[qi] && (
-                                      <div className="text-xs p-3 rounded bg-purple-50 dark:bg-[#3B1F4F]/30 text-purple-900 dark:text-[#F3E8FF] border border-purple-200 dark:border-[#C084FC]/20">
+                                      <div className="text-xs p-3 rounded bg-purple-50 text-purple-900 border border-purple-200 dark:bg-[#3B1F4F]/30 dark:text-[#F3E8FF] dark:border-[#C084FC]/20">
                                         <AutoFixMarkdown>{quizResults[qi].fullSolution}</AutoFixMarkdown>
                                       </div>
                                     )}
@@ -1027,7 +1076,22 @@ export default function NodePage() {
                             const json = await res.json().catch(() => ({}));
                             if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
 
-                            setQuizResults(json.results || {});
+                            const results = json.results || {};
+                            setQuizResults(results);
+                            // Persist results and answers onto the lesson
+                            try {
+                              const next = { ...(content as TopicGeneratedContent) } as any;
+                              next.lessons = Array.isArray(next.lessons) ? [...next.lessons] : [];
+                              const l = { ...(next.lessons[currentLessonIndex] as any) };
+                              const answersArr: string[] = [];
+                              const numQ = (currentLesson.quiz || []).length;
+                              for (let i = 0; i < numQ; i++) answersArr[i] = userAnswers[i] || "";
+                              l.userAnswers = answersArr;
+                              l.quizResults = results;
+                              l.quizCompletedAt = Date.now();
+                              next.lessons[currentLessonIndex] = l;
+                              upsertNodeContent(slug, title, next);
+                            } catch {}
                           } catch (err: any) {
                             alert(err?.message || "Failed to check answers");
                           } finally {
@@ -1147,7 +1211,7 @@ export default function NodePage() {
           </div>
         ) : (
           <div className="relative mx-auto mt-24 flex max-w-md flex-col items-center justify-center">
-            <div className="pointer-events-none absolute -inset-10 -z-10 rounded-full bg-[radial-gradient(circle_at_center,rgba(0,229,255,0.25),rgba(255,45,150,0.12)_60%,transparent_70%)] blur-2xl" />
+            <div className="pointer-events-none absolute -inset-10 -z-10 rounded-full blur-2xl" style={{ background: 'radial-gradient(circle at center, rgba(0, 229, 255, 0.25), rgba(255, 45, 150, 0.12) 60%, transparent 70%)' }} />
             <div className="relative">
               {/* Spinning gradient ring around button (thicker while loading) */}
               <div
@@ -1230,7 +1294,7 @@ export default function NodePage() {
               }}
               disabled={lessonLoading}
             >
-              <span className="text-center leading-tight px-2">Start<br />Lesson</span>
+              <span className="text-center leading-tight px-2 text-white">Start<br />Lesson</span>
             </button>
             </div>
           </div>

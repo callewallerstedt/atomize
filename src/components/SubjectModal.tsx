@@ -79,8 +79,7 @@ export default function SubjectModal({
           <button
             form="subject-form"
             type="submit"
-            className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white"
-            style={{ backgroundImage: "var(--accent-grad)" }}
+            className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
           >
             {mode === "create" ? "Create" : "Save"}
           </button>
@@ -98,7 +97,15 @@ export default function SubjectModal({
             value={name}
             onChange={(e) => { if (!e.target) return; setName(e.target.value); }}
             placeholder="e.g., Calculus I"
-            className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:border-[#2F86F6] focus:outline-none"
+            onTouchStart={(e) => { (e.currentTarget as HTMLInputElement).focus(); }}
+            className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:border-[#2F86F6] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+            inputMode="text"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            tabIndex={0}
+            style={{ WebkitUserSelect: 'text', WebkitTouchCallout: 'none', WebkitAppearance: 'none' }}
           />
         </div>
       </form>

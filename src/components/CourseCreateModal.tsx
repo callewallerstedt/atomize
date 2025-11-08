@@ -28,19 +28,48 @@ export default function CourseCreateModal({ open, onClose, onCreate }: { open: b
       title="Add course"
       footer={
         <div className="flex items-center justify-end gap-2">
-          <button onClick={onClose} className="inline-flex h-9 items-center rounded-full bg-[#141923] px-4 text-sm text-[#E5E7EB] hover:bg-[#1B2030]">Cancel</button>
-          <button onClick={(e) => submit(e as any)} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white" style={{ backgroundImage: "var(--accent-grad)" }}>Create</button>
+          <button onClick={onClose} className="inline-flex h-9 items-center rounded-full px-4 text-sm" style={{ backgroundColor: '#141923', color: 'white' }}>Cancel</button>
+          <button onClick={(e) => submit(e as any)} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]">Create</button>
         </div>
       }
     >
       <form onSubmit={submit} className="space-y-4">
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Course name</label>
-          <input value={name} onChange={(e) => { if (!e.target) return; setName(e.target.value); }} className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none" placeholder="e.g., Concurrent Programming" />
+          <input
+            value={name}
+            onChange={(e) => { if (!e.target) return; setName(e.target.value); }}
+            onTouchStart={(e) => { (e.currentTarget as HTMLInputElement).focus(); }}
+            className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+            placeholder="e.g., Concurrent Programming"
+            inputMode="text"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            tabIndex={0}
+            style={{ WebkitUserSelect: 'text', WebkitTouchCallout: 'none', WebkitAppearance: 'none' }}
+          />
         </div>
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Syllabus (optional)</label>
-          <textarea value={syllabus} onChange={(e) => { if (!e.target) return; setSyllabus(e.target.value); }} rows={5} className="w-full resize-y rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none" placeholder="Paste syllabus or course description..." />
+          <textarea
+            value={syllabus}
+            onChange={(e) => { if (!e.target) return; setSyllabus(e.target.value); }}
+            onTouchStart={(e) => {
+              // Ensure focus works on iOS PWA
+              e.currentTarget.focus();
+            }}
+            rows={5}
+            className="w-full resize-y rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+            placeholder="Paste syllabus or course description..."
+            tabIndex={0}
+            style={{
+              WebkitUserSelect: 'text',
+              WebkitTouchCallout: 'none',
+              WebkitAppearance: 'none'
+            }}
+          />
         </div>
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Upload files (optional)</label>

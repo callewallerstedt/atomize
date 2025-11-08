@@ -65,7 +65,7 @@ function Node({ name, childrenNodes, depth, hrefBase, path, onGenerate, generate
             {onGenerate && !isGenerated && (
               <button
                 onClick={(e) => { e.stopPropagation(); onGenerate(name, path); }}
-                className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-accent text-[11px] text-white shadow hover:opacity-95"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] text-white shadow hover:opacity-95 bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
                 title="Generate AI for this topic"
                 aria-label="Generate AI"
               >
@@ -74,7 +74,7 @@ function Node({ name, childrenNodes, depth, hrefBase, path, onGenerate, generate
             )}
             {isGenerating && (
               <span className="inline-flex items-center gap-2 rounded-full border border-[#2B3140] bg-[#0F141D] px-2 py-0.5 text-[11px] text-[#9AA3B2]">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> Generating…
+                <span className="h-2 w-2 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" /> Generating…
               </span>
             )}
             {onGenerate && isGenerated && !isGenerating && (
@@ -87,7 +87,7 @@ function Node({ name, childrenNodes, depth, hrefBase, path, onGenerate, generate
         <ul className="relative ml-6 mt-3 space-y-3 border-l border-[#2B3140] pl-6">
           {childrenNodes!.map((c, i) => (
             <li key={i} className="relative">
-              <span className="absolute -left-6 top-3 h-px w-6 bg-accent" />
+              <span className="absolute -left-6 top-3 h-px w-6 bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
               <Node name={c.name} childrenNodes={c.subtopics} depth={depth + 1} hrefBase={hrefBase} path={[...path, name]} onGenerate={onGenerate} generatedNames={generatedNames} generatingNames={generatingNames} />
             </li>
           ))}

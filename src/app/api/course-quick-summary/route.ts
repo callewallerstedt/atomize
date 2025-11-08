@@ -30,7 +30,7 @@ Insights:`;
       temperature: 0.3,
     });
 
-    const summary = completion.output_text?.trim();
+    const summary = (completion as any)?.output?.[0]?.content?.[0]?.text?.trim?.();
 
     if (!summary) {
       return new Response(JSON.stringify({ ok: false, error: "Failed to generate summary" }), { status: 500 });

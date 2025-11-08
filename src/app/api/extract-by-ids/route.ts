@@ -17,13 +17,124 @@ export async function POST(req: Request) {
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+    // Extract docx text using multiple strategies for robustness
+    async function extractDocxText(buffer: Buffer): Promise<{ text: string; method: string }> {
+      // 1) Mammoth raw text
+      try {
+        const mammoth = await import("mammoth");
+        const mammothModule = (mammoth as any).default || mammoth;
+        const raw = await mammothModule.extractRawText({ buffer });
+        const text = String(raw?.value || "");
+        if (text.trim().length > 50) {
+          return { text, method: "mammoth-raw" };
+        }
+        // 2) Mammoth HTML -> strip tags
+        const htmlRes = await mammothModule.convertToHtml({ buffer });
+        const html = String(htmlRes?.value || "");
+        const stripped = html
+          .replace(/<style[\s\S]*?<\/style>/gi, "")
+          .replace(/<script[\s\S]*?<\/script>/gi, "")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&nbsp;/g, " ")
+          .replace(/&amp;/g, "&")
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (stripped.trim().length > 50) {
+          return { text: stripped, method: "mammoth-html-strip" };
+        }
+      } catch {}
+      // 3) JSZip: read word/document.xml and strip XML
+      try {
+        const jszipMod: any = await import("jszip");
+        const JSZip = (jszipMod as any).default || jszipMod;
+        const zip = await new JSZip().loadAsync(buffer);
+        const xml = await zip.file("word/document.xml")?.async("string");
+        if (xml && xml.length) {
+          const text = xml
+            .replace(/<w:tab\/>/g, "\t")
+            .replace(/<w:br\/>/g, "\n")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (text.trim().length > 50) {
+            return { text, method: "jszip-xml-strip" };
+          }
+        }
+      } catch {}
+      return { text: "", method: "none" };
+    }
+
+    // Helper to fetch file content from OpenAI and extract text
+    async function readRemoteFileAsText(id: string): Promise<{ name: string; text: string; method: string }> {
+      try {
+        // Retrieve metadata for filename
+        const meta: any = await client.files.retrieve(id).catch(() => ({}));
+        const name: string = String((meta as any)?.filename || (meta as any)?.name || id).toLowerCase();
+        const resp: any = await client.files.content(id);
+        // The client returns a Response object with a web stream
+        const arrayBuffer: ArrayBuffer = await resp.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const contentType = String(resp.headers?.get?.("content-type") || "");
+        // First: try plain UTF-8 decode (covers our DOCX->TXT uploads and most text)
+        try {
+          const decoded = new TextDecoder().decode(buffer);
+          const cleaned = decoded.replace(/[\x00-\x08\x0E-\x1F]/g, "");
+          if (cleaned && cleaned.trim().length > 50) {
+            return { name, text: cleaned, method: "utf8-decode" };
+          }
+        } catch {}
+
+        // Detect types by extension or content-type for binary formats
+        const isPdf = name.endsWith(".pdf") || contentType.includes("pdf");
+        const isDocx = name.endsWith(".docx") || contentType.includes("officedocument.wordprocessingml.document");
+        const isText = contentType.startsWith("text/") || name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".markdown");
+        if (isPdf) {
+          try {
+            const mod: any = await import("pdf-parse");
+            const pdfParse = (mod?.default ?? mod) as (data: Buffer) => Promise<{ text: string }>;
+            const { text } = await pdfParse(buffer).catch(() => ({ text: "" } as any));
+            return { name, text: text || "", method: "pdf-parse" };
+          } catch {
+            return { name, text: "", method: "pdf-parse-failed" };
+          }
+        }
+        if (isDocx) {
+          const out = await extractDocxText(buffer);
+          return { name, text: out.text, method: out.method };
+        }
+        if (isText) {
+          try {
+            return { name, text: new TextDecoder().decode(buffer), method: "text-decode" };
+          } catch {
+            return { name, text: buffer.toString("utf-8"), method: "text-buffer-utf8" };
+          }
+        }
+        // Fallback: try utf-8 decode and clean
+        try {
+          const decoded = new TextDecoder().decode(buffer);
+          const cleaned = decoded.replace(/[\x00-\x08\x0E-\x1F]/g, "").trim();
+          return { name, text: cleaned, method: "utf8-fallback" };
+        } catch {
+          return { name, text: "", method: "none" };
+        }
+      } catch {
+        return { name: id, text: "", method: "error" };
+      }
+    }
+
+    // Revert: do NOT pre-concatenate file contents. Attach original uploaded files to the model.
+
     const system = [
-      "Read ALL provided files and context deeply. Extract the most relevant topics and core concepts students must learn.",
+      "Read ONLY the attached files and any provided text. Do not use external knowledge.",
+      "If the attached material is insufficient, return the JSON with topics: [].",
+      "Extract the most relevant topics and core concepts students must learn from THESE materials.",
       "Return STRICT JSON with this exact shape:",
       "{ subject: string; topics: { name: string; summary: string; coverage: number }[] }",
       "Rules:",
       "- Use 8-16 concise topics (2-6 words) that together cover the course.",
-      "- Topics should be informed by the file content FIRST, then course name/description/context as supporting signals.",
+      "- Topics must be informed by the provided material ONLY.",
       "- Include both conceptual areas and essential methods/skills (e.g., 'Gradient Descent', 'Markov Decision Processes').",
       "- summary: 1–2 sentences explaining what a student will learn in this topic.",
       "- coverage: integer 0–100 estimating how much of the total content this topic covers; topics should roughly sum close to 100 but must not exceed it.",
@@ -31,17 +142,22 @@ export async function POST(req: Request) {
     ].join("\n");
 
     const inputContent: any[] = [
-      { type: "input_text", text: `Subject: ${subject}\nTask: Read all materials and extract the full set of topics and core concepts students need to learn.` },
-      ...fileIds.map((id: string) => ({ type: "input_file", file_id: id })),
+      { type: "input_text", text: `Subject: ${subject}\nTask: Read all provided materials and extract the full set of topics and core concepts students need to learn.` },
     ];
-    if (contextText) inputContent.push({ type: "input_text", text: `Additional context (name, description, notes):\n${contextText}` });
+    for (const id of fileIds) {
+      inputContent.push({ type: "input_file", file_id: id });
+    }
+    if (contextText) {
+      inputContent.push({ type: "input_text", text: `Additional context (name, description, notes):\n${contextText}` });
+    }
 
     const resp = await client.responses.create({
       model: "gpt-4o-mini",
       instructions: system,
       input: [ { role: "user", content: inputContent as any } ],
+      temperature: 0,
     });
-    const out = (resp as any).output_text || "{}";
+    const out = (resp as any)?.output?.[0]?.content?.[0]?.text ?? "";
     let data: any = {};
     try {
       data = JSON.parse(out);
@@ -50,7 +166,7 @@ export async function POST(req: Request) {
       if (s >= 0 && e > s) data = JSON.parse(out.slice(s, e + 1));
     }
     if (!data || !data.subject) data = { subject, topics: Array.isArray(data?.topics) ? data.topics : [] };
-    return NextResponse.json({ ok: true, data, combinedText: "" });
+    return NextResponse.json({ ok: true, data, debug: { fileIdsCount: fileIds.length } });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err?.message || "Unknown error" }, { status: 500 });
   }

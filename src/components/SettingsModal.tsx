@@ -83,7 +83,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
       title="Settings"
       footer={
         <div className="flex justify-end">
-          <button onClick={onClose} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white" style={{ backgroundImage: "var(--accent-grad)" }}>Close</button>
+          <button onClick={onClose} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]">Close</button>
         </div>
       }
     >

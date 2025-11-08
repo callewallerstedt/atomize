@@ -1,5 +1,14 @@
 export type TopicMeta = { name: string; summary: string; coverage: number };
-export type TopicGeneratedLesson = { title: string; body: string; quiz: { question: string }[] };
+export type QuizResult = { correct: boolean; explanation: string; hint?: string; fullSolution?: string };
+export type TopicGeneratedLesson = {
+  title: string;
+  body: string;
+  quiz: { question: string }[];
+  // Optional persisted quiz state
+  userAnswers?: string[];
+  quizResults?: { [index: number]: QuizResult };
+  quizCompletedAt?: number; // timestamp when answers were checked
+};
 export type TopicGeneratedContent = {
   overview: string;
   symbols: { symbol: string; meaning: string; units?: string }[];

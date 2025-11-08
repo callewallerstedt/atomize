@@ -220,7 +220,7 @@ export default function SubjectPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#0F1216]">
+    <div className="flex min-h-screen flex-col bg-[var(--background)]">
       <div className="mx-auto w-full max-w-3xl px-6 py-8">
         {(generatingBasics || loading) && (
           <div className="fixed inset-0 z-[9998] flex flex-col items-center justify-center bg-[var(--background)]/80 backdrop-blur-sm">
@@ -245,7 +245,8 @@ export default function SubjectPage() {
                     router.push(`/subjects/${slug}/node/${encodeURIComponent(first.topicName)}`);
                   }
                 }}
-                className="inline-flex h-9 items-center rounded-full bg-[#00E5FF] px-4 text-sm font-medium text-white hover:opacity-95 transition-opacity"
+                className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium hover:opacity-95 transition-opacity"
+                style={{ backgroundImage: 'var(--accent-grad)', color: 'white' }}
               >
                 Review Now
               </button>
@@ -256,7 +257,7 @@ export default function SubjectPage() {
                   <Link
                     key={idx}
                     href={`/subjects/${slug}/node/${encodeURIComponent(review.topicName)}`}
-                    className="block text-xs text-[#E5E7EB] hover:text-[#00E5FF] transition-colors"
+                    className="block text-xs text-[var(--foreground)] hover:text-[var(--accent-cyan)] transition-colors"
                   >
                     • {review.topicName} - Lesson {review.lessonIndex + 1}
                   </Link>
@@ -271,32 +272,27 @@ export default function SubjectPage() {
         
         {/* Upcoming Reviews Info */}
         {upcomingReviews.length > 0 && reviewsDue.length === 0 && (
-          <div className="mb-6 rounded-xl border border-[#2B3140] bg-[#0B0E12] p-4">
-            <div className="text-sm text-[#E5E7EB]">📅 {upcomingReviews.length} upcoming review{upcomingReviews.length > 1 ? 's' : ''} in the next 7 days</div>
+          <div className="mb-6 rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4">
+            <div className="text-sm text-[var(--foreground)]">📅 {upcomingReviews.length} upcoming review{upcomingReviews.length > 1 ? 's' : ''} in the next 7 days</div>
             <div className="text-xs text-[#A7AFBE] mt-1">Keep up the great work!</div>
           </div>
         )}
 
         {activeTab === 'tree' && (
           <div className="mt-4">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="text-sm text-white">Topics</div>
+              <div className="mb-3 flex items-center justify-between">
+              <div className="text-sm text-[var(--foreground)]">Topics</div>
               <div className="flex items-center gap-2">
                 <button
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#141923] text-[#E5E7EB] hover:bg-[#1B2030]"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--background)] text-[var(--foreground)] hover:bg-[var(--background)]/80 border border-[var(--foreground)]/15"
                   onClick={() => { setNewTopicValue(""); setNewTopicOpen(true); }}
                   aria-label="New topic"
                 >
                   +
                 </button>
                 <button
-                  className="inline-flex h-8 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-3 text-xs font-medium text-white hover:opacity-95"
-                  onClick={() => { setQuickLearnQuery(""); setQuickLearnOpen(true); }}
-                >
-                  Quick Learn
-                </button>
-                <button
-                  className="inline-flex h-8 items-center rounded-full bg-accent px-3 text-xs font-medium text-white hover:opacity-95"
+                  className="inline-flex h-8 items-center rounded-full px-3 text-xs font-medium text-white hover:opacity-95 bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
+                  style={{ color: 'white' }}
                   onClick={async () => {
                     try {
                       setLoading(true);
@@ -310,6 +306,7 @@ export default function SubjectPage() {
                         })
                       });
                       const json = await res.json().catch(() => ({}));
+                      try { console.log('Extract-by-ids debug:', { filesRead: json?.debug?.filesRead, combinedLength: json?.debug?.combinedLength, combinedPreview: (json?.combinedText || '').slice(0, 500) }); } catch {}
                       if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
                       const gotTopics: TopicMeta[] = json.data?.topics || [];
                       setTopics(gotTopics);
@@ -332,7 +329,7 @@ export default function SubjectPage() {
               </div>
             </div>
             {tree && tree.topics && tree.topics.length > 0 ? (
-              <ul className="divide-y divide-[#1A2230] rounded-2xl border border-[#222731] bg-[#0B0E12]">
+              <ul className="divide-y divide-[var(--foreground)]/10 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]">
                 {[...tree.topics].sort((a, b) => {
                   const aGen = !!(Array.isArray(nodes?.[a.name]?.lessons) && nodes[a.name].lessons.length > 0);
                   const bGen = !!(Array.isArray(nodes?.[b.name]?.lessons) && nodes[b.name].lessons.length > 0);
@@ -346,14 +343,40 @@ export default function SubjectPage() {
                   const isFirst = i === 0;
                   const isLast = i === tree.topics.length - 1;
                   const roundedClass = isFirst ? "rounded-t-2xl" : isLast ? "rounded-b-2xl" : "";
+                  // Determine if any lesson quiz is completed (has results for all questions)
+                  let quizCompleted = false;
+                  try {
+                    const node = (nodes as any)?.[name];
+                    const lessons = Array.isArray(node?.lessons) ? node.lessons : [];
+                    for (const l of lessons) {
+                      if (!l || !Array.isArray(l.quiz) || l.quiz.length === 0) continue;
+                      const results = l.quizResults || {};
+                      if (results && Object.keys(results).length >= l.quiz.length) {
+                        quizCompleted = true;
+                        break;
+                      }
+                    }
+                  } catch {}
                   return (
-                    <li key={`${name}-${i}`} className={`group relative flex items-center justify-between px-4 py-3 hover:bg-[#141923] transition-colors cursor-pointer ${roundedClass} ${isGen ? 'before:absolute before:left-0 before:top-0 before:bottom-0 before:w-1 before:bg-gradient-to-b before:from-[#00E5FF]/60 before:to-[#00E5FF]/20' : ''}`} onClick={() => {
+                    <li key={`${name}-${i}`} className={`group relative flex items-center justify-between px-4 py-3 transition-colors cursor-pointer overflow-hidden ${roundedClass} ${isGen ? 'bg-transparent' : 'hover:bg-[var(--background)]/80'}`} onClick={() => {
                       // Don't navigate if this topic is currently generating
                       if (isGenerating) return;
                       // Use Next.js router for clean navigation without interrupting async operations
                       router.push(`/subjects/${slug}/node/${encodeURIComponent(name)}`);
                     }}>
-                      <span className={`text-sm transition-colors ${isGen ? 'text-[#E5E7EB] hover:text-white' : 'text-[#A7AFBE] hover:text-[#E5E7EB]'}`}>{name}</span>
+                      {isGen && (
+                        <div className="pointer-events-none absolute inset-0 opacity-20" style={{ backgroundImage: 'linear-gradient(90deg, #00E5FF, #FF2D96)', borderRadius: 'inherit' }} />
+                      )}
+                      <span className={`text-sm transition-colors ${isGen ? 'text-[var(--foreground)] hover:opacity-90' : 'text-[var(--foreground)]/70 hover:text-[var(--foreground)]'}`}>{name}</span>
+                      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        {isGen && quizCompleted && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-green-300 bg-green-50 px-2 py-0.5 text-[11px] text-green-700 dark:border-green-500/40 dark:bg-green-500/10 dark:text-green-200">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                              <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                            Done
+                          </span>
+                        )}
                       {!isGen && (
                         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                           {!isGenerating && (
@@ -421,16 +444,17 @@ export default function SubjectPage() {
                             />
                           )}
                           {isGenerating && (
-                            <span className="inline-flex items-center gap-2 rounded-full border border-[#2B3140] bg-[#0F141D] px-2 py-0.5 text-[11px] text-[#9AA3B2]"><span className="h-2 w-2 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" /> Generating…</span>
+                            <span className="inline-flex items-center gap-2 rounded-full border border-[var(--foreground)]/20 bg-[var(--background)] px-2 py-0.5 text-[11px] text-[var(--foreground)]/70"><span className="h-2 w-2 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" /> Generating…</span>
                           )}
                         </div>
                       )}
+                      </div>
                     </li>
                   );
                 })}
               </ul>
             ) : (
-              <div className="rounded-2xl border border-[#222731] bg-[#0B0E12] p-6 text-center text-sm text-[#A7AFBE]">No topics yet.</div>
+              <div className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-6 text-center text-sm text-[var(--foreground)]/70">No topics yet.</div>
             )}
           </div>
         )}
@@ -448,7 +472,7 @@ export default function SubjectPage() {
                 value={query}
                 onChange={(e) => { if (!e.target) return; setQuery(e.target.value); }}
                 placeholder="Search topics..."
-                className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none"
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none"
               />
             </div>
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -462,7 +486,7 @@ export default function SubjectPage() {
                   return (
                     <div
                       key={`${t.name}-${i}`}
-                      className="rounded-2xl border border-[#222731] bg-[#0B0E12] p-4 cursor-pointer"
+                      className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 cursor-pointer"
                       role="link"
                       tabIndex={0}
                       onClick={() => router.push(`/subjects/${slug}/node/${encodeURIComponent(t.name)}`)}
@@ -475,7 +499,7 @@ export default function SubjectPage() {
                     >
                       <div className="flex h-full flex-col gap-3">
                         <div className="min-h-[48px]">
-                          <span className="block text-base font-semibold text-white hover:underline">{t.name}</span>
+                          <span className="block text-base font-semibold text-[var(--foreground)] hover:underline">{t.name}</span>
                           <div className="mt-1 truncate text-sm text-[#A7AFBE]" title={t.summary}>{t.summary}</div>
                         </div>
                         <div className="mt-1">
@@ -484,7 +508,7 @@ export default function SubjectPage() {
                             <span>{pct}%</span>
                           </div>
                           <div className="h-2 w-full rounded-full bg-[#1A2230]">
-                            <div className="h-2 rounded-full bg-accent" style={{ width: `${pct}%` }} />
+                            <div className="h-2 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" style={{ width: `${pct}%` }} />
                           </div>
                         </div>
                       </div>
@@ -510,9 +534,19 @@ export default function SubjectPage() {
                   }
                 } catch {}
               }}
+              onTouchStart={(e) => {
+                // Ensure focus works on iOS PWA
+                e.currentTarget.focus();
+              }}
               rows={12}
-              className="w-full resize-y rounded-2xl border border-[#222731] bg-[#0B0E12] p-4 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none"
+              className="w-full resize-y rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)] p-4 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
               placeholder="Write course notes..."
+              tabIndex={0}
+              style={{
+                WebkitUserSelect: 'text',
+                WebkitTouchCallout: 'none',
+                WebkitAppearance: 'none'
+              }}
             />
           </div>
         )}
@@ -522,7 +556,7 @@ export default function SubjectPage() {
           title="Use detected language?"
           footer={
             <div className="flex items-center justify-end gap-2">
-              <button onClick={() => setLanguagePrompt(null)} className="inline-flex h-9 items-center rounded-full bg-[#141923] px-4 text-sm text-[#E5E7EB] hover:bg-[#1B2030]">Keep English</button>
+              <button onClick={() => setLanguagePrompt(null)} className="inline-flex h-9 items-center rounded-full px-4 text-sm" style={{ backgroundColor: '#141923', color: 'white' }}>Keep English</button>
               <button
                 onClick={() => {
                   try {
@@ -535,7 +569,8 @@ export default function SubjectPage() {
                   } catch {}
                   setLanguagePrompt(null);
                 }}
-                className="inline-flex h-9 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 text-sm font-medium text-white"
+                className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium"
+                style={{ backgroundImage: 'var(--accent-grad)', color: 'white' }}
               >Use {languagePrompt?.name}</button>
             </div>
           }
@@ -548,7 +583,7 @@ export default function SubjectPage() {
           title="Extract Topics"
           footer={
             <div className="flex items-center justify-end gap-2">
-              <button onClick={() => setBasicsModalOpen(false)} className="inline-flex h-9 items-center rounded-full bg-[#141923] px-4 text-sm text-[#E5E7EB] hover:bg-[#1B2030]" disabled={generatingBasics}>Cancel</button>
+              <button onClick={() => setBasicsModalOpen(false)} className="inline-flex h-9 items-center rounded-full px-4 text-sm" style={{ backgroundColor: '#141923', color: 'white' }} disabled={generatingBasics}>Cancel</button>
               <button
                 onClick={async () => {
                   try {
@@ -615,9 +650,10 @@ export default function SubjectPage() {
                     setGeneratingBasics(false);
                   }
                 }}
-                className="inline-flex h-9 items-center rounded-full bg-accent px-4 text-sm font-medium text-white"
+                className="inline-flex h-9 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 text-sm font-medium text-white"
+                style={{ color: 'white' }}
                 disabled={generatingBasics}
-              >{generatingBasics ? 'Extracting…' : 'Extract'}</button>
+              >{generatingBasics ? 'Extracting…' : 'Extract Topics'}</button>
             </div>
           }
         >
@@ -628,7 +664,7 @@ export default function SubjectPage() {
               multiple
               accept=".pdf,.docx,.txt,.md,.markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown"
               onChange={(e) => { if (!e.target?.files) return; setBasicsFiles(Array.from(e.target.files)); }}
-              className="block w-full text-sm text-[#E5E7EB] file:mr-4 file:rounded-full file:border-0 file:bg-accent file:px-3 file:py-2 file:text-white"
+              className="block w-full text-sm text-[var(--foreground)] file:mr-4 file:rounded-full file:border-0 file:bg-gradient-to-r file:from-[#00E5FF] file:to-[#FF2D96] file:px-3 file:py-2 file:text-white"
             />
             <div className="mt-2 text-xs text-[#9AA3B2]">We’ll use these plus your saved course summary as context.</div>
           </div>
@@ -639,7 +675,7 @@ export default function SubjectPage() {
           title="New topic"
           footer={
             <div className="flex items-center justify-end gap-2">
-              <button onClick={() => setNewTopicOpen(false)} className="inline-flex h-9 items-center rounded-full bg-[#141923] px-4 text-sm text-[#E5E7EB] hover:bg-[#1B2030]" disabled={creatingTopic}>Cancel</button>
+              <button onClick={() => setNewTopicOpen(false)} className="inline-flex h-9 items-center rounded-full px-4 text-sm" style={{ backgroundColor: '#141923', color: 'white' }} disabled={creatingTopic}>Cancel</button>
               <button
                 onClick={async () => {
                   const prompt = (newTopicValue || "").trim();
@@ -679,7 +715,7 @@ export default function SubjectPage() {
                     setCreatingTopic(false);
                   }
                 }}
-                className="inline-flex h-9 items-center rounded-full bg-accent px-4 text-sm font-medium text-white"
+                className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
                 disabled={creatingTopic}
               >{creatingTopic ? 'Adding…' : 'Add topic'}</button>
             </div>
@@ -690,7 +726,7 @@ export default function SubjectPage() {
             <input
               value={newTopicValue}
               onChange={(e) => { if (!e.target) return; setNewTopicValue(e.target.value); }}
-              className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none"
+              className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none"
               placeholder="e.g. Linear Algebra basics or ‘What is eigenvalue?’"
             />
           </div>
@@ -704,9 +740,19 @@ export default function SubjectPage() {
               <textarea
                 value={quickLearnQuery}
                 onChange={(e) => { if (!e.target) return; setQuickLearnQuery(e.target.value); }}
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none"
+                onTouchStart={(e) => {
+                  // Ensure focus works on iOS PWA
+                  e.currentTarget.focus();
+                }}
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
                 placeholder="e.g. How does binary search work? Or paste a question from your course materials..."
                 rows={4}
+                tabIndex={0}
+                style={{
+                  WebkitUserSelect: 'text',
+                  WebkitTouchCallout: 'none',
+                  WebkitAppearance: 'none'
+                }}
               />
             </div>
             <div className="flex justify-end gap-3">
@@ -720,7 +766,8 @@ export default function SubjectPage() {
               <button
                 onClick={handleQuickLearn}
                 disabled={!quickLearnQuery.trim() || quickLearnLoading}
-                className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60 transition-opacity"
+              className="inline-flex h-10 items-center rounded-full px-6 text-sm font-medium hover:opacity-95 disabled:opacity-60 transition-opacity"
+              style={{ backgroundImage: 'var(--accent-grad)', color: 'white' }}
               >
                 {quickLearnLoading ? "Generating..." : "Generate Lesson"}
               </button>
@@ -732,7 +779,7 @@ export default function SubjectPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="flex flex-col items-center gap-6">
             <div className="h-24 w-24 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
-            <div className="text-base font-medium text-white">Analyzing files…</div>
+            <div className="text-base font-medium text-[var(--foreground)]">Analyzing files…</div>
           </div>
         </div>
       )}

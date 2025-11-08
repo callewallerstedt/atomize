@@ -36,6 +36,14 @@ function Home() {
   const [quickLearnQuery, setQuickLearnQuery] = useState("");
   const [quickLearnLoading, setQuickLearnLoading] = useState(false);
   const [filesModalOpen, setFilesModalOpen] = useState<string | null>(null);
+  const [isIOSStandalone, setIsIOSStandalone] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPad|iPhone|iPod/i.test(ua);
+    const isStandalone = (window.navigator as any).standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+    setIsIOSStandalone(isIOS && isStandalone);
+  }, []);
   const searchParams = useSearchParams();
   const [isDragging, setIsDragging] = useState(false);
   useEffect(() => {
@@ -146,19 +154,14 @@ function Home() {
       const initData: StoredSubjectData = { subject: effectiveName, files: storedFiles, combinedText, tree: null, topics: [], nodes: {}, progress: {}, course_context: syllabus };
       saveSubjectData(unique, initData);
 
-      let fileIds: string[] = [];
+      let documents: Array<{ name: string; text: string }> = [];
       try {
         const uploadForm = new FormData();
         files.forEach((f) => uploadForm.append('files', f));
         const upRes = await fetch('/api/upload-course-files', { method: 'POST', body: uploadForm });
         const upJson = await upRes.json().catch(() => ({}));
-        if (upRes.ok && upJson?.ok && Array.isArray(upJson.fileIds)) {
-          fileIds = upJson.fileIds;
-          const data = loadSubjectData(unique) as StoredSubjectData | null;
-          if (data) {
-            data.course_file_ids = fileIds;
-            saveSubjectData(unique, data);
-          }
+        if (upRes.ok && upJson?.ok && Array.isArray(upJson.docs)) {
+          documents = upJson.docs;
         }
       } catch {}
 
@@ -170,7 +173,7 @@ function Home() {
             subject: effectiveName,
             syllabus,
             text: combinedText,
-            fileIds,
+            documents,
           }),
         });
         if (summaryRes.ok) {
@@ -254,7 +257,7 @@ function Home() {
   return (
     <div className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] px-6 py-10">
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
-        <h1 className="text-xl font-semibold text-white">Your subjects</h1>
+        <h1 className="text-xl font-semibold text-[var(--foreground)]">Your subjects</h1>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setCreateOpen(true)}
@@ -404,11 +407,7 @@ function Home() {
           <span className="text-[var(--foreground)]/70">Drop files here to auto-create a course</span>
           <span className="text-xs text-[var(--foreground)]/50">We’ll scan the files and name it for you</span>
         </div>
-        {subjects.length === 0 && (
-          <div className="col-span-full rounded-2xl border border-[#222731] bg-[#0B0E12] p-6 text-center text-sm text-[#A7AFBE]">
-            No subjects yet. Click “+ New subject” to create one.
-          </div>
-        )}
+        {subjects.length === 0 && null}
       </div>
       <CourseCreateModal
         open={createOpen}
@@ -424,16 +423,33 @@ function Home() {
       {/* Quick Lesson Modal */}
       {quickLearnOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md p-6">
+          <div className={isIOSStandalone ? "w-full max-w-md rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)] p-6" : "w-full max-w-md rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md p-6"}>
             <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Quick Lesson</h3>
             <div className="mb-4">
               <label className="mb-2 block text-xs text-[var(--foreground)]/70">What do you want to learn?</label>
               <textarea
                 value={quickLearnQuery}
                 onChange={(e) => { if (!e.target) return; setQuickLearnQuery(e.target.value); }}
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none"
+                onTouchStart={(e) => {
+                  // Ensure focus works on iOS PWA
+                  e.currentTarget.focus();
+                }}
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
                 placeholder="e.g. How does machine learning work? Or paste a question from your textbook..."
                 rows={4}
+                tabIndex={0}
+                inputMode="text"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                style={{
+                  WebkitUserSelect: 'text',
+                  WebkitTouchCallout: 'none',
+                  WebkitAppearance: 'none',
+                  WebkitTouchAction: 'manipulation',
+                  touchAction: 'manipulation'
+                }}
               />
             </div>
             <div className="flex justify-end gap-3">
@@ -448,6 +464,7 @@ function Home() {
                 onClick={handleQuickLearn}
                 disabled={!quickLearnQuery.trim() || quickLearnLoading}
                 className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60 transition-opacity"
+                style={{ color: 'white' }}
               >
                 {quickLearnLoading ? "Generating..." : "Generate Lesson"}
               </button>

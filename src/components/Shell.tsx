@@ -381,6 +381,7 @@ function ChatDropdown() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 480, h: 460 });
   const [resizing, setResizing] = useState(false);
@@ -412,52 +413,45 @@ function ChatDropdown() {
     if (isLoadingFromHistoryRef.current) {
       isLoadingFromHistoryRef.current = false;
       const messagesKey = JSON.stringify(messages);
-      lastSavedRef.current = messagesKey; // Update ref to match loaded messages
+      lastSavedRef.current = messagesKey;
       return;
     }
 
     if (messages.length > 0 && !sending && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content) {
       const messagesKey = JSON.stringify(messages);
-      // Only save if messages have changed and conversation is complete
-      if (messagesKey !== lastSavedRef.current) {
-        // Check if this exact conversation already exists in history
-        const messagesExist = chatHistory.some(chat => JSON.stringify(chat.messages) === messagesKey);
-        if (!messagesExist) {
-          const firstUserMessage = messages.find(m => m.role === 'user');
-          if (firstUserMessage) {
-            const title = firstUserMessage.content.slice(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '');
-            const newChat: ChatHistory = {
-              id: Date.now().toString(),
-              title,
-              messages: [...messages],
-              timestamp: Date.now()
-            };
-            const updated = [newChat, ...chatHistory.filter(c => c.id !== newChat.id)].slice(0, 50); // Keep last 50 chats
-            setChatHistory(updated);
-            lastSavedRef.current = messagesKey;
-            try {
-              localStorage.setItem('chatHistory', JSON.stringify(updated));
-            } catch {}
-          }
-        } else {
-          // Update ref even if not saving (messages already exist)
-          lastSavedRef.current = messagesKey;
-        }
+      if (messagesKey === lastSavedRef.current) return;
+      const now = Date.now();
+      if (currentChatId) {
+        const updated = chatHistory.map(c => c.id === currentChatId ? { ...c, messages: [...messages], timestamp: now } : c);
+        setChatHistory(updated);
+        lastSavedRef.current = messagesKey;
+        try { localStorage.setItem('chatHistory', JSON.stringify(updated)); } catch {}
+      } else {
+        const firstUserMessage = messages.find(m => m.role === 'user');
+        const title = firstUserMessage ? (firstUserMessage.content.slice(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '')) : 'Conversation';
+        const newChat: ChatHistory = { id: now.toString(), title, messages: [...messages], timestamp: now };
+        const updated = [newChat, ...chatHistory].slice(0, 50);
+        setChatHistory(updated);
+        setCurrentChatId(newChat.id);
+        lastSavedRef.current = messagesKey;
+        try { localStorage.setItem('chatHistory', JSON.stringify(updated)); } catch {}
       }
     }
-  }, [messages, sending, chatHistory]);
+  }, [messages, sending, chatHistory, currentChatId]);
 
   function startNewChat() {
     setMessages([]);
     setInput("");
     setShowHistory(false);
     lastSavedRef.current = '';
+    setCurrentChatId(null);
   }
 
   function loadChat(chat: ChatHistory) {
     isLoadingFromHistoryRef.current = true;
     setMessages(chat.messages);
     setShowHistory(false);
+    setCurrentChatId(chat.id);
   }
 
   function deleteChat(id: string, e: React.MouseEvent) {
@@ -631,24 +625,26 @@ function ChatDropdown() {
           e.currentTarget.blur();
         }}
         className="relative inline-flex h-10 items-center rounded-full px-3 text-sm
-                   text-white bg-[var(--background)]/90
+                   text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]
                    shadow-[0_2px_8px_rgba(0,0,0,0.7)]
-                   hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95
-                   focus:outline-none focus:ring-0 focus-visible:outline-none 
+                   hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:opacity-95
+                   focus:outline-none focus:ring-0 focus-visible:outline-none
                    active:shadow-[0_2px_8px_rgba(0,0,0,0.7)] active:scale-[1]
-                   transition-shadow duration-200 ease-out"
-        style={{ outline: 'none', WebkitTapHighlightColor: 'transparent', transform: 'none !important' }}
+                   transition-shadow duration-200 ease-out overflow-hidden"
+        style={{ outline: 'none', WebkitTapHighlightColor: 'transparent', transform: 'none !important', color: 'white' }}
         aria-label="Chat"
         title="Chat"
       >
-        Chat
-        <svg className={`h-4 w-4 ml-1 transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
+        <span className="relative z-10 flex items-center">
+          Chat
+          <svg className={`h-4 w-4 ml-1 transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
+        </span>
       </button>
       {open && (
         <>
           <div 
             ref={chatDropdownRef}
-            className="absolute right-0 mt-2 z-50 rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-2xl p-3
+            className="absolute right-0 mt-2 z-50 rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 bg-gradient-to-br from-[#00E5FF]/20 to-[#FF2D96]/20 backdrop-blur-md shadow-2xl p-3
                         max-md:fixed max-md:inset-4 max-md:right-4 max-md:left-4 max-md:top-4 max-md:bottom-4 max-md:mt-0 max-md:w-auto max-md:h-auto
                         md:absolute md:right-0 md:mt-2 flex flex-col" 
             style={{ 
@@ -680,7 +676,7 @@ function ChatDropdown() {
             
             {/* History panel - absolute positioned to overlay */}
             {showHistory && (
-              <div className="absolute top-full right-0 mt-1 w-64 p-2 rounded-lg bg-[var(--background)]/95 backdrop-blur-md border border-[var(--foreground)]/20 shadow-xl z-50 max-h-64 overflow-y-auto">
+              <div className="absolute top-full right-0 mt-1 w-64 p-2 rounded-lg bg-[var(--background)]/95 bg-gradient-to-br from-[#00E5FF]/20 to-[#FF2D96]/20 backdrop-blur-md border border-[var(--foreground)]/20 shadow-xl z-50 max-h-64 overflow-y-auto">
                 {chatHistory.length === 0 ? (
                   <div className="text-xs text-[var(--foreground)]/60 text-center py-4">No chat history</div>
                 ) : (
@@ -757,7 +753,7 @@ function ChatDropdown() {
             <div
               onMouseDown={(e) => { setResizing(true); setStart({ x: e.clientX, y: e.clientY, w: size.w, h: size.h }); }}
               title="Resize"
-              className="max-md:hidden absolute left-2 bottom-2 h-3 w-3 cursor-nwse-resize bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] rounded-sm"
+              className="max-md:hidden absolute left-2 bottom-2 h-3 w-3 cursor-nwse-resize opacity-0"
             />
           </div>
         </div>
@@ -787,6 +783,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [uiZoom, setUiZoom] = useState<number>(1.4);
+  const [isIOSStandalone, setIsIOSStandalone] = useState<boolean>(false);
 
   useEffect(() => {
     setSubjects(getSubjects());
@@ -821,6 +819,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       console.error('Error loading theme:', e);
     }
   }, [pathname]);
+
+  // Avoid CSS zoom on iOS PWA (breaks input focus and text selection)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPad|iPhone|iPod/i.test(ua);
+    const isStandalone = (window.navigator as any).standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+    if (isIOS && isStandalone) {
+      setUiZoom(1);
+      setIsIOSStandalone(true);
+    }
+  }, []);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -875,10 +885,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     <>
       {/* Loading Screen */}
       {isLoading && <LoadingScreen onComplete={handleLoadingComplete} />}
-    <div className="flex min-h-screen bg-[var(--background)] text-[var(--foreground)]" style={{ zoom: 1.4 }}>
+    <div className="flex min-h-screen bg-[var(--background)] text-[var(--foreground)]" style={isIOSStandalone ? undefined : { zoom: uiZoom }}>
       {/* Main content */}
       <div className="flex min-h-screen w-full flex-col">
-        <header className="sticky top-0 z-50 backdrop-blur supports-[backdrop-filter]:bg-[var(--background)]/70 bg-[var(--background)] border-b border-[#4A5568]">
+        <header className="sticky top-0 z-50 backdrop-blur supports-[backdrop-filter]:bg-[var(--background)]/70 bg-[var(--background)] border-b border-[#4A5568]" style={{ paddingTop: 'max(3px, calc(env(safe-area-inset-top, 0px) / 2))' }}>
           <nav className="relative flex h-14 items-center px-4">
             {/* Left side buttons */}
             <div className="flex items-center gap-3">

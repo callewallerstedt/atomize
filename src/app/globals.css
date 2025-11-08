@@ -310,3 +310,39 @@ button[aria-label="Settings"]:active {
   -webkit-filter: none !important;
   will-change: auto !important;
 }
+
+/* iOS PWA input fixes */
+input, textarea {
+  -webkit-user-select: text !important;
+  -webkit-touch-callout: none !important;
+  -webkit-appearance: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+/* Standalone (PWA) overrides: avoid blur/filters that break iOS keyboard */
+@media all and (display-mode: standalone) {
+  .backdrop-blur, .backdrop-blur-md, .backdrop-blur-lg, .backdrop-blur-xl, [style*="backdrop-filter"] {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  input, textarea {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+input:focus, textarea:focus {
+  outline: none !important;
+}
+
+/* Removed global translateZ to avoid iOS input focus bugs */
+
+/* Remove restrictive global touch/selection rules on body (iOS focus fix) */
+
+/* Consistent button shadow across the app (match header Home button) */
+button {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.7) !important;
+  transition: box-shadow 200ms ease, opacity 200ms ease, transform 200ms ease;
+}
+button:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8) !important;
+}
