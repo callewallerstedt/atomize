@@ -1319,6 +1319,7 @@ export default function NodePage() {
             onClick={async () => {
               try {
                 const lesson = content.lessons[currentLessonIndex];
+                if (!lesson) return;
                 const res = await fetch('/api/export-pdf', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
