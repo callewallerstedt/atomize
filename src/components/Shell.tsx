@@ -8,6 +8,7 @@ import rehypeKatex from "rehype-katex";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import SettingsModal from "@/components/SettingsModal";
+import Modal from "@/components/Modal";
 
 // Loading Screen Component
 function LoadingScreen({ onComplete }: { onComplete: () => void }) {
@@ -781,10 +782,29 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [uiZoom, setUiZoom] = useState<number>(1.4);
   const [isIOSStandalone, setIsIOSStandalone] = useState<boolean>(false);
+  const infoMarkdown = `
+# Welcome to Synapse
+
+Synapse helps you turn course materials into study-friendly lessons with:
+
+- Lessons with clear structure and practice quizzes
+- Topic extraction from uploaded files
+- Quick explanations on any word or paragraph
+- Language-aware generation that follows your course language
+- Quick Learn for rapid lessons on any query
+- Export to PDF and spaced repetition review scheduling
+
+Tips:
+- Drop files on the home page to auto-create a course
+- Open a topic to generate a comprehensive lesson
+- Use the chat (bottom-right) to ask questions with page context
+- Toggle hints/solutions after checking quiz answers
+`.trim();
 
   useEffect(() => {
     setSubjects(getSubjects());
@@ -976,6 +996,30 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <div className="absolute right-4 top-1/2 transform -translate-y-1/2 flex items-center gap-2">
               {/* Chat dropdown */}
               <ChatDropdown />
+              {/* Info button */}
+              <button
+                onClick={() => setInfoOpen(true)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                }}
+                className="relative inline-flex h-10 w-10 items-center justify-center rounded-full
+                           text-white bg-[var(--background)]/90
+                           shadow-[0_2px_8px_rgba(0,0,0,0.7)]
+                           hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95
+                           focus:outline-none focus:ring-0 focus-visible:outline-none 
+                           active:shadow-[0_2px_8px_rgba(0,0,0,0.7)] active:scale-[1]
+                           transition-shadow duration-200 ease-out"
+                style={{ outline: 'none', WebkitTapHighlightColor: 'transparent', transform: 'none !important' }}
+                aria-label="Info"
+                title="About this app"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
+                  <path d="M12 8.5a.75.75 0 100-1.5.75.75 0 000 1.5z" fill="currentColor"/>
+                  <path d="M11.25 10.5h1.5v6h-1.5z" fill="currentColor"/>
+                </svg>
+              </button>
               <button
                 onClick={() => setSettingsOpen(true)}
                 onMouseDown={(e) => {
@@ -1007,6 +1051,28 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       <div className="settings-modal">
         <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </div>
+      <Modal
+        open={infoOpen}
+        onClose={() => setInfoOpen(false)}
+        title="About this app"
+        footer={
+          <div className="flex items-center justify-end">
+            <button
+              onClick={() => setInfoOpen(false)}
+              className="inline-flex h-9 items-center rounded-full px-4 text-sm"
+              style={{ backgroundColor: '#141923', color: 'white' }}
+            >
+              Close
+            </button>
+          </div>
+        }
+      >
+        <div className="lesson-content text-sm">
+          <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+            {infoMarkdown}
+          </ReactMarkdown>
+        </div>
+      </Modal>
     </div>
     </>
   );
