@@ -181,7 +181,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--background)]">
+    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-start overflow-y-auto bg-[var(--background)]">
       <style dangerouslySetInnerHTML={{__html: `
         @media (min-width: 768px) {
           .spinner-scale-wrapper {
@@ -228,7 +228,7 @@ export default function LoginPage() {
       </div>
 
       {/* Spinning gradient ring */}
-      <div className="logo-wrap -mt-40 -mb-[100px]" style={{ width: 240, aspectRatio: "1 / 0.8", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+      <div className="logo-wrap pt-8 -mb-[100px]" style={{ width: 240, aspectRatio: "1 / 0.8", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
         <div style={{ transform: "scale(1.3)", transformOrigin: "center" }} className="spinner-scale-wrapper">
           <img
             src="/spinner.png"
@@ -253,7 +253,7 @@ export default function LoginPage() {
       </div>
 
       {/* Login form */}
-      <div className="w-full max-w-md px-6">
+      <div className="w-full max-w-md px-6 pb-8">
         <h2 className="text-2xl font-semibold text-[var(--foreground)] mb-2 text-center">
           {authMode === "login" ? "Sign in" : "Sign up"}
         </h2>
