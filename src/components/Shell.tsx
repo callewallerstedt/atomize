@@ -239,21 +239,21 @@ function PomodoroTimer() {
   };
 
   return (
-    <div className="relative pomodoro-timer">
+    <div className="relative pomodoro-timer w-full md:w-auto">
       {/* Main Timer Display */}
       <button
         onClick={() => setShowSettings(!showSettings)}
-        className="relative inline-flex items-center justify-center gap-1 rounded-lg px-2.5 py-1.5 min-w-[100px]
+        className="relative inline-flex w-full md:w-auto items-center justify-between md:justify-center gap-1 rounded-lg px-3 py-1.5 min-w-[100px]
                    text-white bg-[var(--background)]/90 backdrop-blur-md
                    shadow-[0_2px_8px_rgba(0,0,0,0.4)]
                    hover:shadow-[0_4px_12px_rgba(0,0,0,0.5)] hover:bg-[var(--background)]/95
                    transition-all duration-300 ease-out"
       >
         <div className="flex items-center gap-1.5">
-          <span className="font-mono text-xl font-bold leading-none">
+          <span className="font-mono text-lg sm:text-xl font-bold leading-none">
             {formatTime(timeLeft)}
           </span>
-          <span className="text-xs opacity-75">
+          <span className="text-[10px] sm:text-xs opacity-75">
             {isBreak ? 'BREAK' : 'STUDY'}
           </span>
         </div>
@@ -271,7 +271,7 @@ function PomodoroTimer() {
       {showPlayButton && (
         <button
           onClick={startNextTimer}
-          className="absolute -right-12 top-1/2 transform -translate-y-1/2 w-8 h-8 rounded-full
+          className="hidden md:flex md:absolute md:-right-12 md:top-1/2 md:-translate-y-1/2 w-8 h-8 rounded-full
                      bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white
                      flex items-center justify-center shadow-lg hover:shadow-xl
                      transition-all duration-200 hover:scale-110 animate-pulse"
@@ -439,6 +439,18 @@ function ChatDropdown() {
         setChatHistory(JSON.parse(stored));
       }
     } catch {}
+  }, []);
+
+  useEffect(() => {
+    const handleOpenChat = () => {
+      setOpen(true);
+      requestAnimationFrame(() => {
+        chatButtonRef.current?.focus();
+      });
+    };
+
+    document.addEventListener('synapse:open-chat', handleOpenChat as EventListener);
+    return () => document.removeEventListener('synapse:open-chat', handleOpenChat as EventListener);
   }, []);
 
   // Save chat to history when a conversation is complete (not during streaming)
@@ -819,9 +831,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [uiZoom, setUiZoom] = useState<number>(1.4);
   const [isIOSStandalone, setIsIOSStandalone] = useState<boolean>(false);
+  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [authUsername, setAuthUsername] = useState("");
@@ -899,6 +914,33 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const updateLayout = () => {
+      const width = window.innerWidth;
+      const mobile = width < 768;
+      setIsMobile(mobile);
+
+      if (isIOSStandalone) {
+        setUiZoom(1);
+        return;
+      }
+
+      if (mobile) {
+        setUiZoom(1);
+      } else if (width < 1280) {
+        setUiZoom(1.2);
+      } else {
+        setUiZoom(1.35);
+      }
+    };
+
+    updateLayout();
+    window.addEventListener('resize', updateLayout);
+    return () => window.removeEventListener('resize', updateLayout);
+  }, [isIOSStandalone]);
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -914,6 +956,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [settingsOpen, toolsDropdownOpen]);
 
+  useEffect(() => {
+    if (isMobile) {
+      setToolsDropdownOpen(false);
+    }
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (!isMobile) {
+      setMobileMenuOpen(false);
+    }
+  }, [isMobile]);
+
   // Determine auth state (used to hide chrome on login page and show Logout)
   useEffect(() => {
     (async () => {
@@ -927,6 +981,30 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       }
     })();
   }, [pathname]);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+
+    const handleClick = (event: MouseEvent | TouchEvent) => {
+      if (!mobileMenuRef.current) return;
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (!mobileMenuRef.current.contains(target)) {
+        setMobileMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('touchstart', handleClick);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('touchstart', handleClick);
+    };
+  }, [mobileMenuOpen]);
 
   async function handleLogout() {
     try {
@@ -983,29 +1061,26 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     <>
       {/* Loading Screen - show immediately when authenticated, or while checking auth (assumes will be authenticated after login) */}
       {isLoading && (!authChecked || isAuthenticated) && <LoadingScreen onComplete={handleLoadingComplete} />}
-    <div className="flex min-h-screen bg-[var(--background)] text-[var(--foreground)]" style={isIOSStandalone ? undefined : { zoom: uiZoom }}>
+    <div className="flex min-h-screen bg-[var(--background)] text-[var(--foreground)]" style={!isIOSStandalone && !isMobile ? { zoom: uiZoom } : undefined}>
       {/* Main content */}
       <div className="flex min-h-screen w-full flex-col">
         {authChecked && isAuthenticated && (
         <header className="sticky top-0 z-50 backdrop-blur supports-[backdrop-filter]:bg-[var(--background)]/70 bg-[var(--background)]" style={{ paddingTop: 'max(3px, calc(env(safe-area-inset-top, 0px) / 2))' }}>
-          <nav className="relative flex h-14 items-center px-4">
-            {/* Logo and title */}
+          <nav className="relative flex h-14 items-center px-3 sm:px-4 gap-2">
+            <div className="flex items-center gap-3 min-w-0 flex-shrink-0">
               <button
                 onClick={() => router.push('/')}
-              className="flex items-center gap-2 mr-1 hover:opacity-80 transition-opacity !shadow-none pl-0 py-2"
-              style={{ paddingRight: 'calc(3.75rem * 1.7)' }}
-            >
-              <GlowSpinner size={24} ariaLabel="Synapse" idSuffix="header" />
-              <div style={{ transform: "scale(1.3)", transformOrigin: "left center" }}>
-                <h1 className="text-lg font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider relative inline-block" style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}>
-                  SYNAPSE
-                  <sup className="text-xs text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] absolute -top-0.5 left-full ml-1" style={{ fontFamily: 'var(--font-ibm-plex-mono), monospace' }}>(ALPHA)</sup>
-                </h1>
-              </div>
+                className="flex items-center gap-2 hover:opacity-80 transition-opacity !shadow-none pl-0 py-2"
+              >
+                <GlowSpinner size={24} ariaLabel="Synapse" idSuffix="header" />
+                <div style={{ transform: "scale(1.2)", transformOrigin: "left center" }}>
+                  <h1 className="text-lg font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider relative inline-block" style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}>
+                    SYNAPSE
+                    <sup className="text-xs text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] absolute -top-0.5 left-full ml-1" style={{ fontFamily: 'var(--font-ibm-plex-mono), monospace' }}>(ALPHA)</sup>
+                  </h1>
+                </div>
               </button>
-            {/* Left side buttons */}
-            <div className="flex items-center gap-3">
-              <div className="relative tools-dropdown">
+              <div className="relative hidden md:block tools-dropdown">
                 <button
                   onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
                   className="relative inline-flex items-center rounded-xl px-3 py-1.5
@@ -1025,7 +1100,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   </svg>
                 </button>
 
-                {/* Tools Dropdown */}
                 {toolsDropdownOpen && (
                   <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 z-50">
                     <div className="relative rounded-xl p-2
@@ -1070,62 +1144,149 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
 
-            {/* Absolutely centered Pomodoro Timer */}
-            <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2">
-              <PomodoroTimer />
-            </div>
+            {!isMobile && (
+              <div className="hidden md:flex flex-1 justify-center">
+                <PomodoroTimer />
+              </div>
+            )}
 
-            {/* Right side - Chat + Settings */}
-            <div className="absolute right-4 top-1/2 transform -translate-y-1/2 flex items-center gap-2">
-              {/* Chat dropdown */}
-              <ChatDropdown />
-              {/* Info button */}
-              <button
-                onClick={() => setInfoOpen(true)}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  e.currentTarget.blur();
-                }}
-                className="relative inline-flex h-10 w-10 items-center justify-center rounded-full
-                           text-white bg-[var(--background)]/90
-                           shadow-[0_2px_8px_rgba(0,0,0,0.7)]
-                           hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95
-                           focus:outline-none focus:ring-0 focus-visible:outline-none 
-                           active:shadow-[0_2px_8px_rgba(0,0,0,0.7)] active:scale-[1]
-                           transition-shadow duration-200 ease-out"
-                style={{ outline: 'none', WebkitTapHighlightColor: 'transparent', transform: 'none !important' }}
-                aria-label="Info"
-                title="About this app"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
-                  <path d="M12 8.5a.75.75 0 100-1.5.75.75 0 000 1.5z" fill="currentColor"/>
-                  <path d="M11.25 10.5h1.5v6h-1.5z" fill="currentColor"/>
-                </svg>
-              </button>
-              <button
-                onClick={() => setSettingsOpen(true)}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  e.currentTarget.blur();
-                }}
-                className="relative inline-flex h-10 w-10 items-center justify-center rounded-full
-                           text-white bg-[var(--background)]/90
-                           shadow-[0_2px_8px_rgba(0,0,0,0.7)]
-                           hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95
-                           focus:outline-none focus:ring-0 focus-visible:outline-none 
-                           active:shadow-[0_2px_8px_rgba(0,0,0,0.7)] active:scale-[1]
-                           transition-shadow duration-200 ease-out"
-                style={{ outline: 'none', WebkitTapHighlightColor: 'transparent', transform: 'none !important' }}
-                aria-label="Settings"
-                title="Settings"
-              >
-                {/* Settings icon */}
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
-                  <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" stroke="currentColor" strokeWidth="1.5"/>
-                  <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5"/>
-                </svg>
-              </button>
+            <div className="flex items-center gap-2 ml-auto">
+              <div className="hidden md:flex items-center gap-2">
+                <ChatDropdown />
+                <button
+                  onClick={() => setInfoOpen(true)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }}
+                  className="relative inline-flex h-10 w-10 items-center justify-center rounded-full
+                             text-white bg-[var(--background)]/90
+                             shadow-[0_2px_8px_rgba(0,0,0,0.7)]
+                             hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95
+                             focus:outline-none focus:ring-0 focus-visible:outline-none
+                             active:shadow-[0_2px_8px_rgba(0,0,0,0.7)] active:scale-[1]
+                             transition-shadow duration-200 ease-out"
+                  style={{ outline: 'none', WebkitTapHighlightColor: 'transparent', transform: 'none !important' }}
+                  aria-label="Info"
+                  title="About this app"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M12 8.5a.75.75 0 100-1.5.75.75 0 000 1.5z" fill="currentColor"/>
+                    <path d="M11.25 10.5h1.5v6h-1.5z" fill="currentColor"/>
+                  </svg>
+                </button>
+                <button
+                  onClick={() => setSettingsOpen(true)}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }}
+                  className="relative inline-flex h-10 w-10 items-center justify-center rounded-full
+                             text-white bg-[var(--background)]/90
+                             shadow-[0_2px_8px_rgba(0,0,0,0.7)]
+                             hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95
+                             focus:outline-none focus:ring-0 focus-visible:outline-none
+                             active:shadow-[0_2px_8px_rgba(0,0,0,0.7)] active:scale-[1]
+                             transition-shadow duration-200 ease-out"
+                  style={{ outline: 'none', WebkitTapHighlightColor: 'transparent', transform: 'none !important' }}
+                  aria-label="Settings"
+                  title="Settings"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                    <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" stroke="currentColor" strokeWidth="1.5"/>
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5"/>
+                  </svg>
+                </button>
+              </div>
+
+              <div ref={mobileMenuRef} className="relative md:hidden">
+                <button
+                  onClick={() => setMobileMenuOpen((open) => !open)}
+                  className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm text-white bg-[var(--background)]/90 backdrop-blur-md shadow-[0_2px_8px_rgba(0,0,0,0.6)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.7)] transition-all"
+                  aria-expanded={mobileMenuOpen}
+                  aria-haspopup="true"
+                >
+                  Menu
+                  <svg className={`h-4 w-4 transition-transform ${mobileMenuOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {mobileMenuOpen && isMobile && (
+                  <div className="absolute right-0 mt-2 w-[min(18rem,calc(100vw-1.5rem))] rounded-2xl border border-[var(--foreground)]/10 bg-[var(--background)]/95 backdrop-blur-md shadow-[0_12px_30px_rgba(0,0,0,0.6)] p-3 space-y-4 z-50">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-[var(--foreground)]/60">Tools</p>
+                      <div className="mt-2 space-y-1.5">
+                        <button
+                          onClick={() => {
+                            router.push('/exam-snipe');
+                            setMobileMenuOpen(false);
+                          }}
+                          className="w-full rounded-lg bg-[var(--background)]/70 px-3 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/85 transition-colors"
+                        >
+                          Exam Snipe
+                        </button>
+                        <button
+                          onClick={() => {
+                            router.push('/quicklearn');
+                            setMobileMenuOpen(false);
+                          }}
+                          className="w-full rounded-lg bg-[var(--background)]/70 px-3 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/85 transition-colors"
+                        >
+                          Quick Learn
+                        </button>
+                        <button
+                          onClick={() => {
+                            router.push('/readassist');
+                            setMobileMenuOpen(false);
+                          }}
+                          className="w-full rounded-lg bg-[var(--background)]/70 px-3 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/85 transition-colors"
+                        >
+                          Read Assist
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-[var(--foreground)]/10 pt-3">
+                      <p className="text-xs uppercase tracking-wide text-[var(--foreground)]/60">Pomodoro</p>
+                      <div className="mt-2">
+                        <PomodoroTimer />
+                      </div>
+                    </div>
+
+                    <div className="border-t border-[var(--foreground)]/10 pt-3 space-y-1.5">
+                      <button
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          document.dispatchEvent(new CustomEvent('synapse:open-chat'));
+                        }}
+                        className="w-full rounded-lg bg-gradient-to-r from-[#00E5FF]/20 to-[#FF2D96]/20 px-3 py-2 text-left text-sm text-[var(--foreground)] hover:from-[#00E5FF]/30 hover:to-[#FF2D96]/30 transition-colors"
+                      >
+                        Open Chat
+                      </button>
+                      <button
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          setInfoOpen(true);
+                        }}
+                        className="w-full rounded-lg bg-[var(--background)]/70 px-3 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/85 transition-colors"
+                      >
+                        App Info
+                      </button>
+                      <button
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          setSettingsOpen(true);
+                        }}
+                        className="w-full rounded-lg bg-[var(--background)]/70 px-3 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/85 transition-colors"
+                      >
+                        Settings
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </nav>
           {/* Glowing gradient separator */}
