@@ -65,6 +65,12 @@ export default function NodePage() {
   const [flashcardFlipped, setFlashcardFlipped] = useState(false);
   const [currentFlashcardIndex, setCurrentFlashcardIndex] = useState(0);
   const flashcardCounts = [3, 5, 7, 9] as const;
+  // Multiple choice quiz state
+  const [mcQuizOpen, setMcQuizOpen] = useState(false);
+  const [mcQuestions, setMcQuestions] = useState<Array<{question: string; options: string[]; correctAnswer: number}>>([]);
+  const [mcAnswers, setMcAnswers] = useState<{ [key: number]: number }>({});
+  const [mcResults, setMcResults] = useState<{ [key: number]: { correct: boolean; explanation: string } } | null>(null);
+  const [generatingMcQuiz, setGeneratingMcQuiz] = useState(false);
   const currentLesson = (content?.lessons?.[currentLessonIndex] ?? null) as TopicGeneratedLesson | null;
   const lessonFlashcards: LessonFlashcard[] = currentLesson?.flashcards ?? [];
 
@@ -549,105 +555,161 @@ export default function NodePage() {
               <div className="rounded-2xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 p-5 text-[var(--foreground)] shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
               
               <div className="flex items-center gap-2 mb-4">
-                <button
-                  onClick={async () => {
-                    if (shorteningLesson || lessonLoading) return;
-                    setShorteningLesson(true);
-                    try {
-                      const currentLessonIndex = content.lessons.length - 1;
-                      const currentLesson = content.lessons[currentLessonIndex];
-                      if (!currentLesson) {
-                        alert("No lesson content to shorten");
-                        return;
+                {/* Concise button */}
+                <div
+                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                  style={{
+                    padding: '1.5px',
+                    background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                  }}
+                >
+                  <button
+                    onClick={async () => {
+                      if (shorteningLesson || lessonLoading) return;
+                      setShorteningLesson(true);
+                      try {
+                        const currentLessonIndex = content.lessons.length - 1;
+                        const currentLesson = content.lessons[currentLessonIndex];
+                        if (!currentLesson) {
+                          alert("No lesson content to shorten");
+                          return;
+                        }
+                        const res = await fetch("/api/shorten-lesson", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            lessonTitle: currentLesson.title,
+                            lessonBody: currentLesson.body,
+                            subject: subjectData?.subject || slug,
+                            topic: title,
+                          })
+                        });
+                        const json = await res.json().catch(() => ({}));
+                        if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
+                        const shortenedLesson = json.data || {};
+                        const next = { ...(content as TopicGeneratedContent) };
+                        next.lessons[currentLessonIndex] = {
+                          ...currentLesson,
+                          body: String(shortenedLesson.body || currentLesson.body),
+                        };
+                        setContent(next);
+                        upsertNodeContent(slug, title, next as any);
+                      } catch (err: any) {
+                        alert(err?.message || "Failed to shorten lesson");
+                      } finally {
+                        setShorteningLesson(false);
                       }
-                      const res = await fetch("/api/shorten-lesson", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          lessonTitle: currentLesson.title,
-                          lessonBody: currentLesson.body,
-                          subject: subjectData?.subject || slug,
-                          topic: title,
-                        })
-                      });
-                      const json = await res.json().catch(() => ({}));
-                      if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
-                      const shortenedLesson = json.data || {};
-                      const next = { ...(content as TopicGeneratedContent) };
-                      next.lessons[currentLessonIndex] = {
-                        ...currentLesson,
-                        body: String(shortenedLesson.body || currentLesson.body),
-                      };
-                      setContent(next);
-                      upsertNodeContent(slug, title, next as any);
-                    } catch (err: any) {
-                      alert(err?.message || "Failed to shorten lesson");
-                    } finally {
-                      setShorteningLesson(false);
-                    }
+                    }}
+                    disabled={shorteningLesson || lessonLoading}
+                    className="inline-flex items-center justify-center px-1.5 py-1.5
+                               text-[var(--foreground)]
+                               bg-[var(--background)]/90 backdrop-blur-md
+                               disabled:opacity-60 transition-all duration-300 ease-out"
+                    style={{
+                      borderRadius: '10.5px',
+                      margin: 0,
+                      display: 'flex',
+                      minWidth: '28px',
+                      height: '28px',
+                    }}
+                    title="Shorten lesson (make it concise)"
+                  >
+                    <span className="text-lg font-bold leading-none">-</span>
+                  </button>
+                </div>
+                {/* Regenerate button */}
+                <div
+                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                  style={{
+                    padding: '1.5px',
+                    background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
                   }}
-                  disabled={shorteningLesson || lessonLoading}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 text-[var(--foreground)] hover:bg-[var(--background)]/80 disabled:opacity-60 transition-colors"
-                  title="Shorten lesson (make it concise)"
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                  }}
                 >
-                  <span className="text-lg font-bold">-</span>
-                </button>
-                <button
-                  onClick={async () => {
-                    if (lessonLoading) return;
-                    setLessonLoading(true);
-                    try {
-                      const currentLessonIndex = content.lessons.length - 1;
-                      const topicMeta = (subjectData?.topics || []).find((t: any) => String(t.name) === title);
-                      const res = await fetch("/api/node-lesson", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          subject: subjectData?.subject || slug,
-                          topic: title,
-                          course_context: subjectData?.course_context || "",
-                          combinedText: subjectData?.combinedText || "",
-                          topicSummary: topicMeta?.summary || "",
-                          lessonsMeta: content?.lessonsMeta || [],
-                          lessonIndex: currentLessonIndex,
-                          previousLessons: content.lessons.slice(0, currentLessonIndex),
-                          generatedLessons: content.lessons.slice(0, currentLessonIndex).filter((l): l is TopicGeneratedLesson => l !== null).map((l, i) => ({ index: i, title: l.title, body: l.body })),
-                          otherLessonsMeta: (content?.lessonsMeta || []).slice(currentLessonIndex + 1).map((m, i) => ({ index: currentLessonIndex + 1 + i, type: m.type, title: m.title })),
-                          courseTopics,
-                          languageName: subjectData?.course_language_name || "",
-                        })
-                      });
-                      const json = await res.json().catch(() => ({}));
-                      if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
-                      const lesson = json.data || {};
-                      const next = { ...(content as TopicGeneratedContent) };
-                      next.lessons[currentLessonIndex] = {
-                        title: String(lesson.title || next.lessons[currentLessonIndex]?.title || content?.lessonsMeta?.[currentLessonIndex]?.title || `Lesson ${currentLessonIndex + 1}`),
-                        body: String(lesson.body || ""),
-                        quiz: Array.isArray(lesson.quiz) ? lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : next.lessons[currentLessonIndex]?.quiz || []
-                      };
-                      next.rawLessonJson = Array.isArray(next.rawLessonJson) ? [...next.rawLessonJson] : [];
-                      next.rawLessonJson[currentLessonIndex] = typeof json.raw === 'string' ? json.raw : JSON.stringify(lesson);
-                      setContent(next);
-                      upsertNodeContent(slug, title, next as any);
+                  <button
+                    onClick={async () => {
+                      if (lessonLoading) return;
+                      setLessonLoading(true);
+                      try {
+                        const currentLessonIndex = content.lessons.length - 1;
+                        const topicMeta = (subjectData?.topics || []).find((t: any) => String(t.name) === title);
+                        const res = await fetch("/api/node-lesson", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            subject: subjectData?.subject || slug,
+                            topic: title,
+                            course_context: subjectData?.course_context || "",
+                            combinedText: subjectData?.combinedText || "",
+                            topicSummary: topicMeta?.summary || "",
+                            lessonsMeta: content?.lessonsMeta || [],
+                            lessonIndex: currentLessonIndex,
+                            previousLessons: content.lessons.slice(0, currentLessonIndex),
+                            generatedLessons: content.lessons.slice(0, currentLessonIndex).filter((l): l is TopicGeneratedLesson => l !== null).map((l, i) => ({ index: i, title: l.title, body: l.body })),
+                            otherLessonsMeta: (content?.lessonsMeta || []).slice(currentLessonIndex + 1).map((m, i) => ({ index: currentLessonIndex + 1 + i, type: m.type, title: m.title })),
+                            courseTopics,
+                            languageName: subjectData?.course_language_name || "",
+                          })
+                        });
+                        const json = await res.json().catch(() => ({}));
+                        if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
+                        const lesson = json.data || {};
+                        const next = { ...(content as TopicGeneratedContent) };
+                        next.lessons[currentLessonIndex] = {
+                          title: String(lesson.title || next.lessons[currentLessonIndex]?.title || content?.lessonsMeta?.[currentLessonIndex]?.title || `Lesson ${currentLessonIndex + 1}`),
+                          body: String(lesson.body || ""),
+                          quiz: Array.isArray(lesson.quiz) ? lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : next.lessons[currentLessonIndex]?.quiz || []
+                        };
+                        next.rawLessonJson = Array.isArray(next.rawLessonJson) ? [...next.rawLessonJson] : [];
+                        next.rawLessonJson[currentLessonIndex] = typeof json.raw === 'string' ? json.raw : JSON.stringify(lesson);
+                        setContent(next);
+                        upsertNodeContent(slug, title, next as any);
 
-                      // Reset quiz state for the regenerated lesson
-                      setUserAnswers({});
-                      setQuizResults(null);
-                    } catch (err: any) {
-                      alert(err?.message || "Failed to regenerate lesson");
-                    } finally {
-                      setLessonLoading(false);
-                    }
-                  }}
-                  disabled={lessonLoading}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 text-[var(--foreground)] hover:bg-[var(--background)]/80 disabled:opacity-60 transition-colors"
-                  title="Regenerate this lesson"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M4 4V9H4.58152M4.58152 9C5.47362 7.27477 7.06307 6 9 6C11.3869 6 13.6761 7.36491 14.9056 9.54555M4.58152 9H9M20 20V15H19.4185M19.4185 15C18.5264 16.7252 16.9369 18 15 18C12.6131 18 10.3239 16.6351 9.09443 14.4545M19.4185 15H15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </button>
+                        // Reset quiz state for the regenerated lesson
+                        setUserAnswers({});
+                        setQuizResults(null);
+                      } catch (err: any) {
+                        alert(err?.message || "Failed to regenerate lesson");
+                      } finally {
+                        setLessonLoading(false);
+                      }
+                    }}
+                    disabled={lessonLoading}
+                    className="inline-flex items-center justify-center px-1.5 py-1.5
+                               text-[var(--foreground)]
+                               bg-[var(--background)]/90 backdrop-blur-md
+                               disabled:opacity-60 transition-all duration-300 ease-out"
+                    style={{
+                      borderRadius: '10.5px',
+                      margin: 0,
+                      display: 'flex',
+                      minWidth: '28px',
+                      height: '28px',
+                    }}
+                    title="Regenerate this lesson"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M4 4V9H4.58152M4.58152 9C5.47362 7.27477 7.06307 6 9 6C11.3869 6 13.6761 7.36491 14.9056 9.54555M4.58152 9H9M20 20V15H19.4185M19.4185 15C18.5264 16.7252 16.9369 18 15 18C12.6131 18 10.3239 16.6351 9.09443 14.4545M19.4185 15H15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                </div>
 
                 {/* Single-lesson mode: dropdown removed */}
               </div>
@@ -1374,6 +1436,141 @@ export default function NodePage() {
                       <path d="M19 9l-7 7-7-7"/>
                     </svg>
                   </button>
+                )}
+              </div>
+
+              {/* Multiple Choice Quiz item */}
+              <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
+                <button
+                  onClick={() => setMcQuizOpen(!mcQuizOpen)}
+                  className={`w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors ${mcQuizOpen ? 'rounded-t-xl border-b border-[var(--foreground)]/10 !shadow-none' : 'rounded-xl'}`}
+                >
+                  <span>Quiz</span>
+                  <svg
+                    className={`h-4 w-4 transition-transform ${mcQuizOpen ? 'rotate-180' : ''}`}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M19 9l-7 7-7-7"/>
+                  </svg>
+                </button>
+                {mcQuizOpen && (
+                  <div className="px-4 pt-4 pb-4">
+                    {mcQuestions.length === 0 ? (
+                      <div className="space-y-3">
+                        <p className="text-sm text-[var(--foreground)]/70">Generate multiple choice questions to test your understanding.</p>
+                        <button
+                          onClick={async () => {
+                            if (generatingMcQuiz || !currentLesson?.body) return;
+                            setGeneratingMcQuiz(true);
+                            setMcResults(null);
+                            setMcAnswers({});
+                            try {
+                              const res = await fetch("/api/generate-mc-quiz", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  subject: subjectData?.subject || slug,
+                                  topic: title,
+                                  lessonContent: currentLesson.body,
+                                  courseContext: subjectData?.course_context || "",
+                                  languageName: subjectData?.course_language_name || ""
+                                })
+                              });
+                              const json = await res.json().catch(() => ({}));
+                              if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
+                              setMcQuestions(json.questions || []);
+                            } catch (err: any) {
+                              alert(err?.message || "Failed to generate quiz");
+                            } finally {
+                              setGeneratingMcQuiz(false);
+                            }
+                          }}
+                          disabled={generatingMcQuiz || !currentLesson?.body}
+                          className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium !text-white hover:opacity-95 disabled:opacity-60 transition-opacity"
+                        >
+                          {generatingMcQuiz ? "Generating..." : "Generate Quiz"}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        {mcQuestions.map((q, qi) => (
+                          <div key={qi} className="space-y-3 p-4 rounded-lg bg-[var(--background)]/60 border border-[var(--foreground)]/10">
+                            <div className="text-sm font-medium text-[var(--foreground)]">
+                              {qi + 1}. <AutoFixMarkdown>{q.question}</AutoFixMarkdown>
+                            </div>
+                            <div className="space-y-2">
+                              {q.options.map((option, oi) => (
+                                <label
+                                  key={oi}
+                                  className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                                    mcResults?.[qi]
+                                      ? oi === q.correctAnswer
+                                        ? 'border-green-500 bg-green-500/10'
+                                        : mcAnswers[qi] === oi
+                                        ? 'border-red-500 bg-red-500/10'
+                                        : 'border-[var(--foreground)]/10 opacity-50'
+                                      : mcAnswers[qi] === oi
+                                      ? 'border-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10'
+                                      : 'border-[var(--foreground)]/20 hover:border-[var(--accent-cyan)]/50'
+                                  }`}
+                                >
+                                  <input
+                                    type="radio"
+                                    name={`mc-question-${qi}`}
+                                    checked={mcAnswers[qi] === oi}
+                                    onChange={() => {
+                                      if (!mcResults) {
+                                        setMcAnswers(prev => ({ ...prev, [qi]: oi }));
+                                      }
+                                    }}
+                                    disabled={!!mcResults}
+                                    className="mt-0.5"
+                                  />
+                                  <span className="text-sm flex-1"><AutoFixMarkdown>{option}</AutoFixMarkdown></span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                        <div className="flex gap-3 justify-center">
+                          {!mcResults && (
+                            <button
+                              onClick={() => {
+                                const results: { [key: number]: { correct: boolean; explanation: string } } = {};
+                                mcQuestions.forEach((q, qi) => {
+                                  const correct = mcAnswers[qi] === q.correctAnswer;
+                                  results[qi] = {
+                                    correct,
+                                    explanation: correct 
+                                      ? "Great job! You got it right." 
+                                      : `The correct answer is: ${q.options[q.correctAnswer]}`
+                                  };
+                                });
+                                setMcResults(results);
+                              }}
+                              disabled={Object.keys(mcAnswers).length !== mcQuestions.length}
+                              className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60 transition-opacity"
+                            >
+                              Submit Answers
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setMcQuestions([]);
+                              setMcAnswers({});
+                              setMcResults(null);
+                            }}
+                            className="inline-flex h-10 items-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-6 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
+                          >
+                            Generate New Quiz
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 

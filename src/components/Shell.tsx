@@ -706,16 +706,15 @@ function ChatDropdown() {
             e.currentTarget.blur();
           }}
           className="relative inline-flex items-center gap-2 px-1.5 py-1.5 text-sm
-                     text-white backdrop-blur-md
+                     text-[var(--foreground)] bg-[var(--background)]/90 backdrop-blur-md
                      focus:outline-none focus:ring-0 focus-visible:outline-none
                      transition-all duration-300 ease-out overflow-hidden"
           style={{ 
             outline: 'none', 
             WebkitTapHighlightColor: 'transparent', 
             transform: 'none !important', 
-            color: 'white',
             borderRadius: 'calc(0.75rem - 1.5px)',
-            background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.25) 0%, rgba(255, 45, 150, 0.25) 100%), rgba(26, 29, 35, 0.9)',
+            backgroundImage: 'linear-gradient(135deg, rgba(0, 229, 255, 0.25) 0%, rgba(255, 45, 150, 0.25) 100%)',
           }}
           aria-label="Chat"
           title="Chat"
@@ -1152,11 +1151,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   <button
                     onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
                     className="group relative inline-flex items-center gap-2 px-1.5 py-1.5
-                               text-white w-full h-full
+                               text-white
                                transition-all duration-300 ease-out
                                bg-[var(--background)]/90 backdrop-blur-md"
                     style={{
                       borderRadius: 'calc(0.75rem - 1.5px)',
+                      height: '32px',
                     }}
                   >
                     {/* Grid icon for futuristic look */}
@@ -1240,7 +1240,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 <ChatDropdown />
                 {/* Info button */}
                 <div
-                  className="inline-block rounded-xl transition-all duration-300"
+                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
                   style={{
                     padding: '1.5px',
                     background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
@@ -1262,14 +1262,19 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       e.currentTarget.blur();
                     }}
                     className="relative inline-flex items-center justify-center px-1.5 py-1.5
-                               text-white bg-[var(--background)]/90 backdrop-blur-md
+                               text-white
+                               bg-[var(--background)]/90 backdrop-blur-md
                                focus:outline-none focus:ring-0 focus-visible:outline-none
                                transition-all duration-300 ease-out"
                     style={{ 
                       outline: 'none', 
                       WebkitTapHighlightColor: 'transparent', 
                       transform: 'none !important',
-                      borderRadius: 'calc(0.75rem - 1.5px)',
+                      borderRadius: '10.5px',
+                      margin: 0,
+                      display: 'flex',
+                      height: '32px',
+                      width: '32px',
                     }}
                     aria-label="Info"
                     title="About this app"
@@ -1283,7 +1288,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 </div>
                 {/* Settings button */}
                 <div
-                  className="inline-block rounded-xl transition-all duration-300"
+                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
                   style={{
                     padding: '1.5px',
                     background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
@@ -1305,14 +1310,19 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       e.currentTarget.blur();
                     }}
                     className="relative inline-flex items-center justify-center px-1.5 py-1.5
-                               text-white bg-[var(--background)]/90 backdrop-blur-md
+                               text-white
+                               bg-[var(--background)]/90 backdrop-blur-md
                                focus:outline-none focus:ring-0 focus-visible:outline-none
                                transition-all duration-300 ease-out"
                     style={{ 
                       outline: 'none', 
                       WebkitTapHighlightColor: 'transparent', 
                       transform: 'none !important',
-                      borderRadius: 'calc(0.75rem - 1.5px)',
+                      borderRadius: '10.5px',
+                      margin: 0,
+                      display: 'flex',
+                      height: '32px',
+                      width: '32px',
                     }}
                     aria-label="Settings"
                     title="Settings"
@@ -1326,20 +1336,60 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               </div>
 
               <div ref={mobileMenuRef} className="relative md:hidden">
-                <button
-                  onClick={() => setMobileMenuOpen((open) => !open)}
-                  className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm text-white bg-[var(--background)]/90 backdrop-blur-md shadow-[0_2px_8px_rgba(0,0,0,0.6)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.7)] transition-all"
-                  aria-expanded={mobileMenuOpen}
-                  aria-haspopup="true"
+                {/* Mobile menu button with gradient border */}
+                <div
+                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                  style={{
+                    padding: '1.5px',
+                    background: mobileMenuOpen 
+                      ? 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))'
+                      : 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                    boxShadow: mobileMenuOpen
+                      ? '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)'
+                      : '0 2px 8px rgba(0, 0, 0, 0.3)',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!mobileMenuOpen) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!mobileMenuOpen) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                    }
+                  }}
                 >
-                  Menu
-                  <svg className={`h-4 w-4 transition-transform ${mobileMenuOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
+                  <button
+                    onClick={() => setMobileMenuOpen((open) => !open)}
+                    className="group relative inline-flex items-center gap-1 px-3 py-2 text-sm
+                               text-white
+                               transition-all duration-300 ease-out
+                               bg-[var(--background)]/90 backdrop-blur-md"
+                    style={{
+                      borderRadius: 'calc(0.75rem - 1.5px)',
+                    }}
+                    aria-expanded={mobileMenuOpen}
+                    aria-haspopup="true"
+                  >
+                    Menu
+                    <svg className={`h-4 w-4 transition-transform ${mobileMenuOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </div>
 
                 {mobileMenuOpen && isMobile && (
-                  <div className="absolute right-0 mt-2 w-[min(18rem,calc(100vw-1.5rem))] rounded-2xl border border-[var(--foreground)]/10 bg-[var(--background)]/95 backdrop-blur-md shadow-[0_12px_30px_rgba(0,0,0,0.6)] p-3 space-y-4 z-50">
+                  <div 
+                    className="absolute right-0 mt-2 w-[min(18rem,calc(100vw-1.5rem))] rounded-2xl overflow-hidden z-50"
+                    style={{
+                      padding: '1.5px',
+                      background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                      boxShadow: '0 12px 30px rgba(0, 0, 0, 0.6)',
+                    }}
+                  >
+                    <div className="rounded-2xl bg-[var(--background)]/95 backdrop-blur-md p-3 space-y-4" style={{ borderRadius: 'calc(1rem - 1.5px)' }}>
                     <div>
                       <p className="text-xs uppercase tracking-wide text-[var(--foreground)]/60">Tools</p>
                       <div className="mt-2 space-y-1.5">
@@ -1409,17 +1459,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                         Settings
                       </button>
                     </div>
+                    </div>
                   </div>
                 )}
               </div>
             </div>
           </nav>
           {/* Glowing gradient separator */}
-          <div className="relative h-[1px] overflow-hidden">
+          <div className="relative h-[2px] overflow-hidden">
             {/* Main line */}
-            <div className="relative h-[1px] bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] opacity-60 z-10" />
+            <div className="relative h-[2px] bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] opacity-60 z-10" />
             {/* Glow layer under the line */}
-            <div className="absolute left-0 right-0 h-[3px] top-[1px] bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] opacity-90 blur-sm" />
+            <div className="absolute left-0 right-0 h-[4px] top-[2px] bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] opacity-90 blur-sm" />
           </div>
         </header>
         )}

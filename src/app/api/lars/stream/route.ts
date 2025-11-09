@@ -54,10 +54,10 @@ export async function POST(req: Request) {
         try {
           const completion: any = await client.chat.completions.create({
             model: "gpt-4o-mini",
-            temperature: 0.5,
+            temperature: 0.7,
             messages: chatMessages,
             stream: true,
-            max_tokens: 600
+            max_tokens: 800
           });
 
           const write = (obj: any) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
