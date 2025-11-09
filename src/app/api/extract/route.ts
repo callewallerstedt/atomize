@@ -179,78 +179,78 @@ export async function POST(req: Request) {
           `Subject: ${subject}`,
           "",
           "No course material was provided. Generate 6-12 comprehensive, well-structured topics that would typically be covered in a course about this subject. Use your knowledge of the subject area to create a logical and complete topic structure.",
-        ].join("\n\n");
+      ].join("\n\n");
 
-        const completion = await client.chat.completions.create({
-          model: "gpt-4o-mini",
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: "MainTopics",
-              schema: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  subject: { type: "string" },
-                  topics: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      additionalProperties: false,
-                      properties: {
-                        name: { type: "string" },
-                        summary: { type: "string" },
-                        coverage: { type: "number" },
-                      },
-                      required: ["name", "summary", "coverage"],
+      const completion = await client.chat.completions.create({
+        model: "gpt-4o-mini",
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "MainTopics",
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                subject: { type: "string" },
+                topics: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      name: { type: "string" },
+                      summary: { type: "string" },
+                      coverage: { type: "number" },
                     },
+                    required: ["name", "summary", "coverage"],
                   },
                 },
-                required: ["subject", "topics"],
               },
-              strict: true,
+              required: ["subject", "topics"],
             },
+            strict: true,
           },
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: user },
-          ],
-          temperature: 0.2,
-        });
+        },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        temperature: 0.2,
+      });
 
-        const content = completion.choices[0]?.message?.content || "{}";
+      const content = completion.choices[0]?.message?.content || "{}";
+      try {
+        data = JSON.parse(content);
+      } catch {
+        data = { subject, topics: [] };
+      }
+    } else {
+      // Fallback path: upload raw files to OpenAI and let the model read them directly
+      const uploads: string[] = [];
+      for (const file of files) {
         try {
-          data = JSON.parse(content);
-        } catch {
-          data = { subject, topics: [] };
-        }
-      } else {
-        // Fallback path: upload raw files to OpenAI and let the model read them directly
-        const uploads: string[] = [];
-        for (const file of files) {
-          try {
-            const uploaded = await client.files.create({ file: file as any, purpose: "assistants" });
-            uploads.push(uploaded.id);
-          } catch {}
-        }
-        const inputContent: any[] = [
+          const uploaded = await client.files.create({ file: file as any, purpose: "assistants" });
+          uploads.push(uploaded.id);
+        } catch {}
+      }
+      const inputContent: any[] = [
           { type: "input_text", text: `Subject: ${subject}\n\nIMPORTANT: Generate 6-12 comprehensive topics. If the attached files contain minimal material, use the subject name to generate well-structured topics that would typically be covered in this course. Return JSON only.` },
-          ...uploads.map((id) => ({ type: "input_file", file_id: id })),
-        ];
-        const resp = await client.responses.create({
-          model: "gpt-4o-mini",
-          instructions: system,
-          input: [
-            { role: "user", content: inputContent as any },
-          ],
-        });
-        const out = (resp as any).output_text || "{}";
-        try {
-          data = JSON.parse(out);
-        } catch {
-          const start = out.indexOf("{");
-          const end = out.lastIndexOf("}");
-          if (start >= 0 && end > start) data = JSON.parse(out.slice(start, end + 1));
+        ...uploads.map((id) => ({ type: "input_file", file_id: id })),
+      ];
+      const resp = await client.responses.create({
+        model: "gpt-4o-mini",
+        instructions: system,
+        input: [
+          { role: "user", content: inputContent as any },
+        ],
+      });
+      const out = (resp as any).output_text || "{}";
+      try {
+        data = JSON.parse(out);
+      } catch {
+        const start = out.indexOf("{");
+        const end = out.lastIndexOf("}");
+        if (start >= 0 && end > start) data = JSON.parse(out.slice(start, end + 1));
         }
       }
     }
