@@ -371,10 +371,10 @@ function Home() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setCreateOpen(true)}
-            className="relative inline-flex h-10 w-10 items-center justify-center rounded-full !text-white bg-[var(--background)]/90 backdrop-blur-md shadow-[0_2px_8px_rgba(0,0,0,0.7)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95 transition-all duration-200 ease-out"
+            className="relative inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--foreground)] bg-[var(--background)]/90 backdrop-blur-md shadow-[0_2px_8px_rgba(0,0,0,0.7)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95 transition-all duration-200 ease-out"
             aria-label="Add course"
           >
-            <span className="text-lg leading-none !text-white">+</span>
+            <span className="text-lg leading-none text-[var(--foreground)]">+</span>
           </button>
         </div>
       </div>

@@ -31,7 +31,7 @@ export default function CourseCreateModal({ open, onClose, onCreate }: { open: b
       footer={
         <div className="flex items-center justify-end gap-2">
           <button onClick={onClose} className="inline-flex h-9 items-center rounded-full px-4 text-sm" style={{ backgroundColor: '#141923', color: 'white' }}>Cancel</button>
-          <button onClick={(e) => submit(e as any)} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]">Create</button>
+          <button onClick={(e) => submit(e as any)} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium !text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]">Create</button>
         </div>
       }
     >

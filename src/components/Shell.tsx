@@ -241,31 +241,49 @@ function PomodoroTimer() {
   return (
     <div className="relative pomodoro-timer w-full md:w-auto">
       {/* Main Timer Display */}
-      <button
-        onClick={() => setShowSettings(!showSettings)}
-        className="relative inline-flex w-full md:w-auto items-center justify-between md:justify-center gap-1 rounded-lg px-3 py-1.5 min-w-[100px]
-                   text-white bg-[var(--background)]/90 backdrop-blur-md
-                   shadow-[0_2px_8px_rgba(0,0,0,0.4)]
-                   hover:shadow-[0_4px_12px_rgba(0,0,0,0.5)] hover:bg-[var(--background)]/95
-                   transition-all duration-300 ease-out"
+      <div
+        className="inline-block rounded-xl transition-all duration-300"
+        style={{
+          padding: '1.5px',
+          background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+          e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+          e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+        }}
       >
-        <div className="flex items-center gap-1.5">
-          <span className="font-mono text-lg sm:text-xl font-bold leading-none">
-            {formatTime(timeLeft)}
-          </span>
-          <span className="text-[10px] sm:text-xs opacity-75">
-            {isBreak ? 'BREAK' : 'STUDY'}
-          </span>
-        </div>
-        <svg
-          className={`h-3 w-3 transition-transform duration-200 ${showSettings ? 'rotate-180' : ''}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
+        <button
+          onClick={() => setShowSettings(!showSettings)}
+          className="relative inline-flex w-full md:w-auto items-center justify-between md:justify-center gap-1 px-1.5 py-1.5 min-w-[100px]
+                     text-white bg-[var(--background)]/90 backdrop-blur-md
+                     transition-all duration-300 ease-out"
+          style={{
+            borderRadius: 'calc(0.75rem - 1.5px)',
+          }}
         >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-lg sm:text-xl font-bold leading-none">
+              {formatTime(timeLeft)}
+            </span>
+            <span className="text-[10px] sm:text-xs opacity-75">
+              {isBreak ? 'BREAK' : 'STUDY'}
+            </span>
+          </div>
+          <svg
+            className={`h-3 w-3 transition-transform duration-200 ${showSettings ? 'rotate-180' : ''}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+      </div>
 
       {/* Next Timer Play Button */}
       {showPlayButton && (
@@ -663,29 +681,51 @@ function ChatDropdown() {
 
   return (
     <div className="relative">
-      <button
-        ref={chatButtonRef}
-        onClick={() => setOpen(!open)}
-        onMouseDown={(e) => {
-          e.preventDefault();
-          e.currentTarget.blur();
+      {/* Gradient border wrapper */}
+      <div
+        className="inline-block rounded-xl transition-all duration-300"
+        style={{
+          padding: '1.5px',
+          background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
         }}
-        className="relative inline-flex h-10 items-center rounded-full px-3 text-sm
-                   text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]
-                   shadow-[0_2px_8px_rgba(0,0,0,0.7)]
-                   hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:opacity-95
-                   focus:outline-none focus:ring-0 focus-visible:outline-none
-                   active:shadow-[0_2px_8px_rgba(0,0,0,0.7)] active:scale-[1]
-                   transition-shadow duration-200 ease-out overflow-hidden"
-        style={{ outline: 'none', WebkitTapHighlightColor: 'transparent', transform: 'none !important', color: 'white' }}
-        aria-label="Chat"
-        title="Chat"
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+          e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+          e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+        }}
       >
-        <span className="relative z-10 flex items-center">
-          Chat
-          <svg className={`h-4 w-4 ml-1 transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
-        </span>
-      </button>
+        <button
+          ref={chatButtonRef}
+          onClick={() => setOpen(!open)}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.currentTarget.blur();
+          }}
+          className="relative inline-flex items-center gap-2 px-1.5 py-1.5 text-sm
+                     text-white backdrop-blur-md
+                     focus:outline-none focus:ring-0 focus-visible:outline-none
+                     transition-all duration-300 ease-out overflow-hidden"
+          style={{ 
+            outline: 'none', 
+            WebkitTapHighlightColor: 'transparent', 
+            transform: 'none !important', 
+            color: 'white',
+            borderRadius: 'calc(0.75rem - 1.5px)',
+            background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.25) 0%, rgba(255, 45, 150, 0.25) 100%), rgba(26, 29, 35, 0.9)',
+          }}
+          aria-label="Chat"
+          title="Chat"
+        >
+          <span className="relative z-10 flex items-center">
+            Chat
+            <svg className={`h-4 w-4 ml-1 transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
+          </span>
+        </button>
+      </div>
       {open && (
         <>
           <div 
@@ -1073,7 +1113,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                   router.push('/');
                 }}
-                className="flex items-center gap-2 hover:opacity-80 transition-opacity !shadow-none pl-0 py-2"
+                className="flex items-center gap-2 hover:opacity-80 transition-opacity !shadow-none pl-0 pr-20 py-2"
               >
                 <GlowSpinner size={24} ariaLabel="Synapse" idSuffix="header" />
                 <div style={{ transform: "scale(1.2)", transformOrigin: "left center" }}>
@@ -1084,24 +1124,66 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 </div>
               </button>
               <div className="relative hidden md:block tools-dropdown">
-                <button
-                  onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
-                  className="relative inline-flex items-center rounded-xl px-3 py-1.5
-                             text-white bg-[var(--background)]/90 backdrop-blur-md
-                             shadow-[0_2px_8px_rgba(0,0,0,0.4)]
-                             hover:shadow-[0_4px_12px_rgba(0,0,0,0.5)] hover:bg-[var(--background)]/95
-                             transition-all duration-200 ease-out"
+                {/* Gradient border wrapper */}
+                <div
+                  className="inline-block rounded-xl transition-all duration-300"
+                  style={{
+                    padding: '1.5px',
+                    background: toolsDropdownOpen
+                      ? 'linear-gradient(135deg, rgba(0, 229, 255, 1), rgba(255, 45, 150, 1))'
+                      : 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                    boxShadow: toolsDropdownOpen 
+                      ? '0 0 20px rgba(0, 229, 255, 0.4), 0 0 40px rgba(255, 45, 150, 0.2)'
+                      : '0 2px 8px rgba(0, 0, 0, 0.3)',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!toolsDropdownOpen) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!toolsDropdownOpen) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                    }
+                  }}
                 >
-                  <span>Tools</span>
-                  <svg
-                    className={`h-4 w-4 ml-1 transition-transform duration-200 ${toolsDropdownOpen ? 'rotate-180' : ''}`}
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
+                  <button
+                    onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
+                    className="group relative inline-flex items-center gap-2 px-1.5 py-1.5
+                               text-white w-full h-full
+                               transition-all duration-300 ease-out
+                               bg-[var(--background)]/90 backdrop-blur-md"
+                    style={{
+                      borderRadius: 'calc(0.75rem - 1.5px)',
+                    }}
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
+                    {/* Grid icon for futuristic look */}
+                    <svg
+                      className="relative z-10 h-4 w-4 transition-all duration-300"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                    </svg>
+                    
+                    <span className="relative z-10 text-sm font-medium tracking-wide">Tools</span>
+                    
+                    {/* Animated chevron */}
+                    <svg
+                      className={`relative z-10 h-3.5 w-3.5 transition-transform duration-300 ${toolsDropdownOpen ? 'rotate-180' : ''}`}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2.5}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                </div>
 
                 {toolsDropdownOpen && (
                   <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 z-50">
@@ -1148,7 +1230,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             </div>
 
             {!isMobile && (
-              <div className="hidden md:flex flex-1 justify-center">
+              <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2">
                 <PomodoroTimer />
               </div>
             )}
@@ -1156,51 +1238,91 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-2 ml-auto">
               <div className="hidden md:flex items-center gap-2">
                 <ChatDropdown />
-                <button
-                  onClick={() => setInfoOpen(true)}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    e.currentTarget.blur();
+                {/* Info button */}
+                <div
+                  className="inline-block rounded-xl transition-all duration-300"
+                  style={{
+                    padding: '1.5px',
+                    background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
                   }}
-                  className="relative inline-flex h-10 w-10 items-center justify-center rounded-full
-                             text-white bg-[var(--background)]/90
-                             shadow-[0_2px_8px_rgba(0,0,0,0.7)]
-                             hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95
-                             focus:outline-none focus:ring-0 focus-visible:outline-none
-                             active:shadow-[0_2px_8px_rgba(0,0,0,0.7)] active:scale-[1]
-                             transition-shadow duration-200 ease-out"
-                  style={{ outline: 'none', WebkitTapHighlightColor: 'transparent', transform: 'none !important' }}
-                  aria-label="Info"
-                  title="About this app"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
-                    <path d="M12 8.5a.75.75 0 100-1.5.75.75 0 000 1.5z" fill="currentColor"/>
-                    <path d="M11.25 10.5h1.5v6h-1.5z" fill="currentColor"/>
-                  </svg>
-                </button>
-                <button
-                  onClick={() => setSettingsOpen(true)}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    e.currentTarget.blur();
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
                   }}
-                  className="relative inline-flex h-10 w-10 items-center justify-center rounded-full
-                             text-white bg-[var(--background)]/90
-                             shadow-[0_2px_8px_rgba(0,0,0,0.7)]
-                             hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95
-                             focus:outline-none focus:ring-0 focus-visible:outline-none
-                             active:shadow-[0_2px_8px_rgba(0,0,0,0.7)] active:scale-[1]
-                             transition-shadow duration-200 ease-out"
-                  style={{ outline: 'none', WebkitTapHighlightColor: 'transparent', transform: 'none !important' }}
-                  aria-label="Settings"
-                  title="Settings"
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                  }}
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
-                    <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" stroke="currentColor" strokeWidth="1.5"/>
-                    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5"/>
-                  </svg>
-                </button>
+                  <button
+                    onClick={() => setInfoOpen(true)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.currentTarget.blur();
+                    }}
+                    className="relative inline-flex items-center justify-center px-1.5 py-1.5
+                               text-white bg-[var(--background)]/90 backdrop-blur-md
+                               focus:outline-none focus:ring-0 focus-visible:outline-none
+                               transition-all duration-300 ease-out"
+                    style={{ 
+                      outline: 'none', 
+                      WebkitTapHighlightColor: 'transparent', 
+                      transform: 'none !important',
+                      borderRadius: 'calc(0.75rem - 1.5px)',
+                    }}
+                    aria-label="Info"
+                    title="About this app"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
+                      <path d="M12 8.5a.75.75 0 100-1.5.75.75 0 000 1.5z" fill="currentColor"/>
+                      <path d="M11.25 10.5h1.5v6h-1.5z" fill="currentColor"/>
+                    </svg>
+                  </button>
+                </div>
+                {/* Settings button */}
+                <div
+                  className="inline-block rounded-xl transition-all duration-300"
+                  style={{
+                    padding: '1.5px',
+                    background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                  }}
+                >
+                  <button
+                    onClick={() => setSettingsOpen(true)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.currentTarget.blur();
+                    }}
+                    className="relative inline-flex items-center justify-center px-1.5 py-1.5
+                               text-white bg-[var(--background)]/90 backdrop-blur-md
+                               focus:outline-none focus:ring-0 focus-visible:outline-none
+                               transition-all duration-300 ease-out"
+                    style={{ 
+                      outline: 'none', 
+                      WebkitTapHighlightColor: 'transparent', 
+                      transform: 'none !important',
+                      borderRadius: 'calc(0.75rem - 1.5px)',
+                    }}
+                    aria-label="Settings"
+                    title="Settings"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                      <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" stroke="currentColor" strokeWidth="1.5"/>
+                      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
 
               <div ref={mobileMenuRef} className="relative md:hidden">
