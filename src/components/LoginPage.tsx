@@ -174,10 +174,10 @@ export default function LoginPage() {
                 <rect x="-1000" y="-1000" width="3000" height="3000" fill="white" />
                 <circle cx="50" cy="50" r="38" fill="black" />
               </mask>
-              <filter id="blur-soft-checking" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
+              <filter id="blur-soft-checking" filterUnits="userSpaceOnUse" x="-600" y="-600" width="1200" height="1200">
                 <feGaussianBlur stdDeviation="4" edgeMode="duplicate" />
               </filter>
-              <filter id="blur-wide-checking" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
+              <filter id="blur-wide-checking" filterUnits="userSpaceOnUse" x="-600" y="-600" width="1200" height="1200">
                 <feGaussianBlur stdDeviation="8" edgeMode="duplicate" />
               </filter>
             </defs>
@@ -283,10 +283,10 @@ export default function LoginPage() {
               <rect x="-1000" y="-1000" width="3000" height="3000" fill="white" />
               <circle cx="50" cy="50" r="38" fill="black" />
             </mask>
-            <filter id="blur-soft-login" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
+            <filter id="blur-soft-login" filterUnits="userSpaceOnUse" x="-600" y="-600" width="1200" height="1200">
               <feGaussianBlur stdDeviation="4" edgeMode="duplicate" />
             </filter>
-            <filter id="blur-wide-login" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
+            <filter id="blur-wide-login" filterUnits="userSpaceOnUse" x="-600" y="-600" width="1200" height="1200">
               <feGaussianBlur stdDeviation="8" edgeMode="duplicate" />
             </filter>
           </defs>
