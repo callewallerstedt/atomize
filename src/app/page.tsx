@@ -371,10 +371,10 @@ function Home() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => setCreateOpen(true)}
-            className="relative inline-flex h-10 w-10 items-center justify-center rounded-full text-white bg-[var(--background)]/90 backdrop-blur-md shadow-[0_2px_8px_rgba(0,0,0,0.7)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95 transition-all duration-200 ease-out"
+            className="relative inline-flex h-10 w-10 items-center justify-center rounded-full !text-white bg-[var(--background)]/90 backdrop-blur-md shadow-[0_2px_8px_rgba(0,0,0,0.7)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95 transition-all duration-200 ease-out"
             aria-label="Add course"
           >
-            <span className="text-lg leading-none">+</span>
+            <span className="text-lg leading-none !text-white">+</span>
           </button>
         </div>
       </div>
@@ -585,7 +585,7 @@ function Home() {
                   // Ensure focus works on iOS PWA
                   e.currentTarget.focus();
                 }}
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
                 placeholder="e.g. How does machine learning work? Or paste a question from your textbook..."
                 rows={4}
                 tabIndex={0}

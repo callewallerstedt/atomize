@@ -59,7 +59,7 @@ export default function CourseCreateModal({ open, onClose, onCreate }: { open: b
             value={preferredLanguage}
             onChange={(e) => { if (!e.target) return; setPreferredLanguage(e.target.value); }}
             onTouchStart={(e) => { (e.currentTarget as HTMLInputElement).focus(); }}
-            className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+            className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-base text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
             placeholder="e.g., English, Svenska, Español"
             inputMode="text"
             autoComplete="off"
@@ -81,7 +81,7 @@ export default function CourseCreateModal({ open, onClose, onCreate }: { open: b
               e.currentTarget.focus();
             }}
             rows={5}
-            className="w-full resize-y rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+            className="w-full resize-y rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-base text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
             placeholder="Paste syllabus or course description..."
             tabIndex={0}
             style={{
