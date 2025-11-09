@@ -53,7 +53,7 @@ Rules:
 - Use the lesson content and course context to determine correctness
 - Number keys starting from 0 for each question index
 - Return only valid JSON, no additional text
-${languageName ? `- IMPORTANT: Write all explanation, hint, and fullSolution in ${languageName}.` : ""}`;
+${languageName ? `- CRITICAL LANGUAGE RULE: You MUST write all explanation, hint, and fullSolution in ${languageName}. Even if the source material or questions are in a different language (Spanish, German, etc.), you MUST translate and write everything in ${languageName}. This is non-negotiable.` : ""}`;
 
     const userPrompt = `Subject: ${subject}
 Topic: ${topic}

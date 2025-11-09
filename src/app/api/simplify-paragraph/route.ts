@@ -38,7 +38,7 @@ export async function POST(req: Request) {
       "- Keep the same key facts, relationships, and conclusions - just express them simply",
       "- Use conversational, student-friendly language like you're explaining to a friend",
       "- Maintain the logical flow and structure of the original",
-      `Write in ${languageName || 'the same language as the original text'}.`,
+      languageName ? `- CRITICAL LANGUAGE RULE: You MUST write the simplified paragraph in ${languageName}. Even if the original text is in a different language (Spanish, German, etc.), you MUST translate and write the simplified version in ${languageName}. This is non-negotiable.` : `- Write in the same language as the original text.`,
       "CRITICAL LaTeX/Math rules:",
       "- ALL Greek letters MUST have backslash: \\eta \\alpha \\beta \\theta NOT eta alpha beta theta",
       "- Text in math: \\text{proper text} NOT \\t, NOT ext{text}, NEVER use \\t as it's a tab character",

@@ -103,15 +103,17 @@ export async function POST(req: Request) {
     const lang = await detectLanguage(combined || texts.map(t => t.name).join("\n"));
 
     const system = [
-      "Extract ONLY main topics from the course material.",
+      "Extract main topics from the course material. If material is minimal or only a course name is provided, generate comprehensive topics based on the subject name.",
       "Return STRICT JSON with this exact shape:",
       "{ subject: string; topics: { name: string; summary: string; coverage: number }[] }",
-      "Rules:",
-      "- Use 6-12 concise main topics (2-5 words).",
-      "- summary: 1-2 sentences based on the material.",
+      "CRITICAL RULES:",
+      "- ALWAYS generate AT LEAST 6 topics, ideally 8-12 topics. Never generate fewer than 6 topics.",
+      "- If course material is minimal or only a course name/subject is provided, use your knowledge of that subject to generate 6-12 well-structured, comprehensive topics that would typically be covered in such a course.",
+      "- Each topic name should be concise (2-5 words).",
+      "- summary: 1-2 sentences describing what the topic covers. If material is minimal, write summaries based on standard coverage of this topic in the subject area.",
       "- coverage: integer 0-100 estimating how much of the total material this topic covers; topics should roughly sum to ~100 but do not exceed.",
       "- No subtopics, no markdown, no code fences, JSON only.",
-      "- Ignore the subject/course name string for determining topics; use only the provided material content.",
+      "- Structure topics logically and comprehensively to cover the subject area well.",
       `- Write summaries in ${lang.name}.`,
     ].join("\n");
 
@@ -119,9 +121,11 @@ export async function POST(req: Request) {
     if (combined && combined.trim().length >= 50) {
       // Primary path: use extracted text
       const user = [
-        `Subject (label only, do not infer from it): ${subject}`,
+        `Subject: ${subject}`,
         "Material (truncated):",
         combined,
+        "",
+        "IMPORTANT: Generate 6-12 comprehensive topics. If the material above is minimal, use the subject name to generate well-structured topics that would typically be covered in this course.",
       ].join("\n\n");
 
       const completion = await client.chat.completions.create({
@@ -168,32 +172,86 @@ export async function POST(req: Request) {
         data = { subject, topics: [] };
       }
     } else {
-      // Fallback path: upload raw files to OpenAI and let the model read them directly
-      const uploads: string[] = [];
-      for (const file of files) {
+      // Handle case with minimal/no material - generate topics based on subject name
+      if ((!combined || combined.trim().length < 50) && files.length === 0) {
+        // No material provided, generate topics from subject name only
+        const user = [
+          `Subject: ${subject}`,
+          "",
+          "No course material was provided. Generate 6-12 comprehensive, well-structured topics that would typically be covered in a course about this subject. Use your knowledge of the subject area to create a logical and complete topic structure.",
+        ].join("\n\n");
+
+        const completion = await client.chat.completions.create({
+          model: "gpt-4o-mini",
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "MainTopics",
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  subject: { type: "string" },
+                  topics: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      additionalProperties: false,
+                      properties: {
+                        name: { type: "string" },
+                        summary: { type: "string" },
+                        coverage: { type: "number" },
+                      },
+                      required: ["name", "summary", "coverage"],
+                    },
+                  },
+                },
+                required: ["subject", "topics"],
+              },
+              strict: true,
+            },
+          },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+          temperature: 0.2,
+        });
+
+        const content = completion.choices[0]?.message?.content || "{}";
         try {
-          const uploaded = await client.files.create({ file: file as any, purpose: "assistants" });
-          uploads.push(uploaded.id);
-        } catch {}
-      }
-      const inputContent: any[] = [
-        { type: "input_text", text: `Subject (label only, do not infer from it): ${subject}\nPlease extract ONLY main topics from the attached files. Return JSON only.` },
-        ...uploads.map((id) => ({ type: "input_file", file_id: id })),
-      ];
-      const resp = await client.responses.create({
-        model: "gpt-4o-mini",
-        instructions: system,
-        input: [
-          { role: "user", content: inputContent as any },
-        ],
-      });
-      const out = (resp as any).output_text || "{}";
-      try {
-        data = JSON.parse(out);
-      } catch {
-        const start = out.indexOf("{");
-        const end = out.lastIndexOf("}");
-        if (start >= 0 && end > start) data = JSON.parse(out.slice(start, end + 1));
+          data = JSON.parse(content);
+        } catch {
+          data = { subject, topics: [] };
+        }
+      } else {
+        // Fallback path: upload raw files to OpenAI and let the model read them directly
+        const uploads: string[] = [];
+        for (const file of files) {
+          try {
+            const uploaded = await client.files.create({ file: file as any, purpose: "assistants" });
+            uploads.push(uploaded.id);
+          } catch {}
+        }
+        const inputContent: any[] = [
+          { type: "input_text", text: `Subject: ${subject}\n\nIMPORTANT: Generate 6-12 comprehensive topics. If the attached files contain minimal material, use the subject name to generate well-structured topics that would typically be covered in this course. Return JSON only.` },
+          ...uploads.map((id) => ({ type: "input_file", file_id: id })),
+        ];
+        const resp = await client.responses.create({
+          model: "gpt-4o-mini",
+          instructions: system,
+          input: [
+            { role: "user", content: inputContent as any },
+          ],
+        });
+        const out = (resp as any).output_text || "{}";
+        try {
+          data = JSON.parse(out);
+        } catch {
+          const start = out.indexOf("{");
+          const end = out.lastIndexOf("}");
+          if (start >= 0 && end > start) data = JSON.parse(out.slice(start, end + 1));
+        }
       }
     }
 
@@ -204,6 +262,65 @@ export async function POST(req: Request) {
         summary: String(t.summary || ""),
         coverage: Math.max(0, Math.min(100, Math.round(Number((t as any).coverage) || 0))),
       }));
+    }
+
+    // Ensure we always have at least 6 topics - regenerate if needed
+    if (!Array.isArray(data.topics) || data.topics.length < 6) {
+      try {
+        const regenerateUser = [
+          `Subject: ${subject}`,
+          combined && combined.trim().length >= 50 
+            ? `Material: ${combined.slice(0, 50000)}`
+            : "No material provided - generate topics based on subject knowledge.",
+          "",
+          "CRITICAL: You must generate AT LEAST 6 topics (ideally 8-12). Previous attempt returned fewer than 6. Generate a comprehensive set of 6-12 well-structured topics for this subject.",
+        ].join("\n\n");
+
+        const regenerateCompletion = await client.chat.completions.create({
+          model: "gpt-4o-mini",
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "MainTopics",
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  subject: { type: "string" },
+                  topics: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      additionalProperties: false,
+                      properties: {
+                        name: { type: "string" },
+                        summary: { type: "string" },
+                        coverage: { type: "number" },
+                      },
+                      required: ["name", "summary", "coverage"],
+                    },
+                  },
+                },
+                required: ["subject", "topics"],
+              },
+              strict: true,
+            },
+          },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: regenerateUser },
+          ],
+          temperature: 0.2,
+        });
+
+        const regenerateContent = regenerateCompletion.choices[0]?.message?.content || "{}";
+        try {
+          const regenerated = JSON.parse(regenerateContent);
+          if (Array.isArray(regenerated.topics) && regenerated.topics.length >= 6) {
+            data = regenerated;
+          }
+        } catch {}
+      } catch {}
     }
 
     // Build course summary/context

@@ -47,7 +47,8 @@ QUIZ REQUIREMENTS:
 - Focus on key theoretical concepts, technical mechanisms, and course-specific applications
 - Do NOT include any quiz content inside the body text
 
-Focus on academic rigor, technical depth, and course-specific integration. Use discipline-appropriate terminology and expect readers to engage with complex ideas.`;
+Focus on academic rigor, technical depth, and course-specific integration. Use discipline-appropriate terminology and expect readers to engage with complex ideas.
+${languageName ? `\n\nCRITICAL LANGUAGE RULE: You MUST write the ENTIRE lesson (title, body, quiz questions) in ${languageName}. Even if the source material is in a different language (Spanish, German, etc.), you MUST translate and write everything in ${languageName}. This is non-negotiable.` : ''}`;
 
     const userPrompt = `Create a comprehensive, university-level lesson about: "${query}"
 
@@ -60,7 +61,7 @@ ${combinedText}
 **Related Topics in Course:**
 ${courseTopics?.join(", ") || "None specified"}
 
-**Language:** ${languageName || "English"}
+${languageName ? `**CRITICAL: Write the ENTIRE lesson in ${languageName}. Even if the materials are in a different language, translate and write everything in ${languageName}.**` : '**Language:** English'}
 
 Generate a single, academically rigorous lesson that thoroughly explains this complex topic at a university level. Include detailed technical analysis, mathematical precision where applicable, and deep exploration of the subject matter within the course context. Follow the specified structure and maintain academic rigor throughout.`;
 

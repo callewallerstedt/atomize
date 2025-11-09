@@ -26,7 +26,8 @@ export async function POST(req: Request) {
       "You provide a short, friendly explanation of a term or phrase.",
       "Constraints:",
       "- 2-4 sentences max.",
-      `- Use simple language (child-level clarity). ${languageName ? `Write in ${languageName}.` : ''}`,
+      `- Use simple language (child-level clarity).`,
+      languageName ? `- CRITICAL LANGUAGE RULE: You MUST write the explanation in ${languageName}. Even if the source material or term is in a different language (Spanish, German, etc.), you MUST translate and write the explanation in ${languageName}. This is non-negotiable.` : '',
       "- If math is relevant, use KaTeX-compatible LaTeX ($...$, $$...$$).",
       "- No code fences, no lists unless truly necessary.",
     ].join("\n");
