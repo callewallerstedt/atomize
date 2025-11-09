@@ -7,6 +7,9 @@ export default function LoginPage() {
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCodeInput, setShowCodeInput] = useState(false);
+  const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -31,6 +34,14 @@ export default function LoginPage() {
     try {
       setLoading(true);
       setError(null);
+      
+      // Validate password confirmation for signup
+      if (authMode === "signup" && password !== confirmPassword) {
+        setError("Passwords do not match");
+        setLoading(false);
+        return;
+      }
+      
       const res = await fetch(authMode === "login" ? "/api/auth/login" : "/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -177,6 +188,24 @@ export default function LoginPage() {
             transform: scale(0.9) !important;
           }
         }
+        @media (max-width: 767px) {
+          .logo-wrap {
+            margin-top: -130px !important;
+            margin-bottom: -50px !important;
+          }
+          .synapse-header h1 {
+            display: block;
+            text-align: center;
+          }
+          .synapse-header h1 sup {
+            position: static !important;
+            display: block;
+            margin-top: -0.3rem;
+            margin-left: 0 !important;
+            text-align: center;
+            width: 100%;
+          }
+        }
       `}} />
       {/* Animated background dots */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -213,7 +242,7 @@ export default function LoginPage() {
       </div>
 
       {/* SYNAPSE text */}
-      <div className="mb-4 text-center">
+      <div className="mb-4 text-center synapse-header">
         <h1 className="text-7xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider relative inline-block" style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}>
           SYNAPSE
           <sup className="text-xl text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] absolute -top-1 left-full ml-1" style={{ fontFamily: 'var(--font-ibm-plex-mono), monospace' }}>(ALPHA)</sup>
@@ -225,6 +254,9 @@ export default function LoginPage() {
 
       {/* Login form */}
       <div className="w-full max-w-md px-6">
+        <h2 className="text-2xl font-semibold text-[var(--foreground)] mb-2 text-center">
+          {authMode === "login" ? "Sign in" : "Sign up"}
+        </h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
             <div className="rounded-xl border border-[#FF2D96]/30 bg-[#FF2D96]/10 px-4 py-3 text-sm text-[#FFC0DA]">
@@ -258,9 +290,53 @@ export default function LoginPage() {
             />
           </div>
 
+          {authMode === "signup" && (
+            <div>
+              <label className="mb-2 block text-sm text-[var(--foreground)]/80">Confirm Password</label>
+              <input
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                type="password"
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-3 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
+                placeholder="Re-enter your password"
+                autoComplete="new-password"
+                minLength={6}
+                required
+              />
+            </div>
+          )}
+
+          {authMode === "signup" && (
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCodeInput(!showCodeInput);
+                  setCode("");
+                }}
+                className="text-xs text-[var(--foreground)]/60 hover:text-[var(--accent-cyan)] underline !shadow-none !bg-transparent !border-none outline-none p-0 m-0 font-inherit"
+              >
+                Got a code?
+              </button>
+            </div>
+          )}
+
+          {authMode === "signup" && showCodeInput && (
+            <div>
+              <label className="mb-2 block text-sm text-[var(--foreground)]/80">Code</label>
+              <input
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                type="text"
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-3 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
+                placeholder="Enter your code"
+              />
+            </div>
+          )}
+
           <button
             type="submit"
-            disabled={loading || !username.trim() || password.length < 6}
+            disabled={loading || !username.trim() || password.length < 6 || (authMode === "signup" && password !== confirmPassword)}
             className="w-full inline-flex h-12 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium !text-white hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed transition-opacity"
           >
             {loading ? (authMode === "login" ? "Signing in..." : "Creating account...") : authMode === "login" ? "Sign in" : "Sign up"}
@@ -275,6 +351,9 @@ export default function LoginPage() {
                   onClick={() => {
                     setAuthMode("signup");
                     setError(null);
+                    setConfirmPassword("");
+                    setShowCodeInput(false);
+                    setCode("");
                   }}
                   className="underline hover:text-[var(--accent-cyan)] !shadow-none !bg-transparent !border-none outline-none p-0 m-0 font-inherit text-inherit"
                 >
@@ -289,6 +368,9 @@ export default function LoginPage() {
                   onClick={() => {
                     setAuthMode("login");
                     setError(null);
+                    setConfirmPassword("");
+                    setShowCodeInput(false);
+                    setCode("");
                   }}
                   className="underline hover:text-[var(--accent-cyan)] !shadow-none !bg-transparent !border-none outline-none p-0 m-0 font-inherit text-inherit"
                 >
