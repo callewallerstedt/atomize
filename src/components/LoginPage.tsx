@@ -155,87 +155,15 @@ export default function LoginPage() {
           ))}
         </div>
 
-        <div className="logo-wrap" style={{ width: 200, aspectRatio: "1 / 1", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg viewBox="0 0 100 100" role="img" aria-label="Spinning logo" width="160" height="160" overflow="visible" style={{ overflow: "visible" }}>
-            <defs>
-              <linearGradient id="grad-checking" x1="0%" y1="0%" x2="100%" y2="0%" gradientUnits="userSpaceOnUse">
-                <stop offset="0%" stopColor="#00E5FF" />
-                <stop offset="100%" stopColor="#FF2D96" />
-                <animateTransform
-                  attributeName="gradientTransform"
-                  type="rotate"
-                  from="0 50 50"
-                  to="360 50 50"
-                  dur="6s"
-                  repeatCount="indefinite"
-                />
-              </linearGradient>
-              <mask id="outer-only-checking" maskUnits="userSpaceOnUse">
-                <rect x="-1000" y="-1000" width="3000" height="3000" fill="white" />
-                <circle cx="50" cy="50" r="38" fill="black" />
-              </mask>
-              <filter id="blur-soft-checking" filterUnits="userSpaceOnUse" x="-600" y="-600" width="1200" height="1200">
-                <feGaussianBlur stdDeviation="4" edgeMode="duplicate" />
-              </filter>
-              <filter id="blur-wide-checking" filterUnits="userSpaceOnUse" x="-600" y="-600" width="1200" height="1200">
-                <feGaussianBlur stdDeviation="8" edgeMode="duplicate" />
-              </filter>
-            </defs>
-            {/* glow and crisp ring: rotate together */}
-            <g style={{ transformOrigin: "50% 50%", animation: "spin 6s linear infinite" }}>
-              <path
-                d="M50,12 A38,38 0 1,1 49.99,12"
-                fill="none"
-                stroke="url(#grad-checking)"
-                strokeWidth={12}
-                strokeLinecap="round"
-                filter="url(#blur-wide-checking)"
-                mask="url(#outer-only-checking)"
-                opacity="0.35"
-              />
-              <path
-                d="M50,12 A38,38 0 1,1 49.99,12"
-                fill="none"
-                stroke="url(#grad-checking)"
-                strokeWidth={10}
-                strokeLinecap="round"
-                filter="url(#blur-soft-checking)"
-                mask="url(#outer-only-checking)"
-                opacity="0.55"
-              />
-              <path
-                d="M50,12 A38,38 0 1,1 49.99,12"
-                fill="none"
-                stroke="url(#grad-checking)"
-                strokeWidth={7}
-                strokeLinecap="round"
-              />
-            </g>
-            <style>{`
-              @keyframes spin { to { transform: rotate(360deg); } }
-              @keyframes float-0 {
-                0% { transform: translate(0, 0) rotate(0deg); }
-                33% { transform: translate(30px, -50px) rotate(120deg); }
-                66% { transform: translate(-20px, 40px) rotate(240deg); }
-                100% { transform: translate(0, 0) rotate(360deg); }
-              }
-              @keyframes float-1 {
-                0% { transform: translate(0, 0) rotate(0deg); }
-                33% { transform: translate(-40px, 30px) rotate(-120deg); }
-                66% { transform: translate(50px, -30px) rotate(-240deg); }
-                100% { transform: translate(0, 0) rotate(-360deg); }
-              }
-              @keyframes float-2 {
-                0% { transform: translate(0, 0) rotate(0deg); }
-                50% { transform: translate(25px, 35px) rotate(180deg); }
-                100% { transform: translate(0, 0) rotate(360deg); }
-              }
-              @media (prefers-reduced-motion: reduce) { 
-                .logo-wrap g { animation: none !important }
-                [class*="float-"] { animation: none !important }
-              }
-            `}</style>
-          </svg>
+        <div className="logo-wrap" style={{ width: 400, aspectRatio: "1 / 1", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <img
+            src="/spinner.png"
+            alt="Spinning logo"
+            width={320}
+            height={320}
+            style={{ width: 320, height: 320, objectFit: "contain", transformOrigin: "center" }}
+            className="animate-spin"
+          />
         </div>
       </div>
     );
@@ -243,6 +171,13 @@ export default function LoginPage() {
 
   return (
     <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--background)]">
+      <style dangerouslySetInnerHTML={{__html: `
+        @media (min-width: 768px) {
+          .spinner-scale-wrapper {
+            transform: scale(0.9) !important;
+          }
+        }
+      `}} />
       {/* Animated background dots */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {loginDots.map((dot) => (
@@ -264,87 +199,17 @@ export default function LoginPage() {
       </div>
 
       {/* Spinning gradient ring */}
-      <div className="logo-wrap mb-8" style={{ width: 200, aspectRatio: "1 / 1", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <svg viewBox="0 0 100 100" role="img" aria-label="Spinning logo" width="160" height="160" overflow="visible" style={{ overflow: "visible" }}>
-          <defs>
-            <linearGradient id="grad-login" x1="0%" y1="0%" x2="100%" y2="0%" gradientUnits="userSpaceOnUse">
-              <stop offset="0%" stopColor="#00E5FF" />
-              <stop offset="100%" stopColor="#FF2D96" />
-              <animateTransform
-                attributeName="gradientTransform"
-                type="rotate"
-                from="0 50 50"
-                to="360 50 50"
-                dur="6s"
-                repeatCount="indefinite"
-              />
-            </linearGradient>
-            <mask id="outer-only-login" maskUnits="userSpaceOnUse">
-              <rect x="-1000" y="-1000" width="3000" height="3000" fill="white" />
-              <circle cx="50" cy="50" r="38" fill="black" />
-            </mask>
-            <filter id="blur-soft-login" filterUnits="userSpaceOnUse" x="-600" y="-600" width="1200" height="1200">
-              <feGaussianBlur stdDeviation="4" edgeMode="duplicate" />
-            </filter>
-            <filter id="blur-wide-login" filterUnits="userSpaceOnUse" x="-600" y="-600" width="1200" height="1200">
-              <feGaussianBlur stdDeviation="8" edgeMode="duplicate" />
-            </filter>
-          </defs>
-          {/* glow and crisp ring: rotate together */}
-          <g style={{ transformOrigin: "50% 50%", animation: "spin 6s linear infinite" }}>
-            <path
-              d="M50,12 A38,38 0 1,1 49.99,12"
-              fill="none"
-              stroke="url(#grad-login)"
-              strokeWidth={12}
-              strokeLinecap="round"
-              filter="url(#blur-wide-login)"
-              mask="url(#outer-only-login)"
-              opacity="0.35"
-            />
-            <path
-              d="M50,12 A38,38 0 1,1 49.99,12"
-              fill="none"
-              stroke="url(#grad-login)"
-              strokeWidth={10}
-              strokeLinecap="round"
-              filter="url(#blur-soft-login)"
-              mask="url(#outer-only-login)"
-              opacity="0.55"
-            />
-            <path
-              d="M50,12 A38,38 0 1,1 49.99,12"
-              fill="none"
-              stroke="url(#grad-login)"
-              strokeWidth={7}
-              strokeLinecap="round"
-            />
-          </g>
-          <style>{`
-            @keyframes spin { to { transform: rotate(360deg); } }
-            @keyframes float-0 {
-              0% { transform: translate(0, 0) rotate(0deg); }
-              33% { transform: translate(30px, -50px) rotate(120deg); }
-              66% { transform: translate(-20px, 40px) rotate(240deg); }
-              100% { transform: translate(0, 0) rotate(360deg); }
-            }
-            @keyframes float-1 {
-              0% { transform: translate(0, 0) rotate(0deg); }
-              33% { transform: translate(-40px, 30px) rotate(-120deg); }
-              66% { transform: translate(50px, -30px) rotate(-240deg); }
-              100% { transform: translate(0, 0) rotate(-360deg); }
-            }
-            @keyframes float-2 {
-              0% { transform: translate(0, 0) rotate(0deg); }
-              50% { transform: translate(25px, 35px) rotate(180deg); }
-              100% { transform: translate(0, 0) rotate(360deg); }
-            }
-            @media (prefers-reduced-motion: reduce) { 
-              .logo-wrap g { animation: none !important }
-              [class*="float-"] { animation: none !important }
-            }
-          `}</style>
-        </svg>
+      <div className="logo-wrap -mt-40 -mb-[100px]" style={{ width: 240, aspectRatio: "1 / 0.8", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+        <div style={{ transform: "scale(1.3)", transformOrigin: "center" }} className="spinner-scale-wrapper">
+          <img
+            src="/spinner.png"
+            alt="Spinning logo"
+            width={320}
+            height={320}
+            style={{ width: 320, height: 320, objectFit: "contain", transformOrigin: "center" }}
+            className="animate-spin"
+          />
+        </div>
       </div>
 
       {/* SYNAPSE text */}

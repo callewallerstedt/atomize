@@ -90,7 +90,7 @@ function LoadingScreen({ onComplete }: { onComplete: () => void }) {
           <div
             key={dot.key}
             className="absolute rounded-full opacity-40"
-            style={{
+             style={{
               width: `${dot.size}px`,
               height: `${dot.size}px`,
               left: `${dot.left}%`,
@@ -106,87 +106,18 @@ function LoadingScreen({ onComplete }: { onComplete: () => void }) {
 
 
       {/* Spinning gradient ring - same as login page */}
-      <div className="logo-wrap mb-8" style={{ width: 200, aspectRatio: "1 / 1", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <svg viewBox="0 0 100 100" role="img" aria-label="Spinning logo" width="160" height="160" overflow="visible" style={{ overflow: "visible" }}>
-          <defs>
-            <linearGradient id="grad-loading" x1="0%" y1="0%" x2="100%" y2="0%" gradientUnits="userSpaceOnUse">
-              <stop offset="0%" stopColor="#00E5FF" />
-              <stop offset="100%" stopColor="#FF2D96" />
-              <animateTransform
-                attributeName="gradientTransform"
-                type="rotate"
-                from="0 50 50"
-                to="360 50 50"
-                dur="6s"
-                repeatCount="indefinite"
-              />
-            </linearGradient>
-            <mask id="outer-only-loading" maskUnits="userSpaceOnUse">
-              <rect x="-1000" y="-1000" width="3000" height="3000" fill="white" />
-              <circle cx="50" cy="50" r="38" fill="black" />
-            </mask>
-            <filter id="blur-soft-loading" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
-              <feGaussianBlur stdDeviation="4" edgeMode="duplicate" />
-            </filter>
-            <filter id="blur-wide-loading" filterUnits="userSpaceOnUse" x="-400" y="-400" width="1000" height="1000">
-              <feGaussianBlur stdDeviation="8" edgeMode="duplicate" />
-            </filter>
-          </defs>
-          {/* glow and crisp ring: rotate together */}
-          <g style={{ transformOrigin: "50% 50%", animation: "spin 6s linear infinite" }}>
-            <path
-              d="M50,12 A38,38 0 1,1 49.99,12"
-              fill="none"
-              stroke="url(#grad-loading)"
-              strokeWidth={12}
-              strokeLinecap="round"
-              filter="url(#blur-wide-loading)"
-              mask="url(#outer-only-loading)"
-              opacity="0.35"
-            />
-            <path
-              d="M50,12 A38,38 0 1,1 49.99,12"
-              fill="none"
-              stroke="url(#grad-loading)"
-              strokeWidth={10}
-              strokeLinecap="round"
-              filter="url(#blur-soft-loading)"
-              mask="url(#outer-only-loading)"
-              opacity="0.55"
-            />
-            <path
-              d="M50,12 A38,38 0 1,1 49.99,12"
-              fill="none"
-              stroke="url(#grad-loading)"
-              strokeWidth={7}
-              strokeLinecap="round"
-            />
-          </g>
-          <style>{`
-            @keyframes spin { to { transform: rotate(360deg); } }
-            @keyframes float-0 {
-              0% { transform: translate(0, 0) rotate(0deg); }
-              33% { transform: translate(30px, -50px) rotate(120deg); }
-              66% { transform: translate(-20px, 40px) rotate(240deg); }
-              100% { transform: translate(0, 0) rotate(360deg); }
-            }
-            @keyframes float-1 {
-              0% { transform: translate(0, 0) rotate(0deg); }
-              33% { transform: translate(-40px, 30px) rotate(-120deg); }
-              66% { transform: translate(50px, -30px) rotate(-240deg); }
-              100% { transform: translate(0, 0) rotate(-360deg); }
-            }
-            @keyframes float-2 {
-              0% { transform: translate(0, 0) rotate(0deg); }
-              50% { transform: translate(25px, 35px) rotate(180deg); }
-              100% { transform: translate(0, 0) rotate(360deg); }
-            }
-            @media (prefers-reduced-motion: reduce) { 
-              .logo-wrap g { animation: none !important }
-              [class*="float-"] { animation: none !important }
-            }
-          `}</style>
-        </svg>
+      <div className="logo-wrap mb-2" style={{ width: 240, aspectRatio: "1 / 1", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ transform: "scale(1.3)", transformOrigin: "center" }}>
+          <img
+            src="/spinner.png"
+            alt=""
+            width={320}
+            height={320}
+            style={{ width: 320, height: 320, objectFit: "contain", transformOrigin: "center" }}
+            className="animate-spin"
+            loading="eager"
+          />
+        </div>
       </div>
 
       {/* Welcome text */}
@@ -1059,16 +990,19 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <header className="sticky top-0 z-50 backdrop-blur supports-[backdrop-filter]:bg-[var(--background)]/70 bg-[var(--background)]" style={{ paddingTop: 'max(3px, calc(env(safe-area-inset-top, 0px) / 2))' }}>
           <nav className="relative flex h-14 items-center px-4">
             {/* Logo and title */}
-            <button
-              onClick={() => router.push('/')}
-              className="flex items-center gap-2 mr-1 hover:opacity-80 transition-opacity !shadow-none pl-0 pr-15 py-2"
+              <button
+                onClick={() => router.push('/')}
+              className="flex items-center gap-2 mr-1 hover:opacity-80 transition-opacity !shadow-none pl-0 py-2"
+              style={{ paddingRight: 'calc(3.75rem * 1.7)' }}
             >
-              <GlowSpinner size={24} ariaLabel="Synapse" idSuffix="header" padding={10} />
-              <h1 className="text-lg font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider relative inline-block" style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}>
-                SYNAPSE
-                <sup className="text-xs text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] absolute -top-0.5 left-full ml-1" style={{ fontFamily: 'var(--font-ibm-plex-mono), monospace' }}>(ALPHA)</sup>
-              </h1>
-            </button>
+              <GlowSpinner size={24} ariaLabel="Synapse" idSuffix="header" />
+              <div style={{ transform: "scale(1.3)", transformOrigin: "left center" }}>
+                <h1 className="text-lg font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider relative inline-block" style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}>
+                  SYNAPSE
+                  <sup className="text-xs text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] absolute -top-0.5 left-full ml-1" style={{ fontFamily: 'var(--font-ibm-plex-mono), monospace' }}>(ALPHA)</sup>
+                </h1>
+              </div>
+              </button>
             {/* Left side buttons */}
             <div className="flex items-center gap-3">
               <div className="relative tools-dropdown">

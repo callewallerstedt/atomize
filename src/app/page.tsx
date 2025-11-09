@@ -151,9 +151,9 @@ function Home() {
       if (!quickLearnData) {
         quickLearnData = {
           subject: "Quick Learn",
-          course_context: "",
-          combinedText: "",
-          topics: [],
+        course_context: "",
+        combinedText: "",
+        topics: [],
           nodes: {},
           files: [],
           progress: {},
@@ -168,15 +168,15 @@ function Home() {
       // Add the new quick learn lesson
       const lessonTitle = json.data.title || quickLearnQuery;
       quickLearnData.nodes[lessonTitle] = {
-        overview: `Quick lesson on: ${quickLearnQuery}`,
-        symbols: [],
+            overview: `Quick lesson on: ${quickLearnQuery}`,
+            symbols: [],
         lessonsMeta: [{ type: "Quick Lesson", title: lessonTitle }],
-        lessons: [{
+            lessons: [{
           title: lessonTitle,
-          body: json.data.body,
-          quiz: json.data.quiz || []
-        }],
-        rawLessonJson: [json.raw || JSON.stringify(json.data)]
+              body: json.data.body,
+              quiz: json.data.quiz || []
+            }],
+            rawLessonJson: [json.raw || JSON.stringify(json.data)]
       };
 
       // Save to server (await to ensure it's saved)
@@ -401,24 +401,24 @@ function Home() {
             <div className="flex items-center gap-3 h-full">
               <span className="text-lg font-semibold flex-1 break-words whitespace-normal leading-snug pr-8">{s.name}</span>
             </div>
-            <button
-              onClick={(e) => { e.stopPropagation(); setMenuOpenFor((cur) => (cur === s.slug ? null : s.slug)); }}
-              disabled={preparingSlug === s.slug}
+              <button
+                onClick={(e) => { e.stopPropagation(); setMenuOpenFor((cur) => (cur === s.slug ? null : s.slug)); }}
+                disabled={preparingSlug === s.slug}
               data-menu-button
               className={`absolute top-3 right-3 inline-flex items-center justify-center text-[var(--foreground)]/60 hover:text-[var(--foreground)]/80 transition-colors !shadow-none ${
-                preparingSlug === s.slug
+                  preparingSlug === s.slug
                   ? 'opacity-50 cursor-not-allowed'
                   : 'cursor-pointer'
-              }`}
-              aria-label="More actions"
-              title="More actions"
-            >
+                }`}
+                aria-label="More actions"
+                title="More actions"
+              >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="5" cy="12" r="2" fill="currentColor"/>
-                <circle cx="12" cy="12" r="2" fill="currentColor"/>
-                <circle cx="19" cy="12" r="2" fill="currentColor"/>
-              </svg>
-            </button>
+                  <circle cx="5" cy="12" r="2" fill="currentColor"/>
+                  <circle cx="12" cy="12" r="2" fill="currentColor"/>
+                  <circle cx="19" cy="12" r="2" fill="currentColor"/>
+                </svg>
+              </button>
             
             {preparingSlug === s.slug && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--background)]/80 backdrop-blur-sm rounded-2xl z-10">

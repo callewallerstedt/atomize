@@ -285,6 +285,40 @@ select {
   animation: fade-in 0.5s ease-out forwards;
 }
 
+/* Floating animations for background dots */
+@keyframes float-0 {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  33% {
+    transform: translate(10px, -10px);
+  }
+  66% {
+    transform: translate(-10px, 10px);
+  }
+}
+
+@keyframes float-1 {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(-15px, -15px);
+  }
+}
+
+@keyframes float-2 {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(15px, 10px);
+  }
+  75% {
+    transform: translate(-10px, -15px);
+  }
+}
+
 /* Remove focus outlines for header buttons (but keep hover shadows) */
 button:focus,
 button:focus-visible {

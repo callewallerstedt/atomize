@@ -543,22 +543,22 @@ export default function LessonPage() {
                   </button>
                   {practiceOpen && (content?.lessons?.[lessonIndex]?.quiz?.length || 0) > 0 && (
                     <div className="px-4 pt-4 pb-4">
-                      <ol className="list-decimal space-y-2 pl-6 text-sm text-[var(--foreground)]">
-                        {content!.lessons![lessonIndex]!.quiz!.map((q, qi) => (
-                          <li key={qi} className="flex items-start justify-between gap-3">
-                            <span className="flex-1">
-                              <AutoFixMarkdown>{q.question}</AutoFixMarkdown>
-                            </span>
-                            <button
-                              className="ml-3 inline-flex h-8 shrink-0 items-center rounded-full border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 px-3 text-xs text-[var(--foreground)] hover:bg-[var(--background)]/80"
-                              onClick={() => setCheckedMap((m) => ({ ...m, [qi]: !m[qi] }))}
-                            >
-                              {checkedMap[qi] ? 'Checked' : 'Check'}
-                            </button>
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
+                  <ol className="list-decimal space-y-2 pl-6 text-sm text-[var(--foreground)]">
+                    {content!.lessons![lessonIndex]!.quiz!.map((q, qi) => (
+                      <li key={qi} className="flex items-start justify-between gap-3">
+                        <span className="flex-1">
+                          <AutoFixMarkdown>{q.question}</AutoFixMarkdown>
+                        </span>
+                        <button
+                          className="ml-3 inline-flex h-8 shrink-0 items-center rounded-full border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 px-3 text-xs text-[var(--foreground)] hover:bg-[var(--background)]/80"
+                          onClick={() => setCheckedMap((m) => ({ ...m, [qi]: !m[qi] }))}
+                        >
+                          {checkedMap[qi] ? 'Checked' : 'Check'}
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
                   )}
                 </div>
 
