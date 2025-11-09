@@ -190,7 +190,7 @@ export default function LoginPage() {
         }
         @media (max-width: 767px) {
           .logo-wrap {
-            margin-top: -130px !important;
+            margin-top: -30px !important;
             margin-bottom: -50px !important;
           }
           .synapse-header h1 {
