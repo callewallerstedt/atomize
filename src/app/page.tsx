@@ -265,12 +265,16 @@ function Home() {
 
       let documents: Array<{ name: string; text: string }> = [];
       try {
-        const uploadForm = new FormData();
-        files.forEach((f) => uploadForm.append('files', f));
-        const upRes = await fetch('/api/upload-course-files', { method: 'POST', body: uploadForm });
-        const upJson = await upRes.json().catch(() => ({}));
-        if (upRes.ok && upJson?.ok && Array.isArray(upJson.docs)) {
-          documents = upJson.docs;
+        // Upload files one-by-one to avoid exceeding Vercel request size limits
+        for (const file of files) {
+          const form = new FormData();
+          form.append('files', file);
+          const res = await fetch('/api/upload-course-files', { method: 'POST', body: form });
+          const json = await res.json().catch(() => ({}));
+          if (res.ok && json?.ok && Array.isArray(json.docs)) {
+            // Append any returned docs (server may return an array even for single file)
+            documents.push(...json.docs);
+          }
         }
       } catch {}
 
