@@ -123,7 +123,7 @@ export async function PATCH(req: Request) {
 
   let updatedResults = existing.results;
   try {
-    if (updatedResults && typeof updatedResults === "object") {
+    if (updatedResults && typeof updatedResults === "object" && updatedResults !== null) {
       updatedResults = { ...updatedResults, courseName: courseNameInput };
     }
   } catch {
@@ -134,7 +134,7 @@ export async function PATCH(req: Request) {
     where: { userId_slug: { userId: user.id, slug: slugInput } },
     data: {
       courseName: courseNameInput,
-      results: updatedResults,
+      results: updatedResults as any,
     },
   });
 
