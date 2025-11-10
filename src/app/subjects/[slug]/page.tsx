@@ -5,11 +5,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { loadSubjectData, saveSubjectData, saveSubjectDataAsync, StoredSubjectData, TopicMeta, getLessonsDueForReview, getUpcomingReviews } from "@/utils/storage";
+import { loadSubjectData, saveSubjectData, saveSubjectDataAsync, StoredSubjectData, TopicMeta, getLessonsDueForReview, getUpcomingReviews, LessonFlashcard } from "@/utils/storage";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import Modal from "@/components/Modal";
 import GlowSpinner from "@/components/GlowSpinner";
+import { AutoFixMarkdown } from "@/components/AutoFixMarkdown";
 // Tree view replaced by a simple topic list with actions
 
 type Subject = {
@@ -62,11 +63,49 @@ export default function SubjectPage() {
   const [generatingBasics, setGeneratingBasics] = useState(false);
   const [reviewsDue, setReviewsDue] = useState<ReturnType<typeof getLessonsDueForReview>>([]);
   const [upcomingReviews, setUpcomingReviews] = useState<ReturnType<typeof getUpcomingReviews>>([]);
+  const [allFlashcardsModalOpen, setAllFlashcardsModalOpen] = useState(false);
+  const [allFlashcards, setAllFlashcards] = useState<Array<LessonFlashcard & { topicName: string; lessonTitle: string; id: string }>>([]);
+  const [currentFlashcardIndex, setCurrentFlashcardIndex] = useState(0);
+  const [flashcardFlipped, setFlashcardFlipped] = useState(false);
+  const [starredFlashcards, setStarredFlashcards] = useState<Set<string>>(new Set());
+  const [showOnlyStarred, setShowOnlyStarred] = useState(false);
+  const [isShuffleActive, setIsShuffleActive] = useState(false);
+
+  function getRandomCardIndex(filteredFlashcards: typeof allFlashcards, currentIndex: number): number {
+    if (filteredFlashcards.length <= 1) return currentIndex;
+    let newIndex;
+    do {
+      newIndex = Math.floor(Math.random() * filteredFlashcards.length);
+    } while (newIndex === currentIndex && filteredFlashcards.length > 1);
+    return newIndex;
+  }
 
   useEffect(() => {
     const found = readSubjects().find((s) => s.slug === slug);
     setSubjectName(found?.name ?? slug);
+    
+    // Load starred flashcards from localStorage
+    try {
+      const saved = localStorage.getItem(`starredFlashcards:${slug}`);
+      if (saved) {
+        setStarredFlashcards(new Set(JSON.parse(saved)));
+      }
+    } catch {}
   }, [slug]);
+
+  // Adjust index when filter changes
+  useEffect(() => {
+    if (allFlashcardsModalOpen && allFlashcards.length > 0) {
+      const filteredFlashcards = showOnlyStarred 
+        ? allFlashcards.filter(f => starredFlashcards.has(f.id))
+        : allFlashcards;
+      if (currentFlashcardIndex >= filteredFlashcards.length && filteredFlashcards.length > 0) {
+        setCurrentFlashcardIndex(filteredFlashcards.length - 1);
+      } else if (filteredFlashcards.length === 0 && showOnlyStarred) {
+        // Will show empty state, handled in render
+      }
+    }
+  }, [showOnlyStarred, starredFlashcards, allFlashcards, allFlashcardsModalOpen, currentFlashcardIndex]);
 
   useEffect(() => {
     const saved = loadSubjectData(slug);
@@ -119,6 +158,77 @@ export default function SubjectPage() {
   function addFiles(newFiles: File[]) {
     // No client-side size caps; just append
     setFiles((prev) => [...prev, ...newFiles]);
+  }
+
+  function collectAllFlashcards() {
+    const saved = loadSubjectData(slug);
+    if (!saved || !saved.nodes) {
+      alert("No flashcards found. Generate flashcards from lessons first.");
+      return;
+    }
+
+    const flashcards: Array<LessonFlashcard & { topicName: string; lessonTitle: string; id: string }> = [];
+    
+    // Iterate through all topics (nodes)
+    Object.keys(saved.nodes).forEach((topicName) => {
+      const node = saved.nodes[topicName];
+      if (!node || typeof node !== 'object') return;
+      
+      // Check if it's the new format with lessons array
+      if (Array.isArray(node.lessons)) {
+        node.lessons.forEach((lesson: any) => {
+          if (lesson && Array.isArray(lesson.flashcards) && lesson.flashcards.length > 0) {
+            lesson.flashcards.forEach((flashcard: LessonFlashcard) => {
+              // Create unique ID for each flashcard
+              const id = `${topicName}:${lesson.title || 'Untitled Lesson'}:${flashcard.prompt}`;
+              flashcards.push({
+                ...flashcard,
+                topicName,
+                lessonTitle: lesson.title || 'Untitled Lesson',
+                id,
+              });
+            });
+          }
+        });
+      }
+    });
+
+    if (flashcards.length === 0) {
+      alert("No flashcards found. Generate flashcards from lessons first.");
+      return;
+    }
+
+    setAllFlashcards(flashcards);
+    setCurrentFlashcardIndex(0);
+    setFlashcardFlipped(false);
+    setShowOnlyStarred(false);
+    setIsShuffleActive(false);
+    setAllFlashcardsModalOpen(true);
+  }
+
+  function toggleStar(flashcardId: string) {
+    const newStarred = new Set(starredFlashcards);
+    if (newStarred.has(flashcardId)) {
+      newStarred.delete(flashcardId);
+    } else {
+      newStarred.add(flashcardId);
+    }
+    setStarredFlashcards(newStarred);
+    // Save to localStorage
+    try {
+      localStorage.setItem(`starredFlashcards:${slug}`, JSON.stringify(Array.from(newStarred)));
+    } catch {}
+    
+    // If showing only starred and we unstarred the current card, adjust index
+    if (showOnlyStarred) {
+      const filtered = allFlashcards.filter(f => newStarred.has(f.id));
+      if (currentFlashcardIndex >= filtered.length && filtered.length > 0) {
+        setCurrentFlashcardIndex(filtered.length - 1);
+      } else if (filtered.length === 0) {
+        setShowOnlyStarred(false);
+        setCurrentFlashcardIndex(0);
+      }
+    }
   }
 
   async function handleQuickLearn() {
@@ -296,6 +406,14 @@ export default function SubjectPage() {
 
         {activeTab === 'tree' && (
           <div className="mt-4">
+            <div className="mb-4">
+              <button
+                onClick={collectAllFlashcards}
+                className="w-full rounded-xl bg-gradient-to-r from-[var(--accent-cyan)]/10 to-[var(--accent-pink)]/10 hover:from-[var(--accent-cyan)]/20 hover:to-[var(--accent-pink)]/20 transition-all py-3 px-6 flex items-center justify-center text-base font-semibold text-[var(--foreground)]"
+              >
+                Flashcards
+              </button>
+            </div>
               <div className="mb-3 flex items-center justify-between">
               <div className="text-sm text-[var(--foreground)]">Topics</div>
               <div className="flex items-center gap-2">
@@ -497,22 +615,32 @@ export default function SubjectPage() {
           </div>
         ) : null}
 
-        {activeTab === 'topics' && topics ? (
+        {activeTab === 'topics' && (
           <>
             <div className="mt-6">
-              <input
-                value={query}
-                onChange={(e) => { if (!e.target) return; setQuery(e.target.value); }}
-                placeholder="Search topics..."
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none"
-              />
+              <button
+                onClick={collectAllFlashcards}
+                className="w-full rounded-xl bg-gradient-to-r from-[var(--accent-cyan)]/10 to-[var(--accent-pink)]/10 hover:from-[var(--accent-cyan)]/20 hover:to-[var(--accent-pink)]/20 transition-all py-3 px-6 flex items-center justify-center text-base font-semibold text-[var(--foreground)]"
+              >
+                Flashcards
+              </button>
             </div>
-            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {topics
-                .filter((t) =>
-                  query.trim() ? (t.name + " " + (t.summary || "")).toLowerCase().includes(query.toLowerCase()) : true
-                )
-                .map((t, i) => {
+            {topics ? (
+              <>
+                <div className="mt-4">
+                  <input
+                    value={query}
+                    onChange={(e) => { if (!e.target) return; setQuery(e.target.value); }}
+                    placeholder="Search topics..."
+                    className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none"
+                  />
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {topics
+                    .filter((t) =>
+                      query.trim() ? (t.name + " " + (t.summary || "")).toLowerCase().includes(query.toLowerCase()) : true
+                    )
+                    .map((t, i) => {
                   const p = progress[t.name];
                   const pct = p && p.totalLessons > 0 ? Math.round((p.completedLessons / p.totalLessons) * 100) : 0;
                   return (
@@ -547,9 +675,15 @@ export default function SubjectPage() {
                     </div>
                   );
                 })}
-            </div>
+                </div>
+              </>
+            ) : (
+              <div className="mt-4 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-6 text-center text-sm text-[var(--foreground)]/70">
+                No topics yet.
+              </div>
+            )}
           </>
-        ) : null}
+        )}
 
         {activeTab === 'notes' && (
           <div className="mt-6">
@@ -821,6 +955,298 @@ export default function SubjectPage() {
           </div>
         </div>
       )}
+
+      {/* All Course Flashcards Modal */}
+      {allFlashcardsModalOpen && allFlashcards.length > 0 && (() => {
+        const filteredFlashcards = showOnlyStarred 
+          ? allFlashcards.filter(f => starredFlashcards.has(f.id))
+          : allFlashcards;
+        const currentCard = filteredFlashcards[currentFlashcardIndex];
+        const isStarred = currentCard ? starredFlashcards.has(currentCard.id) : false;
+        
+        return filteredFlashcards.length > 0 ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+            <div className="relative w-full max-w-xl rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/95 p-6 shadow-2xl">
+              <button
+                onClick={() => {
+                  setAllFlashcardsModalOpen(false);
+                  setFlashcardFlipped(false);
+                }}
+                className="absolute right-4 top-4 h-8 w-8 rounded-full border border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 flex items-center justify-center"
+                aria-label="Close flashcards"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+              <div className="mb-4">
+                <div className="mb-1">
+                  <span className="text-sm text-[var(--foreground)]/70">
+                    Flashcard {currentFlashcardIndex + 1} of {filteredFlashcards.length}
+                    {showOnlyStarred && <span className="text-xs ml-1">(starred only)</span>}
+                  </span>
+                </div>
+                <div className="text-xs text-[var(--foreground)]/50 text-left">
+                  {currentCard?.topicName} • {currentCard?.lessonTitle}
+                </div>
+              </div>
+              <div className="relative flex items-center justify-center gap-3">
+                <div
+                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                  style={{
+                    padding: '1.5px',
+                    background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+                    opacity: (!isShuffleActive && currentFlashcardIndex === 0) ? 0.4 : 1,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!(!isShuffleActive && currentFlashcardIndex === 0)) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!(!isShuffleActive && currentFlashcardIndex === 0)) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                    }
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      if (isShuffleActive) {
+                        const newIndex = getRandomCardIndex(filteredFlashcards, currentFlashcardIndex);
+                        setCurrentFlashcardIndex(newIndex);
+                      } else {
+                        if (currentFlashcardIndex === 0) return;
+                        setCurrentFlashcardIndex((idx) => Math.max(idx - 1, 0));
+                      }
+                      setFlashcardFlipped(false);
+                    }}
+                    disabled={!isShuffleActive && currentFlashcardIndex === 0}
+                    className="flex h-10 w-10 items-center justify-center text-white bg-[var(--background)]/90 backdrop-blur-md transition-all duration-300 ease-out disabled:cursor-not-allowed"
+                    style={{
+                      borderRadius: 'calc(0.75rem - 1.5px)',
+                    }}
+                    aria-label="Previous flashcard"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M15 18l-6-6 6-6" />
+                    </svg>
+                  </button>
+                </div>
+                <div
+                  className="relative h-72 w-full max-w-md cursor-pointer overflow-hidden rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/80 p-6 text-center shadow-inner"
+                  onClick={() => setFlashcardFlipped((f) => !f)}
+                >
+                  {/* Low opacity spinner background */}
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ opacity: 0.08 }}>
+                    <GlowSpinner size={120} ariaLabel="" idSuffix="flashcard-bg" />
+                  </div>
+                  
+                  {currentCard && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        toggleStar(currentCard.id);
+                      }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                      }}
+                      className="absolute right-2 top-2 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/90 backdrop-blur-sm text-[var(--foreground)]/70 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 transition-colors pointer-events-auto"
+                      style={{ pointerEvents: 'auto' }}
+                      aria-label={isStarred ? "Unstar flashcard" : "Star flashcard"}
+                    >
+                      <svg 
+                        className={`h-5 w-5 transition-colors ${isStarred ? 'fill-yellow-400 text-yellow-400' : ''}`} 
+                        viewBox="0 0 24 24" 
+                        fill={isStarred ? "currentColor" : "none"} 
+                        stroke="currentColor" 
+                        strokeWidth="2"
+                      >
+                        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                      </svg>
+                    </button>
+                  )}
+                  <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-0' : 'opacity-100'}`}>
+                    <div className="pointer-events-auto">
+                      <AutoFixMarkdown>{currentCard?.prompt || ""}</AutoFixMarkdown>
+                    </div>
+                  </div>
+                  <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-100' : 'opacity-0'}`}>
+                    <div className="pointer-events-auto">
+                      <AutoFixMarkdown>{currentCard?.answer || ""}</AutoFixMarkdown>
+                    </div>
+                  </div>
+                  <div className="absolute bottom-4 left-0 right-0 text-xs text-[var(--foreground)]/60 z-10 pointer-events-none">
+                    {flashcardFlipped ? "Tap to view prompt" : "Tap to reveal answer"}
+                  </div>
+                </div>
+                <div
+                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                  style={{
+                    padding: '1.5px',
+                    background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+                    opacity: (!isShuffleActive && currentFlashcardIndex >= filteredFlashcards.length - 1) ? 0.4 : 1,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!(!isShuffleActive && currentFlashcardIndex >= filteredFlashcards.length - 1)) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!(!isShuffleActive && currentFlashcardIndex >= filteredFlashcards.length - 1)) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                    }
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      if (isShuffleActive) {
+                        const newIndex = getRandomCardIndex(filteredFlashcards, currentFlashcardIndex);
+                        setCurrentFlashcardIndex(newIndex);
+                      } else {
+                        if (currentFlashcardIndex >= filteredFlashcards.length - 1) return;
+                        setCurrentFlashcardIndex((idx) => Math.min(idx + 1, filteredFlashcards.length - 1));
+                      }
+                      setFlashcardFlipped(false);
+                    }}
+                    disabled={!isShuffleActive && currentFlashcardIndex >= filteredFlashcards.length - 1}
+                    className="flex h-10 w-10 items-center justify-center text-white bg-[var(--background)]/90 backdrop-blur-md transition-all duration-300 ease-out disabled:cursor-not-allowed"
+                    style={{
+                      borderRadius: 'calc(0.75rem - 1.5px)',
+                    }}
+                    aria-label="Next flashcard"
+                  >
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M9 6l6 6-6 6" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div className="mt-4 flex justify-center gap-3">
+                <div
+                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                  style={{
+                    padding: '1.5px',
+                    background: isShuffleActive
+                      ? 'linear-gradient(135deg, rgba(0, 229, 255, 1), rgba(255, 45, 150, 1))'
+                      : 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                    boxShadow: isShuffleActive
+                      ? '0 0 20px rgba(0, 229, 255, 0.4), 0 0 40px rgba(255, 45, 150, 0.2)'
+                      : '0 2px 8px rgba(0, 0, 0, 0.3)',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isShuffleActive) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isShuffleActive) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                    }
+                  }}
+                >
+                  <button
+                    onClick={() => setIsShuffleActive(!isShuffleActive)}
+                    className="flex h-10 items-center justify-center px-3 text-xs font-medium text-white bg-[var(--background)]/90 backdrop-blur-md transition-all duration-300 ease-out"
+                    style={{
+                      borderRadius: 'calc(0.75rem - 1.5px)',
+                    }}
+                    aria-label={isShuffleActive ? "Disable shuffle mode" : "Enable shuffle mode"}
+                  >
+                    Shuffle
+                  </button>
+                </div>
+                <div
+                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                  style={{
+                    padding: '1.5px',
+                    background: showOnlyStarred
+                      ? 'linear-gradient(135deg, rgba(251, 191, 36, 0.8), rgba(245, 158, 11, 0.8))'
+                      : 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                    boxShadow: showOnlyStarred
+                      ? '0 0 20px rgba(251, 191, 36, 0.3), 0 0 40px rgba(245, 158, 11, 0.15)'
+                      : '0 2px 8px rgba(0, 0, 0, 0.3)',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!showOnlyStarred) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!showOnlyStarred) {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                    }
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      setShowOnlyStarred(!showOnlyStarred);
+                      setCurrentFlashcardIndex(0);
+                      setFlashcardFlipped(false);
+                    }}
+                    className="flex h-10 items-center gap-1.5 px-3 text-xs font-medium text-white bg-[var(--background)]/90 backdrop-blur-md transition-all duration-300 ease-out"
+                    style={{
+                      borderRadius: 'calc(0.75rem - 1.5px)',
+                    }}
+                    aria-label={showOnlyStarred ? "Show all flashcards" : "Show only starred flashcards"}
+                  >
+                    <svg 
+                      className={`h-4 w-4 ${showOnlyStarred ? 'fill-yellow-400 text-yellow-400' : ''}`} 
+                      viewBox="0 0 24 24" 
+                      fill={showOnlyStarred ? "currentColor" : "none"} 
+                      stroke="currentColor" 
+                      strokeWidth="2"
+                    >
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                    </svg>
+                    {showOnlyStarred ? 'Starred Only' : 'Show Starred'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+            <div className="relative w-full max-w-xl rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/95 p-6 shadow-2xl">
+              <button
+                onClick={() => {
+                  setAllFlashcardsModalOpen(false);
+                  setShowOnlyStarred(false);
+                }}
+                className="absolute right-4 top-4 h-8 w-8 rounded-full border border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 flex items-center justify-center"
+                aria-label="Close flashcards"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+              <div className="text-center py-8">
+                <p className="text-[var(--foreground)] mb-4">No starred flashcards yet.</p>
+                <button
+                  onClick={() => {
+                    setShowOnlyStarred(false);
+                    setCurrentFlashcardIndex(0);
+                  }}
+                  className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
+                >
+                  Show All Flashcards
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

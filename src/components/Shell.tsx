@@ -303,7 +303,7 @@ function PomodoroTimer() {
 
       {/* Settings Panel */}
       {showSettings && (
-        <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 z-50">
+        <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 z-[100]">
           <div className="relative rounded-xl p-4
                          bg-[var(--background)]/95 backdrop-blur-md
                          shadow-[0_4px_12px_rgba(0,0,0,0.7)]

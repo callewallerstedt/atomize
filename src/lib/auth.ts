@@ -6,7 +6,7 @@ const COOKIE_NAME = "atom_auth";
 const SECRET = process.env.AUTH_SECRET || "dev-secret-change-me";
 const encoder = new TextEncoder();
 
-export type AuthUser = { id: string; username: string };
+export type AuthUser = { id: string; username: string; subscriptionLevel: string };
 
 export async function createSession(userId: string) {
   const token = crypto.randomUUID().replace(/-/g, "");
@@ -52,7 +52,11 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
     if (!token) return null;
     const session = await prisma.session.findUnique({ where: { token }, include: { user: true } });
     if (!session || session.expiresAt < new Date()) return null;
-    return { id: session.user.id, username: session.user.username };
+    return { 
+      id: session.user.id, 
+      username: session.user.username,
+      subscriptionLevel: session.user.subscriptionLevel || "Free"
+    };
   } catch {
     return null;
   }

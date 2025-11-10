@@ -15,6 +15,24 @@ export default function LoginPage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const router = useRouter();
 
+  // Disable body/html scrolling when login page is shown
+  useEffect(() => {
+    const originalStyle = {
+      overflow: document.body.style.overflow,
+      overflowX: document.body.style.overflowX,
+      overflowY: document.body.style.overflowY,
+    };
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    
+    return () => {
+      document.body.style.overflow = originalStyle.overflow;
+      document.body.style.overflowX = originalStyle.overflowX;
+      document.body.style.overflowY = originalStyle.overflowY;
+      document.documentElement.style.overflow = '';
+    };
+  }, []);
+
   // Check if already logged in
   useEffect(() => {
     fetch("/api/me", { credentials: "include" })
@@ -45,7 +63,11 @@ export default function LoginPage() {
       const res = await fetch(authMode === "login" ? "/api/auth/login" : "/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim(), password }),
+        body: JSON.stringify({ 
+          username: username.trim(), 
+          password,
+          ...(authMode === "signup" && code.trim() ? { code: code.trim() } : {}),
+        }),
         credentials: "include", // Ensure cookies are sent/received
       });
       const json = await res.json().catch(() => ({}));
@@ -181,11 +203,27 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-start overflow-y-auto overflow-x-hidden bg-[var(--background)]">
+    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-start overflow-y-auto overflow-x-hidden bg-[var(--background)] login-page-scroll desktop-scale" style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none', minHeight: '100dvh' }}>
       <style dangerouslySetInnerHTML={{__html: `
+        html, body {
+          overflow: hidden !important;
+        }
+        html::-webkit-scrollbar, body::-webkit-scrollbar {
+          display: none !important;
+        }
+        .login-page-scroll::-webkit-scrollbar {
+          display: none;
+        }
         @media (min-width: 768px) {
+          .desktop-scale {
+            transform: scale(0.8) !important;
+            transform-origin: center top !important;
+          }
           .spinner-scale-wrapper {
             transform: scale(0.9) !important;
+          }
+          .logo-wrap {
+            margin-top: -20px !important;
           }
         }
         @media (max-width: 767px) {
@@ -228,7 +266,7 @@ export default function LoginPage() {
       </div>
 
       {/* Spinning gradient ring */}
-      <div className="logo-wrap pt-8 -mb-[100px]" style={{ width: 240, aspectRatio: "1 / 0.8", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+      <div className="logo-wrap pt-8 md:pt-2 -mb-[100px]" style={{ width: 240, aspectRatio: "1 / 0.8", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
         <div style={{ transform: "scale(1.3)", transformOrigin: "center" }} className="spinner-scale-wrapper">
           <img
             src="/spinner.png"
@@ -253,7 +291,7 @@ export default function LoginPage() {
       </div>
 
       {/* Login form */}
-      <div className="w-full max-w-md px-6 pb-8 overflow-x-hidden">
+      <div className="w-full max-w-md px-6 pb-8 mb-20">
         <h2 className="text-2xl font-semibold text-[var(--foreground)] mb-2 text-center">
           {authMode === "login" ? "Sign in" : "Sign up"}
         </h2>
