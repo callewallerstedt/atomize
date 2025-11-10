@@ -94,3 +94,83 @@ export async function POST(req: Request) {
   return NextResponse.json({ ok: true, record: responseRecord });
 }
 
+export async function PATCH(req: Request) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  let payload: any;
+  try {
+    payload = await req.json();
+  } catch {
+    return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const slugInput = typeof payload?.slug === "string" ? payload.slug.trim() : "";
+  const courseNameInput = typeof payload?.courseName === "string" ? payload.courseName.trim() : "";
+  if (!slugInput || !courseNameInput) {
+    return NextResponse.json({ ok: false, error: "Missing slug or courseName" }, { status: 400 });
+  }
+
+  const existing = await prisma.examSnipeHistory.findUnique({
+    where: { userId_slug: { userId: user.id, slug: slugInput } },
+  });
+
+  if (!existing) {
+    return NextResponse.json({ ok: false, error: "Record not found" }, { status: 404 });
+  }
+
+  let updatedResults = existing.results;
+  try {
+    if (updatedResults && typeof updatedResults === "object") {
+      updatedResults = { ...updatedResults, courseName: courseNameInput };
+    }
+  } catch {
+    // ignore serialization issues, keep original
+  }
+
+  const record = await prisma.examSnipeHistory.update({
+    where: { userId_slug: { userId: user.id, slug: slugInput } },
+    data: {
+      courseName: courseNameInput,
+      results: updatedResults,
+    },
+  });
+
+  return NextResponse.json({
+    ok: true,
+    record: {
+      id: record.id,
+      courseName: record.courseName,
+      slug: record.slug,
+      createdAt: record.createdAt.toISOString(),
+      fileNames: Array.isArray(record.fileNames) ? (record.fileNames as string[]) : [],
+      results: record.results,
+    },
+  });
+}
+
+export async function DELETE(req: Request) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  const url = new URL(req.url);
+  const slug = url.searchParams.get("slug")?.trim();
+  if (!slug) {
+    return NextResponse.json({ ok: false, error: "Missing slug parameter" }, { status: 400 });
+  }
+
+  try {
+    await prisma.examSnipeHistory.delete({
+      where: { userId_slug: { userId: user.id, slug } },
+    });
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: "Record not found" }, { status: 404 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
+

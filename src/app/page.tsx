@@ -15,8 +15,8 @@ type ExamHistoryCard = {
   slug: string;
   courseName: string;
   createdAt: string;
-  fileCount: number;
-  topConcept: string | null;
+  fileNames: string[];
+  results: any;
 };
 
 function readSubjects(): Subject[] {
@@ -52,6 +52,7 @@ function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [examHistory, setExamHistory] = useState<ExamHistoryCard[]>([]);
   const [loadingExamHistory, setLoadingExamHistory] = useState(false);
+  const [examMenuOpenFor, setExamMenuOpenFor] = useState<string | null>(null);
   
   // Check authentication and sync subjects from server
   useEffect(() => {
@@ -115,13 +116,14 @@ function Home() {
     if (!menuOpenFor) return;
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element;
-      if (!target.closest('[data-menu-dropdown]') && !target.closest('[data-menu-button]')) {
-        setMenuOpenFor(null);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [menuOpenFor]);
+    if (!target.closest('[data-menu-dropdown]') && !target.closest('[data-menu-button]')) {
+      setMenuOpenFor(null);
+      setExamMenuOpenFor(null);
+    }
+  };
+  document.addEventListener('mousedown', handleClickOutside);
+  return () => document.removeEventListener('mousedown', handleClickOutside);
+}, [menuOpenFor, examMenuOpenFor]);
 
   useEffect(() => {
     if (searchParams.get("quickLesson") === "1") {
@@ -156,19 +158,16 @@ function Home() {
                   ? item.results.courseName.trim()
                   : "Exam Snipe Course";
             const createdAt = typeof item?.createdAt === "string" ? item.createdAt : new Date().toISOString();
-            const fileCount = Array.isArray(item?.fileNames) ? item.fileNames.length : 0;
-            const topConcept =
-              typeof item?.results?.concepts?.[0]?.name === "string"
-                ? item.results.concepts[0].name
-                : null;
+            const fileNames = Array.isArray(item?.fileNames) ? item.fileNames.map((name: any) => String(name)) : [];
+            const results = item?.results && typeof item.results === "object" ? item.results : {};
             const idSource = item?.id ?? slug ?? (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
             return {
               id: String(idSource),
               slug,
               courseName,
               createdAt,
-              fileCount,
-              topConcept,
+              fileNames,
+              results,
             } as ExamHistoryCard;
           });
           const filtered = mapped.filter((item) => item.slug);
@@ -442,6 +441,86 @@ function Home() {
     }
   };
 
+  const renameSnipedExam = async (slug: string, currentName: string) => {
+    const next = window.prompt("Rename exam", currentName)?.trim();
+    if (!next || next === currentName) return;
+    try {
+      const res = await fetch("/api/exam-snipe/history", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ slug, courseName: next }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `Failed to rename exam (${res.status})`);
+      setExamHistory((prev) =>
+        prev.map((item) =>
+          item.slug === slug
+            ? {
+                ...item,
+                courseName: next,
+                results:
+                  item.results && typeof item.results === "object"
+                    ? { ...item.results, courseName: next }
+                    : item.results,
+              }
+            : item
+        )
+      );
+    } catch (err: any) {
+      alert(err?.message || "Failed to rename exam");
+    } finally {
+      setExamMenuOpenFor(null);
+    }
+  };
+
+  const deleteSnipedExam = async (slug: string) => {
+    const ok = window.confirm("Delete this exam analysis?");
+    if (!ok) return;
+    try {
+      const res = await fetch(`/api/exam-snipe/history?slug=${encodeURIComponent(slug)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `Failed to delete exam (${res.status})`);
+      setExamHistory((prev) => prev.filter((item) => item.slug !== slug));
+    } catch (err: any) {
+      alert(err?.message || "Failed to delete exam");
+    } finally {
+      setExamMenuOpenFor(null);
+    }
+  };
+
+  const exportSnipedExam = (record: ExamHistoryCard) => {
+    try {
+      const payload = {
+        courseName: record.courseName,
+        slug: record.slug,
+        createdAt: record.createdAt,
+        fileNames: record.fileNames,
+        results: record.results,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const safeName =
+        record.slug ||
+        record.courseName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") ||
+        "exam-snipe";
+      a.href = url;
+      a.download = `${safeName}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Failed to export exam data");
+    } finally {
+      setExamMenuOpenFor(null);
+    }
+  };
+
   return (
     <div className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] px-6 pt-10 pb-4">
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
@@ -622,43 +701,94 @@ function Home() {
             </div>
           </div>
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {examHistory.map((record) => (
-              <div
-                key={record.id}
-                className="relative rounded-2xl bg-[var(--background)] p-5 text-[var(--foreground)] transition-all duration-200 shadow-[0_2px_8px_rgba(0,0,0,0.7)] cursor-pointer hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)]"
-                role="link"
-                tabIndex={0}
-                onClick={() => router.push(`/exam-snipe?resume=${encodeURIComponent(record.slug)}`)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    router.push(`/exam-snipe?resume=${encodeURIComponent(record.slug)}`);
-                  }
-                }}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold leading-snug truncate">{record.courseName}</div>
-                    <div className="mt-1 text-xs text-[var(--foreground)]/55">
-                      {new Date(record.createdAt).toLocaleString(undefined, { dateStyle: "medium" })}
+            {examHistory.map((record) => {
+              const topConcept =
+                record.results?.concepts?.[0]?.name && typeof record.results.concepts[0].name === "string"
+                  ? String(record.results.concepts[0].name)
+                  : null;
+              const fileCount = record.fileNames.length;
+              return (
+                <div
+                  key={record.id}
+                  className="relative rounded-2xl bg-[var(--background)] p-5 text-[var(--foreground)] transition-all duration-200 shadow-[0_2px_8px_rgba(0,0,0,0.7)] cursor-pointer hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)]"
+                  role="link"
+                  tabIndex={0}
+                  onClick={() => router.push(`/exam-snipe?resume=${encodeURIComponent(record.slug)}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      router.push(`/exam-snipe?resume=${encodeURIComponent(record.slug)}`);
+                    }
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold leading-snug truncate">{record.courseName}</div>
+                      <div className="mt-1 text-xs text-[var(--foreground)]/55">
+                        {new Date(record.createdAt).toLocaleString(undefined, { dateStyle: "medium" })}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-[10px] uppercase tracking-wide text-[var(--foreground)]/45">
+                        Exam Snipe
+                      </div>
+                      <button
+                        data-menu-button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExamMenuOpenFor((cur) => (cur === record.slug ? null : record.slug));
+                        }}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[var(--foreground)]/60 hover:text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors !shadow-none"
+                        aria-label="More actions"
+                        title="More actions"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <circle cx="5" cy="12" r="2" fill="currentColor" />
+                          <circle cx="12" cy="12" r="2" fill="currentColor" />
+                          <circle cx="19" cy="12" r="2" fill="currentColor" />
+                        </svg>
+                      </button>
                     </div>
                   </div>
-                  <div className="text-[10px] uppercase tracking-wide text-[var(--foreground)]/45">
-                    Exam Snipe
+                  <div className="mt-3 text-xs text-[var(--foreground)]/60">
+                    {fileCount} exam{fileCount === 1 ? "" : "s"}
+                    {topConcept ? ` • Top concept: ${topConcept}` : ""}
                   </div>
+                  <div className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-[var(--accent-cyan)]/80">
+                    <span>Open analysis</span>
+                    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M5 12h14M13 6l6 6-6 6" />
+                    </svg>
+                  </div>
+                  {examMenuOpenFor === record.slug && (
+                    <div
+                      data-menu-dropdown
+                      className="absolute right-4 top-14 z-50 w-40 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-lg p-2 space-y-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={() => renameSnipedExam(record.slug, record.courseName)}
+                        className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        onClick={() => deleteSnipedExam(record.slug)}
+                        className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[#FFC0DA] hover:bg-[#FF2D96]/20 transition-colors"
+                      >
+                        Delete
+                      </button>
+                      <button
+                        onClick={() => exportSnipedExam(record)}
+                        className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
+                      >
+                        Export JSON
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <div className="mt-3 text-xs text-[var(--foreground)]/60">
-                  {record.fileCount} exam{record.fileCount === 1 ? "" : "s"}
-                  {record.topConcept ? ` • Top concept: ${record.topConcept}` : ""}
-                </div>
-                <div className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-[var(--accent-cyan)]/80">
-                  <span>Open analysis</span>
-                  <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M5 12h14M13 6l6 6-6 6" />
-                  </svg>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
