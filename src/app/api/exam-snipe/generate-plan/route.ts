@@ -33,15 +33,11 @@ export async function POST(req: NextRequest) {
       patternAnalysis,
       conceptName,
       conceptStage,
-      subConceptName,
-      subConceptLevel,
-      subConceptRole,
       description,
-      studyApproach,
-      components,
-      skills,
+      focusAreas,
+      keySkills,
+      practiceApproach,
       examConnections,
-      pitfalls,
       detectedLanguage,
     } = body || {};
     const requestedCount =
@@ -49,7 +45,7 @@ export async function POST(req: NextRequest) {
         ? Math.min(Math.max(Math.floor(body.count), 5), 12)
         : 6;
 
-    if (!historySlug || !subConceptName || !conceptName) {
+    if (!historySlug || !conceptName) {
       return NextResponse.json({ ok: false, error: "Missing required fields" }, { status: 400 });
     }
 
@@ -68,23 +64,20 @@ export async function POST(req: NextRequest) {
       `Exams analyzed: ${Number(totalExams) || 0}`,
       gradeInfo ? `Grade requirements: ${gradeInfo}` : "",
       patternAnalysis ? `Pattern analysis: ${patternAnalysis}` : "",
-      description ? `Key focus: ${description}` : "",
+      description ? `Concept description: ${description}` : "",
       conceptStage ? `Concept stage: ${conceptStage}` : "",
-      subConceptLevel ? `Subtopic level: ${subConceptLevel}` : "",
-      subConceptRole ? `Subtopic role: ${subConceptRole}` : "",
-      studyApproach ? `Recommended study approach: ${studyApproach}` : "",
-      stringifyList(components) ? `Technical components: ${stringifyList(components)}` : "",
-      stringifyList(skills) ? `Target skills: ${stringifyList(skills)}` : "",
+      stringifyList(focusAreas) ? `Focus areas: ${stringifyList(focusAreas)}` : "",
+      stringifyList(keySkills) ? `Key skills: ${stringifyList(keySkills)}` : "",
+      practiceApproach ? `Recommended practice approach: ${practiceApproach}` : "",
       stringifyList(examConnections) ? `Exam references: ${stringifyList(examConnections)}` : "",
-      stringifyList(pitfalls) ? `Common pitfalls: ${stringifyList(pitfalls)}` : "",
     ]
       .filter(Boolean)
       .join("\n");
 
     const languageName = detectedLanguage?.name || "English";
     const prompt = `
-You are an elite exam coach. Create a ${requestedCount}-lesson study progression that teaches the sub-concept "${subConceptName}" inside the broader concept "${conceptName}".
-Lessons must start with foundational concept lessons and progress to applications and integration, respecting the "${subConceptRole || "core"}" role within the "${conceptStage || "core"}" concept stage and the ${subConceptLevel || "fundamental"} level.
+You are an elite exam coach. Create a ${requestedCount}-lesson study progression that fully teaches the concept "${conceptName}".
+Lessons must start with foundational work and progress toward integrated mastery, respecting the "${conceptStage || "core"}" stage described in the exam analysis.
 
 IMPORTANT: Generate ALL content (lesson titles, summaries, objectives) in ${languageName}. Only use ${languageName} for the AI-generated material.
 
@@ -97,18 +90,23 @@ Style constraints for lesson TITLES (critical):
 - No ending punctuation.
 
 Sequencing policy (teach concepts first):
-1) Foundations (first 2–3 lessons): one lesson per core primitive/concept from the provided components. Prioritize the most basic building blocks first.
-2) Core Operations & Invariants: correctness properties, typical APIs, constraints, and guarantees (map to skills).
+1) Foundations (first 2–3 lessons): anchor the essential theory and core focus areas.
+2) Core Operations & Invariants: correctness properties, typical APIs, constraints, and guarantees (map to the key skills).
 3) Applications & Patterns: common usage patterns, scenarios, and workflows (map to examConnections).
 4) Integration & Mastery: multi-step problems and combined reasoning across concepts; exam-style synthesis.
 
 Coverage policy:
-- The early lessons MUST map one-to-one with distinct fundamentals from "Technical components" (when available). Do not merge multiple fundamentals into one early lesson.
-- Later lessons may combine concepts for applied practice and exam alignment.
+- Early lessons must map one-to-one with the most fundamental focus areas.
+- Later lessons may combine focus areas for applied practice and exam alignment.
 - Ensure each lesson is distinct with non-overlapping objectives.
 
 Return JSON in this exact format:
 {
+  "summary": "2-3 sentences describing how the plan progresses and what outcomes it delivers",
+  "focusAreas": ["Focus Area A", "Focus Area B"],
+  "keySkills": ["Analyze ...", "Construct ..."],
+  "practiceApproach": "1-2 sentences describing practice expectations",
+  "examConnections": ["Exam 2022 Q3 - ...", "Exam 2021 Q1 - ..."],
   "plans": [
     {
       "title": "Concise concept title (2–5 words)",
@@ -122,9 +120,8 @@ Return JSON in this exact format:
 Rules:
 - Objectives must begin with verbs like "Explain", "Define", "Prove", "Apply", "Analyze".
 - Sequence lessons strictly from fundamentals ➝ operations/invariants ➝ applications/patterns ➝ integration/mastery.
-- Explicitly incorporate the provided components, skills, and exam connections across the plan.
-- Address the listed pitfalls by baking preventative strategies into summaries/objectives.
-- Reference the recommended study approach when suggesting activities or practice in the summaries.
+- Explicitly incorporate the provided focus areas, key skills, and exam connections across the plan.
+- Reference the recommended practice approach when suggesting activities or practice in the summaries.
 `;
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
@@ -153,25 +150,37 @@ Rules:
       }
     }
 
-    const plansRaw: any[] = Array.isArray(json?.plans) ? json.plans : [];
-    if (plansRaw.length === 0) {
+    const lessonsRaw: any[] = Array.isArray(json?.plans) ? json.plans : [];
+    if (lessonsRaw.length === 0) {
       return NextResponse.json({ ok: false, error: "Failed to generate plan" }, { status: 500 });
     }
 
-    const plans: PlanItem[] = plansRaw.map((plan, index) => {
+    const lessons: PlanItem[] = lessonsRaw.map((plan, index) => {
       const title = String(plan?.title || `Lesson ${index + 1}`);
       const summary = String(plan?.summary || "");
       const objectives = Array.isArray(plan?.objectives)
         ? plan.objectives.map((o: any) => String(o || "")).filter(Boolean)
         : [];
       return {
-        id: `${subConceptName.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}-${index}`,
+        id: `${conceptName.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}-${index}`,
         title,
         summary,
         objectives,
         estimatedTime: plan?.estimatedTime ? String(plan.estimatedTime) : undefined,
       };
     });
+
+    const summaryText = typeof json?.summary === "string" ? json.summary : "";
+    const focusAreasList = Array.isArray(json?.focusAreas)
+      ? json.focusAreas.map((item: any) => String(item || "")).filter(Boolean)
+      : [];
+    const keySkillsList = Array.isArray(json?.keySkills)
+      ? json.keySkills.map((item: any) => String(item || "")).filter(Boolean)
+      : [];
+    const practiceApproachText = typeof json?.practiceApproach === "string" ? json.practiceApproach : "";
+    const examConnectionsList = Array.isArray(json?.examConnections)
+      ? json.examConnections.map((item: any) => String(item || "")).filter(Boolean)
+      : [];
 
     const history = await prisma.examSnipeHistory.findUnique({
       where: { userId_slug: { userId: user.id, slug: historySlug } },
@@ -182,8 +191,13 @@ Rules:
 
     const results = (history.results as any) || {};
     if (!results.lessonPlans) results.lessonPlans = {};
-    results.lessonPlans[subConceptName] = {
-      plans,
+    results.lessonPlans[conceptName] = {
+      summary: summaryText,
+      focusAreas: focusAreasList,
+      keySkills: keySkillsList,
+      practiceApproach: practiceApproachText,
+      examConnections: examConnectionsList,
+      lessons,
     };
 
     const updated = await prisma.examSnipeHistory.update({

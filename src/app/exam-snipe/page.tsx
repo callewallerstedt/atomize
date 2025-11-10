@@ -13,6 +13,15 @@ type LessonPlan = {
   estimatedTime?: string;
 };
 
+type ConceptLessonPlan = {
+  summary: string;
+  focusAreas: string[];
+  keySkills: string[];
+  practiceApproach: string;
+  examConnections: string[];
+  lessons: LessonPlan[];
+};
+
 type GeneratedLesson = {
   planId: string;
   title: string;
@@ -20,27 +29,13 @@ type GeneratedLesson = {
   createdAt: string;
 };
 
-type SubtopicLevel = "fundamental" | "intermediate" | "advanced";
-type SubtopicRole = "introductory" | "core" | "applied" | "mastery";
 type ConceptStage = "foundation" | "core" | "advanced" | "mastery";
-
-type ExamSnipeSubtopic = {
-  name: string;
-  level: SubtopicLevel;
-  role: SubtopicRole;
-  description: string;
-  components: string[];
-  skills: string[];
-  studyApproach: string;
-  examConnections: string[];
-  pitfalls: string[];
-};
 
 type ExamSnipeConcept = {
   name: string;
   learningStage: ConceptStage;
-  overview: string;
-  subtopics: ExamSnipeSubtopic[];
+  description: string;
+  lessonPlan: ConceptLessonPlan;
 };
 
 type ExamSnipeResult = {
@@ -49,7 +44,7 @@ type ExamSnipeResult = {
   gradeInfo: string | null;
   patternAnalysis: string | null;
   concepts: ExamSnipeConcept[];
-  lessonPlans?: Record<string, { plans: LessonPlan[] }>;
+  lessonPlans?: Record<string, ConceptLessonPlan>;
   generatedLessons?: Record<string, Record<string, GeneratedLesson>>;
   detectedLanguage?: { code: string; name: string };
 };
@@ -117,106 +112,78 @@ function coerceConceptStage(value: any, index: number): ConceptStage {
   }
 }
 
-function coerceSubtopicLevel(value: any): SubtopicLevel {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  switch (normalized) {
-    case "fundamental":
-    case "intermediate":
-    case "advanced":
-      return normalized as SubtopicLevel;
-    default:
-      if (normalized === "beginner") return "fundamental";
-      return "intermediate";
-  }
-}
-
-function coerceSubtopicRole(value: any, fallback: SubtopicRole = "core"): SubtopicRole {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  switch (normalized) {
-    case "introductory":
-    case "core":
-    case "applied":
-    case "mastery":
-      return normalized as SubtopicRole;
-    default:
-      if (normalized === "high") return "core";
-      if (normalized === "medium") return "applied";
-      if (normalized === "low") return "introductory";
-      return fallback;
-  }
-}
-
-function ensureIntroductory(subtopics: ExamSnipeSubtopic[]): ExamSnipeSubtopic[] {
-  if (subtopics.some((sub) => sub.role === "introductory" && sub.level === "fundamental")) {
-    return subtopics;
-  }
-  if (subtopics.length === 0) return subtopics;
-  const [first, ...rest] = subtopics;
-  return [
-    {
-      ...first,
-      role: "introductory",
-      level: "fundamental",
-    },
-    ...rest,
-  ];
-}
-
-function normalizeSubtopic(raw: any, index: number, conceptIndex: number): ExamSnipeSubtopic {
-  const name =
-    typeof raw?.name === "string" && raw.name.trim()
-      ? raw.name.trim()
-      : typeof raw?.topic === "string" && raw.topic.trim()
-        ? raw.topic.trim()
-        : `Subtopic ${conceptIndex + 1}.${index + 1}`;
-
-  const level = coerceSubtopicLevel(raw?.level ?? raw?.difficulty);
-  const fallbackRole: SubtopicRole = conceptIndex === 0 && index === 0 ? "introductory" : "core";
-  const role = coerceSubtopicRole(raw?.role ?? raw?.priority, fallbackRole);
-
-  const descriptionSource =
-    typeof raw?.description === "string" && raw.description.trim()
-      ? raw.description.trim()
-      : typeof raw?.summary === "string" && raw.summary.trim()
-        ? raw.summary.trim()
-        : typeof raw?.topic === "string"
-          ? `Master the exam tasks on ${raw.topic.trim()}.`
-          : "Understand and apply the required techniques for this area.";
-
-  const components = normalizeStringArray(raw?.components);
-
-  const skillsSource = raw?.skills ?? raw?.learning_objectives;
-  const skills = normalizeStringArray(skillsSource);
-
-  const studyApproach =
-    typeof raw?.studyApproach === "string" && raw.studyApproach.trim()
-      ? raw.studyApproach.trim()
-      : typeof raw?.example === "string" && raw.example.trim()
-        ? `Practice by working through examples such as: ${raw.example.trim()}`
-        : "Review lecture notes, worked solutions, and create your own practice problems to build fluency.";
-
-  const examConnectionsSource =
-    raw?.examConnections ??
-    raw?.exam ??
-    (Array.isArray(raw?.details) ? raw.details : undefined);
-  const examConnections = normalizeStringArray(examConnectionsSource, { allowSentence: true });
-
-  const pitfalls = normalizeStringArray(raw?.pitfalls ?? raw?.common_pitfalls);
+function normalizeLesson(plan: any, index: number, conceptName: string): LessonPlan {
+  const title =
+    typeof plan?.title === "string" && plan.title.trim()
+      ? plan.title.trim()
+      : `Lesson ${index + 1}`;
+  const summary =
+    typeof plan?.summary === "string" && plan.summary.trim()
+      ? plan.summary.trim()
+      : `Learn the essential material for ${conceptName}.`;
+  const objectivesSource = Array.isArray(plan?.objectives) ? plan.objectives : [];
+  const objectives = objectivesSource
+    .map((item: any) => (typeof item === "string" ? item.trim() : item != null ? String(item) : ""))
+    .filter((item: string) => item.length > 0);
+  const estimatedTime =
+    typeof plan?.estimatedTime === "string" && plan.estimatedTime.trim()
+      ? plan.estimatedTime.trim()
+      : undefined;
 
   return {
-    name,
-    level,
-    role,
-    description: descriptionSource,
-    components: components.length > 0 ? components : ["Core techniques", "Key formulas", "Problem templates"],
-    skills: skills.length > 0 ? skills : ["Explain core ideas", "Solve representative problems", "Diagnose mistakes"],
-    studyApproach,
-    examConnections: examConnections.length > 0 ? examConnections : ["Scope derived from historic exams"],
-    pitfalls: pitfalls.length > 0 ? pitfalls : ["Skipping foundational derivations", "Memorizing without practice"],
+    id:
+      typeof plan?.id === "string" && plan.id.trim()
+        ? plan.id.trim()
+        : `${conceptName.replace(/\s+/g, "-").toLowerCase()}-${index}`,
+    title,
+    summary,
+    objectives,
+    estimatedTime,
   };
 }
 
-function normalizeConcept(raw: any, index: number): ExamSnipeConcept {
+function normalizeConceptLessonPlan(raw: any, conceptName: string): ConceptLessonPlan {
+  const summary =
+    typeof raw?.summary === "string" && raw.summary.trim()
+      ? raw.summary.trim()
+      : `Master the full scope of ${conceptName} as it appears on historic exams.`;
+  const focusAreas = normalizeStringArray(raw?.focusAreas ?? raw?.focus ?? raw?.components);
+  const keySkills = normalizeStringArray(raw?.keySkills ?? raw?.skills);
+  const practiceApproach =
+    typeof raw?.practiceApproach === "string" && raw.practiceApproach.trim()
+      ? raw.practiceApproach.trim()
+      : typeof raw?.studyApproach === "string" && raw.studyApproach.trim()
+        ? raw.studyApproach.trim()
+        : "Blend worked examples with timed exam-style drills to build fluency.";
+  const examConnections = normalizeStringArray(raw?.examConnections ?? raw?.exam ?? raw?.references, {
+    allowSentence: true,
+  });
+  const lessonsRaw = Array.isArray(raw?.lessons)
+    ? raw.lessons
+    : Array.isArray(raw?.plans)
+      ? raw.plans
+      : [];
+  const lessons = lessonsRaw.length
+    ? lessonsRaw.map((lesson: any, idx: number) => normalizeLesson(lesson, idx, conceptName))
+    : [normalizeLesson({}, 0, conceptName)];
+
+  return {
+    summary,
+    focusAreas: focusAreas.length ? focusAreas : ["Foundational theory", "Core methods", "Exam applications"],
+    keySkills: keySkills.length ? keySkills : ["Explain concepts", "Solve exam-style problems", "Check solutions"],
+    practiceApproach,
+    examConnections: examConnections.length
+      ? examConnections
+      : ["Synthesized from recurring exam questions"],
+    lessons,
+  };
+}
+
+function normalizeConcept(
+  raw: any,
+  index: number,
+  storedPlans?: Record<string, ConceptLessonPlan>
+): ExamSnipeConcept {
   const name =
     typeof raw?.name === "string" && raw.name.trim()
       ? raw.name.trim()
@@ -224,34 +191,52 @@ function normalizeConcept(raw: any, index: number): ExamSnipeConcept {
 
   const learningStage = coerceConceptStage(raw?.learningStage ?? raw?.stage, index);
 
-  const overviewSource =
-    typeof raw?.overview === "string" && raw.overview.trim()
-      ? raw.overview.trim()
-      : typeof raw?.summary === "string" && raw.summary.trim()
-        ? raw.summary.trim()
-        : "Break down the clustered exam questions and extract the repeated knowledge themes.";
+  const descriptionSource =
+    typeof raw?.description === "string" && raw.description.trim()
+      ? raw.description.trim()
+      : typeof raw?.overview === "string" && raw.overview.trim()
+        ? raw.overview.trim()
+        : typeof raw?.summary === "string" && raw.summary.trim()
+          ? raw.summary.trim()
+          : "Break down the clustered exam questions and extract the repeated knowledge themes.";
 
-  const rawSubtopics = Array.isArray(raw?.subtopics)
-    ? raw.subtopics
-    : Array.isArray(raw?.details)
-      ? raw.details
-      : [];
+  const rawLessonPlan = raw?.lessonPlan ?? raw?.lesson_plan ?? {
+    lessons: Array.isArray(raw?.lessons) ? raw.lessons : undefined,
+    summary: raw?.planSummary,
+    focusAreas: raw?.focusAreas,
+    keySkills: raw?.keySkills,
+    practiceApproach: raw?.practiceApproach,
+    examConnections: raw?.examConnections,
+  };
 
-  const subtopics = ensureIntroductory(
-    rawSubtopics.map((subtopic: any, subIndex: number) => normalizeSubtopic(subtopic, subIndex, index))
-  );
+  const normalizedPlan = normalizeConceptLessonPlan(rawLessonPlan, name);
+  const storedOverride = storedPlans?.[name];
+  const lessonPlan = storedOverride
+    ? {
+        ...normalizedPlan,
+        ...storedOverride,
+        lessons: storedOverride.lessons?.length ? storedOverride.lessons : normalizedPlan.lessons,
+        focusAreas: storedOverride.focusAreas?.length ? storedOverride.focusAreas : normalizedPlan.focusAreas,
+        keySkills: storedOverride.keySkills?.length ? storedOverride.keySkills : normalizedPlan.keySkills,
+        examConnections: storedOverride.examConnections?.length
+          ? storedOverride.examConnections
+          : normalizedPlan.examConnections,
+        practiceApproach: storedOverride.practiceApproach || normalizedPlan.practiceApproach,
+        summary: storedOverride.summary || normalizedPlan.summary,
+      }
+    : normalizedPlan;
 
   return {
     name,
     learningStage,
-    overview: overviewSource,
-    subtopics: subtopics.length > 0 ? subtopics : ensureIntroductory([normalizeSubtopic({}, 0, index)]),
+    description: descriptionSource,
+    lessonPlan,
   };
 }
 
-function normalizeConcepts(raw: any): ExamSnipeConcept[] {
+function normalizeConcepts(raw: any, storedPlans?: Record<string, ConceptLessonPlan>): ExamSnipeConcept[] {
   const array = Array.isArray(raw) ? raw : [];
-  return array.map((concept, index) => normalizeConcept(concept, index));
+  return array.map((concept, index) => normalizeConcept(concept, index, storedPlans));
 }
 
 function deriveCourseName(aiName: string | null, concepts: ExamSnipeConcept[], fileNames: string[]): string {
@@ -270,23 +255,13 @@ function deriveCourseName(aiName: string | null, concepts: ExamSnipeConcept[], f
   return "Exam Snipe Course";
 }
 
-function normalizeLessonPlans(raw: any): Record<string, { plans: LessonPlan[] }> | undefined {
+function normalizeLessonPlans(raw: any): Record<string, ConceptLessonPlan> | undefined {
   if (!raw || typeof raw !== "object") return undefined;
-  const out: Record<string, { plans: LessonPlan[] }> = {};
+  const out: Record<string, ConceptLessonPlan> = {};
   for (const key of Object.keys(raw)) {
     const source = raw[key];
-    const plansArray = Array.isArray(source?.plans) ? source.plans : [];
-    const plans: LessonPlan[] = plansArray.map((plan: any, idx: number) => {
-      const title = String(plan?.title || `Lesson ${idx + 1}`);
-      const summary = String(plan?.summary || "");
-      const objectives = Array.isArray(plan?.objectives)
-        ? plan.objectives.map((o: any) => String(o || "")).filter(Boolean)
-        : [];
-      const estimatedTime = plan?.estimatedTime ? String(plan.estimatedTime) : undefined;
-      const id = String(plan?.id || `${key.replace(/\s+/g, "-").toLowerCase()}-${idx}`);
-      return { id, title, summary, objectives, estimatedTime };
-    });
-    out[key] = { plans };
+    const plan = normalizeConceptLessonPlan(source, key);
+    out[key] = plan;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -321,7 +296,8 @@ function normalizeHistoryRecord(record: any): ExamSnipeRecord {
         ? rawResults.courseName
         : ""
   ) || "Exam Snipe Course";
-  const concepts = normalizeConcepts(rawResults?.concepts);
+  const lessonPlans = normalizeLessonPlans(rawResults?.lessonPlans);
+  const concepts = normalizeConcepts(rawResults?.concepts, lessonPlans);
   const totalExams = Number(rawResults?.totalExams ?? rawResults?.total_exams ?? record?.totalExams ?? concepts.length) || 0;
   const gradeInfo =
     typeof rawResults?.gradeInfo === "string"
@@ -335,7 +311,6 @@ function normalizeHistoryRecord(record: any): ExamSnipeRecord {
       : typeof rawResults?.pattern_analysis === "string"
         ? rawResults.pattern_analysis
         : null;
-  const lessonPlans = normalizeLessonPlans(rawResults?.lessonPlans);
   const generatedLessons = normalizeGeneratedLessons(rawResults?.generatedLessons);
   const detectedLanguage = rawResults?.detectedLanguage && typeof rawResults.detectedLanguage === "object"
     ? {
@@ -375,7 +350,7 @@ function ExamSnipeInner() {
   const [examAnalyzing, setExamAnalyzing] = useState(false);
   const [examResults, setExamResults] = useState<ExamSnipeResult | null>(null);
   const [expandedConcept, setExpandedConcept] = useState<number | null>(null);
-  const [selectedSubConcept, setSelectedSubConcept] = useState<{conceptIndex: number, subConceptIndex: number} | null>(null);
+  const [selectedConceptIndex, setSelectedConceptIndex] = useState<number | null>(null);
   const [generatingPlan, setGeneratingPlan] = useState(false);
   const [lessonGenerating, setLessonGenerating] = useState<Record<string, boolean>>({});
   const [progress, setProgress] = useState(0);
@@ -391,21 +366,18 @@ function ExamSnipeInner() {
   const streamContainerRef = useRef<HTMLDivElement>(null);
 
   const selectedConcept =
-    examResults && selectedSubConcept
-      ? examResults.concepts[selectedSubConcept.conceptIndex] ?? null
+    examResults != null && selectedConceptIndex != null
+      ? examResults.concepts[selectedConceptIndex] ?? null
       : null;
 
-  const selectedSubtopic =
-    selectedConcept && selectedSubConcept
-      ? selectedConcept.subtopics[selectedSubConcept.subConceptIndex] ?? null
-      : null;
+  const selectedPlanData = selectedConcept
+    ? activeHistoryMeta?.results?.lessonPlans?.[selectedConcept.name] || selectedConcept.lessonPlan
+    : null;
 
-  const selectedPlans = selectedSubtopic
-    ? activeHistoryMeta?.results?.lessonPlans?.[selectedSubtopic.name]?.plans ?? []
-    : [];
+  const selectedPlans = selectedPlanData?.lessons ?? [];
 
-  const selectedGeneratedRaw = selectedSubtopic
-    ? activeHistoryMeta?.results?.generatedLessons?.[selectedSubtopic.name]
+  const selectedGeneratedRaw = selectedConcept
+    ? activeHistoryMeta?.results?.generatedLessons?.[selectedConcept.name]
     : undefined;
 
   const selectedGeneratedMap: Record<string, GeneratedLesson> =
@@ -428,17 +400,17 @@ function ExamSnipeInner() {
 
   useEffect(() => {
     setLessonGenerating({});
-  }, [selectedSubConcept?.conceptIndex, selectedSubConcept?.subConceptIndex]);
+  }, [selectedConceptIndex]);
 
   useEffect(() => {
-    if (selectedSubConcept) {
+    if (selectedConceptIndex != null) {
       const previous = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       return () => {
         document.body.style.overflow = previous;
       };
     }
-  }, [selectedSubConcept]);
+  }, [selectedConceptIndex]);
 
   useEffect(() => {
     if (!isClient) return;
@@ -463,7 +435,7 @@ function ExamSnipeInner() {
     setExamResults(record.results);
     setActiveHistoryMeta(record);
     setExpandedConcept(null);
-    setSelectedSubConcept(null);
+    setSelectedConceptIndex(null);
     setStreamingText("");
     setExamFiles([]);
     setCurrentFileNames(record.fileNames);
@@ -630,9 +602,9 @@ function ExamSnipeInner() {
                     streamProgress = 50; // Found pattern analysis
                   } else if (content.includes('learningstage') || content.includes('concept stage') || content.includes('progression')) {
                     streamProgress = 65; // Identifying staged concepts
-                  } else if (content.includes('subtopic') || content.includes('studyapproach') || content.includes('components')) {
-                    streamProgress = 80; // Drafting subtopic breakdowns
-                  } else if (content.includes('skills') || content.includes('pitfalls') || content.includes('examconnections')) {
+                  } else if (content.includes('lessonplan') || content.includes('lesson plan') || content.includes('focusareas')) {
+                    streamProgress = 80; // Drafting lesson plans
+                  } else if (content.includes('keyskills') || content.includes('practiceapproach') || content.includes('examconnections')) {
                     streamProgress = 90; // Finalizing detailed guidance
                   } else {
                     // Incremental progress based on chunk count
@@ -645,7 +617,8 @@ function ExamSnipeInner() {
                   console.log('Analysis complete! Data keys:', Object.keys(parsed.data || {}));
                   console.log('Concepts found:', parsed.data?.concepts?.length || 0);
                   const rawData = parsed.data ?? {};
-                  const concepts = normalizeConcepts(rawData?.concepts);
+                  const lessonPlans = normalizeLessonPlans(rawData?.lessonPlans);
+                  const concepts = normalizeConcepts(rawData?.concepts, lessonPlans);
                   const aiCourseName = typeof rawData?.courseName === 'string' ? rawData.courseName : null;
                   const courseName = deriveCourseName(aiCourseName, concepts, fileNames);
                   const timestamp = Date.now();
@@ -662,7 +635,6 @@ function ExamSnipeInner() {
                       : typeof rawData?.pattern_analysis === 'string'
                         ? rawData.pattern_analysis
                         : null;
-                  const lessonPlans = normalizeLessonPlans(rawData?.lessonPlans);
                   const generatedLessons = normalizeGeneratedLessons(rawData?.generatedLessons);
                   const detectedLanguage = rawData?.detectedLanguage && typeof rawData.detectedLanguage === "object"
                     ? {
@@ -711,6 +683,10 @@ function ExamSnipeInner() {
                             ? savedResults.courseName
                             : courseName
                       ) || courseName;
+                      const mergedLessonPlans = normalizeLessonPlans(savedResults?.lessonPlans ?? result.lessonPlans);
+                      const mergedGeneratedLessons = normalizeGeneratedLessons(
+                        savedResults?.generatedLessons ?? result.generatedLessons
+                      );
                       record = {
                         id: String(saved?.id ?? saved?.slug ?? slug),
                         courseName: normalizedCourseName,
@@ -733,7 +709,9 @@ function ExamSnipeInner() {
                               : typeof savedResults?.pattern_analysis === 'string'
                                 ? savedResults.pattern_analysis
                                 : result.patternAnalysis,
-                          concepts: normalizeConcepts(savedResults?.concepts ?? result.concepts),
+                          lessonPlans: mergedLessonPlans,
+                          generatedLessons: mergedGeneratedLessons,
+                          concepts: normalizeConcepts(savedResults?.concepts ?? result.concepts, mergedLessonPlans),
                           detectedLanguage: savedResults?.detectedLanguage || result.detectedLanguage,
                         },
                       };
@@ -747,7 +725,7 @@ function ExamSnipeInner() {
                   setActiveHistoryMeta(record);
                   setCurrentFileNames(record.fileNames);
                   setExpandedConcept(null);
-                  setSelectedSubConcept(null);
+                  setSelectedConceptIndex(null);
                   setExamFiles([]);
                   setHistory((prev) => {
                     const filtered = prev.filter((item) => item.slug !== record.slug);
@@ -868,7 +846,7 @@ function ExamSnipeInner() {
                                 setExamResults(record.results);
                                 setActiveHistoryMeta(record);
                                 setExpandedConcept(null);
-                                setSelectedSubConcept(null);
+                                setSelectedConceptIndex(null);
                                 setStreamingText("");
                                 setExamFiles([]);
                                 setCurrentFileNames(record.fileNames);
@@ -1032,11 +1010,11 @@ function ExamSnipeInner() {
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-[var(--foreground)] text-sm">{concept.name}</div>
                       <div className="text-xs text-[var(--foreground)]/60 mt-1">
-                        Stage: {formatLabel(concept.learningStage)} • {concept.subtopics.length} subtopic{concept.subtopics.length === 1 ? "" : "s"}
+                        Stage: {formatLabel(concept.learningStage)} • {concept.lessonPlan?.lessons?.length || 0} lesson{(concept.lessonPlan?.lessons?.length || 0) === 1 ? "" : "s"}
                       </div>
-                      {concept.overview && (
+                      {concept.description && (
                         <div className="text-xs text-[var(--foreground)]/55 mt-2 leading-relaxed line-clamp-2">
-                          {concept.overview}
+                          {concept.description}
                         </div>
                       )}
                     </div>
@@ -1047,64 +1025,65 @@ function ExamSnipeInner() {
                     </div>
                   </div>
                   
-                  {expandedConcept === i && concept.subtopics && (
-                    <div className="border-t border-[var(--foreground)]/10 bg-[var(--background)]/60 p-4">
-                      <div className="mb-4">
-                        <div className="text-xs uppercase tracking-wide text-[var(--foreground)]/40 mb-1">Concept Overview</div>
-                        <div className="text-sm text-[var(--foreground)]/80 leading-relaxed">{concept.overview}</div>
-                      </div>
-                      <div className="text-xs font-semibold text-[var(--foreground)]/70 mb-3">Learning Progression</div>
-                      <div className="grid gap-3">
-                        {concept.subtopics.map((subtopic: any, di: number) => (
-                          <div
-                            key={di}
-                            className="rounded-xl p-3 border border-[var(--foreground)]/12 bg-[var(--background)]/70 hover:bg-[var(--background)]/80 cursor-pointer transition-colors shadow-[0_1px_4px_rgba(0,0,0,0.25)]"
-                            onClick={() => setSelectedSubConcept({ conceptIndex: i, subConceptIndex: di })}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex-1 min-w-0">
-                                <div className="font-medium text-[var(--foreground)] text-sm mb-1">{subtopic.name}</div>
-                                <div className="text-xs text-[var(--foreground)]/80 leading-relaxed mb-2">{subtopic.description}</div>
-                                <div className="text-xs text-[var(--foreground)]/60 italic">
-                                  Study Approach: {subtopic.studyApproach}
-                                </div>
-                              </div>
-                              <div className="flex flex-col items-end gap-1">
-                                <span
-                                  className="inline-flex items-center rounded-full text-[10px] font-medium px-2 py-0.5"
-                                  style={{
-                                    padding: '1.25px',
-                                    background: 'linear-gradient(135deg, rgba(0,229,255,0.6), rgba(255,45,150,0.6))',
-                                  }}
-                                >
-                                  <span
-                                    className="rounded-full px-2 py-0.5 bg-[var(--background)]/90 text-[var(--foreground)]/80"
-                                    style={{ borderRadius: 'calc(9999px - 1.25px)' }}
-                                  >
-                                    {formatLabel(subtopic.level)}
-                                  </span>
-                                </span>
-                                <span
-                                  className="inline-flex items-center rounded-full text-[10px] font-medium px-2 py-0.5"
-                                  style={{
-                                    padding: '1.25px',
-                                    background: 'linear-gradient(135deg, rgba(0,229,255,0.6), rgba(255,45,150,0.6))',
-                                  }}
-                                >
-                                  <span
-                                    className="rounded-full px-2 py-0.5 bg-[var(--background)]/90 text-[var(--foreground)]/80"
-                                    style={{ borderRadius: 'calc(9999px - 1.25px)' }}
-                                  >
-                                    {formatLabel(subtopic.role)}
-                                  </span>
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+
+{expandedConcept === i && (
+  <div className="border-t border-[var(--foreground)]/10 bg-[var(--background)]/60 p-4">
+    <div className="mb-4">
+      <div className="text-xs uppercase tracking-wide text-[var(--foreground)]/40 mb-1">Concept Overview</div>
+      <div className="text-sm text-[var(--foreground)]/80 leading-relaxed">{concept.description}</div>
+    </div>
+    <div className="mb-4">
+      <div className="text-xs uppercase tracking-wide text-[var(--foreground)]/40 mb-1">Lesson Strategy</div>
+      <div className="text-sm text-[var(--foreground)]/80 leading-relaxed">
+        {concept.lessonPlan?.summary}
+      </div>
+    </div>
+    <div className="grid gap-3">
+      <div className="rounded-xl bg-[var(--background)]/70 p-3 border border-[var(--foreground)]/12">
+        <h4 className="text-xs font-semibold text-[var(--foreground)] mb-2">Key Focus Areas</h4>
+        <div className="flex flex-wrap gap-1">
+          {(concept.lessonPlan?.focusAreas || []).map((area: string, idx: number) => (
+            <span
+              key={idx}
+              className="px-2 py-1 bg-[var(--background)]/80 border border-[var(--foreground)]/15 rounded text-[10px] text-[var(--foreground)]/70"
+            >
+              {area}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="rounded-xl bg-[var(--background)]/70 p-3 border border-[var(--foreground)]/12">
+        <h4 className="text-xs font-semibold text-[var(--foreground)] mb-2">Key Skills</h4>
+        <ul className="text-xs text-[var(--foreground)]/85 space-y-1 list-disc list-inside">
+          {(concept.lessonPlan?.keySkills || []).map((skill: string, idx: number) => (
+            <li key={idx}>{skill}</li>
+          ))}
+        </ul>
+      </div>
+      <div className="rounded-xl bg-[var(--background)]/70 p-3 border border-[var(--foreground)]/12">
+        <h4 className="text-xs font-semibold text-[var(--foreground)] mb-2">Practice Approach</h4>
+        <p className="text-xs text-[var(--foreground)]/80 leading-relaxed">{concept.lessonPlan?.practiceApproach}</p>
+      </div>
+      <div className="rounded-xl bg-[var(--background)]/70 p-3 border border-[var(--foreground)]/12">
+        <h4 className="text-xs font-semibold text-[var(--foreground)] mb-2">Exam Connections</h4>
+        <ul className="text-xs text-[var(--foreground)]/85 space-y-1 list-disc list-inside">
+          {(concept.lessonPlan?.examConnections || []).map((connection: string, idx: number) => (
+            <li key={idx}>{connection}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+    <div className="flex justify-end mt-4">
+      <button
+        onClick={() => setSelectedConceptIndex(i)}
+        className="inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-5 py-2 text-xs font-medium text-white hover:opacity-90 transition-opacity"
+      >
+        Start
+      </button>
+    </div>
+  </div>
+)}
+
                 </div>
               ))}
             </div>
@@ -1114,11 +1093,11 @@ function ExamSnipeInner() {
               <h3 className="text-base font-semibold text-[var(--foreground)] mb-3">Study Strategy</h3>
               <p className="text-sm text-[var(--foreground)] mb-4">
                 Move through the concepts in order—they build from foundational understanding to advanced exam execution.
-                Use the level and role badges to set expectations for depth and pacing.
+                Use the stage badge and lesson count to set expectations for depth and pacing.
               </p>
               <div className="text-sm text-[var(--foreground)]/70">
                 <strong>Recommended flow:</strong> Secure the fundamentals in Concept 1, then advance sequentially.
-                Revisit exam connections for each subtopic as deliberate practice checkpoints.
+                Revisit the exam connections inside each lesson plan as deliberate practice checkpoints.
               </div>
             </div>
 
@@ -1126,18 +1105,19 @@ function ExamSnipeInner() {
             <div className="mt-4 rounded-lg bg-[var(--background)]/60 border border-[var(--accent-cyan)]/20 p-4">
               <div className="text-xs text-[var(--foreground)]/70">
                 <strong className="text-[var(--foreground)]">Pro Tips:</strong><br/>
-                • Begin with the introductory subtopic to anchor the big picture<br/>
-                • Map each study session to the listed exam connections for authentic practice<br/>
-                • Call out the pitfalls while reviewing to avoid repeating historic mistakes
+                • Begin with the foundation concept to anchor the big picture<br/>
+                • Map each study session to the listed lesson objectives for authentic practice<br/>
+                • Capture tricky insights from the exam connections to avoid repeating historic mistakes
               </div>
             </div>
           </Fragment>
         )}
       </div>
 
-      {/* Sub-Concept Details Modal */}
-      {selectedSubConcept && examResults && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-3 py-12">
+
+      {/* Concept Details Modal */}
+      {selectedConceptIndex != null && examResults && selectedConcept && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-3 py-12">
           <div
             className="w-full max-w-2xl rounded-2xl text-[var(--foreground)] shadow-2xl flex flex-col"
             style={{
@@ -1148,33 +1128,33 @@ function ExamSnipeInner() {
           >
             <div className="rounded-[calc(1rem-1.5px)] border border-[var(--foreground)]/10 bg-[var(--background)]/95 backdrop-blur-md h-full overflow-hidden flex flex-col">
             {(() => {
-              const concept = examResults.concepts[selectedSubConcept.conceptIndex];
-              const subConcept = concept.subtopics[selectedSubConcept.subConceptIndex];
-              const plans = activeHistoryMeta?.results?.lessonPlans?.[subConcept.name]?.plans || [];
-              const rawGenerated = activeHistoryMeta?.results?.generatedLessons?.[subConcept.name];
-              const generatedMap = Array.isArray(rawGenerated)
-                ? rawGenerated.reduce<Record<string, GeneratedLesson>>((acc, lesson, legacyIdx) => {
-                    const planId = String((lesson as any)?.planId || `legacy-${legacyIdx}`);
-                    acc[planId] = {
-                      planId,
-                      title: String((lesson as any)?.title || `Lesson ${legacyIdx + 1}`),
-                      body: String((lesson as any)?.body || ""),
-                      createdAt: (lesson as any)?.createdAt ? String((lesson as any).createdAt) : new Date().toISOString(),
-                    };
-                    return acc;
-                  }, {})
-                : rawGenerated || {};
+              const concept = selectedConcept;
+              const plan = selectedPlanData || concept.lessonPlan;
+              const lessons = selectedPlans;
+              const generatedMap = selectedGeneratedMap || {};
+
+              if (!concept || !plan) return null;
 
               return (
                 <>
                   {/* Fixed Header */}
                   <div className="flex items-center justify-between p-6 pb-4 border-b border-[var(--foreground)]/10">
                     <div>
-                      <div className="text-xs uppercase tracking-wide text-[var(--foreground)]/40">Concept Plan</div>
-                      <h3 className="text-lg font-semibold text-[var(--foreground)] mt-0.5">{subConcept.name}</h3>
+                      <div className="text-xs uppercase tracking-wide text-[var(--foreground)]/40">Main Concept</div>
+                      <h3 className="text-lg font-semibold text-[var(--foreground)] mt-0.5">{concept.name}</h3>
+                      <div className="mt-1 inline-flex items-center gap-2 text-xs text-[var(--foreground)]/60">
+                        <span
+                          className="inline-flex items-center rounded-full px-3 py-1 bg-[var(--background)]/80 border border-[var(--foreground)]/15"
+                        >
+                          Stage: {formatLabel(concept.learningStage)}
+                        </span>
+                        <span className="inline-flex items-center rounded-full px-3 py-1 bg-[var(--background)]/80 border border-[var(--foreground)]/15">
+                          Lessons: {lessons.length}
+                        </span>
+                      </div>
                     </div>
                     <button
-                      onClick={() => setSelectedSubConcept(null)}
+                      onClick={() => setSelectedConceptIndex(null)}
                       className="h-8 w-8 rounded-full border border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 flex items-center justify-center flex-shrink-0"
                       aria-label="Close"
                     >
@@ -1185,132 +1165,98 @@ function ExamSnipeInner() {
                   {/* Scrollable Content */}
                   <div className="modal-scroll flex-1 overflow-y-auto p-6 space-y-8">
                     <div className="space-y-4">
-                    <div className="flex flex-wrap gap-2">
-                      <span
-                        className="inline-flex items-center rounded-full text-xs font-medium px-3 py-1"
-                        style={{ padding: '1.25px', background: 'linear-gradient(135deg, rgba(0,229,255,0.6), rgba(255,45,150,0.6))' }}
-                      >
-                        <span className="rounded-full px-3 py-1 bg-[var(--background)]/90 text-[var(--foreground)]/80" style={{ borderRadius: 'calc(9999px - 1.25px)' }}>
-                          Level: {formatLabel(subConcept.level)}
-                        </span>
-                      </span>
-                      <span
-                        className="inline-flex items-center rounded-full text-xs font-medium px-3 py-1"
-                        style={{ padding: '1.25px', background: 'linear-gradient(135deg, rgba(0,229,255,0.6), rgba(255,45,150,0.6))' }}
-                      >
-                        <span className="rounded-full px-3 py-1 bg-[var(--background)]/90 text-[var(--foreground)]/80" style={{ borderRadius: 'calc(9999px - 1.25px)' }}>
-                          Role: {formatLabel(subConcept.role)}
-                        </span>
-                      </span>
-                      <span
-                        className="inline-flex items-center rounded-full text-xs font-medium px-3 py-1"
-                        style={{ padding: '1.25px', background: 'linear-gradient(135deg, rgba(0,229,255,0.6), rgba(255,45,150,0.6))' }}
-                      >
-                        <span className="rounded-full px-3 py-1 bg-[var(--background)]/90 text-[var(--foreground)]/80" style={{ borderRadius: 'calc(9999px - 1.25px)' }}>
-                          Concept Stage: {formatLabel(concept.learningStage)}
-                        </span>
-                      </span>
-                    </div>
+                      <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
+                        <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Concept Summary</h4>
+                        <p className="text-sm text-[var(--foreground)]/85 leading-relaxed">{concept.description}</p>
+                      </div>
 
-                    <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
-                      <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">What to Learn</h4>
-                      <p className="text-sm text-[var(--foreground)]/85 leading-relaxed">{subConcept.description}</p>
-                    </div>
+                      <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
+                        <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Lesson Strategy</h4>
+                        <p className="text-sm text-[var(--foreground)]/80 leading-relaxed">{plan.summary}</p>
+                      </div>
 
-                    <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
-                      <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Study Approach</h4>
-                      <p className="text-sm text-[var(--foreground)]/80 leading-relaxed">{subConcept.studyApproach}</p>
-                    </div>
+                      <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
+                        <h4 className="text-sm font-semibold text-[var(--foreground)] mb-3">Key Focus Areas</h4>
+                        <div className="flex flex-wrap gap-1">
+                          {(plan.focusAreas || []).map((area: string, idx: number) => (
+                            <span
+                              key={idx}
+                              className="px-2 py-1 bg-[var(--background)]/80 border border-[var(--foreground)]/15 rounded text-xs text-[var(--foreground)]/80 font-medium"
+                            >
+                              {area}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
 
-                    <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
-                      <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Key Components</h4>
-                      <div className="flex flex-wrap gap-1">
-                        {(subConcept.components || []).map((component: string, idx: number) => (
-                          <span
-                            key={idx}
-                            className="px-2 py-1 bg-[var(--background)]/80 border border-[var(--foreground)]/15 rounded text-xs text-[var(--foreground)]/80 font-medium"
-                          >
-                            {component}
-                          </span>
-                        ))}
+                      <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
+                        <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Skills to Master</h4>
+                        <ul className="text-xs text-[var(--foreground)]/85 space-y-1 list-disc list-inside">
+                          {(plan.keySkills || []).map((skill: string, idx: number) => (
+                            <li key={idx}>{skill}</li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
+                        <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Practice Approach</h4>
+                        <p className="text-sm text-[var(--foreground)]/80 leading-relaxed">{plan.practiceApproach}</p>
+                      </div>
+
+                      <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
+                        <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Exam Connections</h4>
+                        <ul className="text-xs text-[var(--foreground)]/85 space-y-1 list-disc list-inside">
+                          {(plan.examConnections || []).map((connection: string, idx: number) => (
+                            <li key={idx}>{connection}</li>
+                          ))}
+                        </ul>
                       </div>
                     </div>
 
-                    <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
-                      <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Skills to Master</h4>
-                      <ul className="text-xs text-[var(--foreground)]/85 space-y-1 list-disc list-inside">
-                        {(subConcept.skills || []).map((skill: string, idx: number) => (
-                          <li key={idx}>{skill}</li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
-                      <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Exam Connections</h4>
-                      <ul className="text-xs text-[var(--foreground)]/85 space-y-1 list-disc list-inside">
-                        {(subConcept.examConnections || []).map((connection: string, idx: number) => (
-                          <li key={idx}>{connection}</li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
-                      <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Common Pitfalls</h4>
-                      <ul className="text-xs text-[var(--foreground)]/85 space-y-1 list-disc list-inside">
-                        {(subConcept.pitfalls || []).map((pitfall: string, idx: number) => (
-                          <li key={idx}>{pitfall}</li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div className="text-xs text-[var(--foreground)]/65">
-                      Referenced in {subConcept.examConnections?.length || 0} exam question(s)
-                    </div>
-                    </div>
-
-                  {plans.length > 0 && (
+                    {lessons.length > 0 && (
                       <div>
-                        <div className="text-sm font-semibold text-[var(--foreground)] mb-3">Concept Plan</div>
+                        <div className="text-sm font-semibold text-[var(--foreground)] mb-3">Lesson Plan</div>
                         <ul className="divide-y divide-[var(--foreground)]/10 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]">
-                          {plans.map((plan: any, i: number) => {
-                            const planId = String(plan.id);
+                          {lessons.map((planItem: any, i: number) => {
+                            const planId = String(planItem.id);
                             const generatedLesson = generatedMap?.[planId] as GeneratedLesson | undefined;
                             const isGenerating = !!lessonGenerating[planId];
                             const isFirst = i === 0;
-                            const isLast = i === plans.length - 1;
-                            const isOnly = plans.length === 1;
+                            const isLast = i === lessons.length - 1;
+                            const isOnly = lessons.length === 1;
                             const roundedClass = isOnly
-                              ? "rounded-t-2xl rounded-b-2xl"
+                              ? 'rounded-t-2xl rounded-b-2xl'
                               : isFirst
-                              ? "rounded-t-2xl"
+                              ? 'rounded-t-2xl'
                               : isLast
-                              ? "rounded-b-2xl"
-                              : "";
-                            const planTitle = String(plan.title || `Lesson ${i + 1}`);
+                              ? 'rounded-b-2xl'
+                              : '';
+                            const planTitle = String(planItem.title || `Lesson ${i + 1}`);
 
                             const openGeneratedLesson = async () => {
                               if (!generatedLesson) return;
                               try {
-                                const slugBase = (activeHistoryMeta?.courseName || "Exam Snipe Lessons")
+                                const slugBase = (activeHistoryMeta?.courseName || 'Exam Snipe Lessons')
                                   .toLowerCase()
-                                  .replace(/[^a-z0-9]+/g, "-")
-                                  .replace(/^-+|-+$/g, "");
-                                const slug = `${slugBase}-${activeHistoryMeta?.slug || "exams"}`.slice(0, 64);
-                                const topic = subConcept.name;
+                                  .replace(/[^a-z0-9]+/g, '-')
+                                  .replace(/^-+|-+$/g, '');
+                                const slug = `${slugBase}-${activeHistoryMeta?.slug || 'exams'}`.slice(0, 64);
+                                const topic = concept.name;
                                 const data: StoredSubjectData = {
-                                  subject: activeHistoryMeta?.courseName || "Exam Snipe Lessons",
-                                  course_context: (examResults.patternAnalysis || "") + "\n" + (examResults.gradeInfo || ""),
-                                  combinedText: "",
+                                  subject: activeHistoryMeta?.courseName || 'Exam Snipe Lessons',
+                                  course_context: (examResults.patternAnalysis || '') + "
+" + (examResults.gradeInfo || ''),
+                                  combinedText: '',
                                   topics: [],
                                   nodes: {
                                     [topic]: {
                                       overview: `Lessons generated from Exam Snipe for: ${topic}`,
                                       symbols: [],
-                                      lessonsMeta: [{ type: "Generated Lesson", title: String(generatedLesson.title || planTitle) }],
+                                      lessonsMeta: [{ type: 'Generated Lesson', title: String(generatedLesson.title || planTitle) }],
                                       lessons: [
                                         {
                                           title: String(generatedLesson.title || planTitle),
-                                          body: String(generatedLesson.body || ""),
+                                          body: String(generatedLesson.body || ''),
                                           quiz: [],
                                         },
                                       ],
@@ -1321,96 +1267,44 @@ function ExamSnipeInner() {
                                   progress: {},
                                 };
                                 await saveSubjectDataAsync(slug, data);
-                                setSelectedSubConcept(null);
+                                setSelectedConceptIndex(null);
                                 router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}`);
                               } catch {}
                             };
 
-                            const triggerLessonGeneration = async () => {
-                              if (!selectedSubConcept || isGenerating) return;
-                              setLessonGenerating((prev) => ({ ...prev, [planId]: true }));
-                              try {
-                                const conceptRef = examResults.concepts[selectedSubConcept.conceptIndex];
-                                const subConceptRef = conceptRef.subtopics[selectedSubConcept.subConceptIndex];
-                                const payload = {
-                                  historySlug: activeHistoryMeta?.slug || "",
-                                  courseName: activeHistoryMeta?.courseName || examResults.courseName || "Exam Snipe Course",
-                                  conceptName: conceptRef.name,
-                                  conceptStage: conceptRef.learningStage,
-                                  subConceptName: subConceptRef.name,
-                                  subConceptLevel: subConceptRef.level,
-                                  subConceptRole: subConceptRef.role,
-                                  planId,
-                                  planTitle: plan.title,
-                                  planSummary: plan.summary,
-                                  planObjectives: plan.objectives,
-                                  planEstimatedTime: plan.estimatedTime,
-                                  totalExams: examResults.totalExams,
-                                  gradeInfo: examResults.gradeInfo,
-                                  patternAnalysis: examResults.patternAnalysis,
-                                  description: subConceptRef.description,
-                                  components: subConceptRef.components,
-                                  skills: subConceptRef.skills,
-                                  studyApproach: subConceptRef.studyApproach,
-                                  examConnections: subConceptRef.examConnections,
-                                  pitfalls: subConceptRef.pitfalls,
-                                  existingLessons: Object.values(generatedMap || {}),
-                                  detectedLanguage: examResults.detectedLanguage,
-                                };
-                                const res = await fetch("/api/exam-snipe/generate-lesson", {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  credentials: "include",
-                                  body: JSON.stringify(payload),
-                                });
-                                const json = await res.json().catch(() => ({}));
-                                if (!res.ok || !json?.ok) throw new Error(json?.error || "Failed to generate lesson");
-                                if (json.record) {
-                                  const updated = normalizeHistoryRecord(json.record);
-                                  setActiveHistoryMeta(updated);
-                                  setExamResults(updated.results);
-                                  setHistory((prev) => {
-                                    const filtered = prev.filter((r) => r.slug !== updated.slug);
-                                    return [updated, ...filtered].slice(0, MAX_HISTORY_ITEMS);
-                                  });
-                                }
-                              } catch (err: any) {
-                                alert(err?.message || "Failed to generate lesson");
-                              } finally {
-                                setLessonGenerating((prev) => ({ ...prev, [planId]: false }));
-                              }
-                            };
-
                             const openPlaceholderLesson = async () => {
                               try {
-                                const slugBase = (activeHistoryMeta?.courseName || "Exam Snipe Lessons")
+                                const slugBase = (activeHistoryMeta?.courseName || 'Exam Snipe Lessons')
                                   .toLowerCase()
-                                  .replace(/[^a-z0-9]+/g, "-")
-                                  .replace(/^-+|-+$/g, "");
-                                const slug = `${slugBase}-${activeHistoryMeta?.slug || "exams"}`.slice(0, 64);
-                                const topic = subConcept.name;
-                                const contextBlocks = [
-                                  concept.learningStage ? `Concept stage: ${formatLabel(concept.learningStage)}` : "",
-                                  subConcept.level ? `Subtopic level: ${formatLabel(subConcept.level)}` : "",
-                                  subConcept.role ? `Subtopic role: ${formatLabel(subConcept.role)}` : "",
-                                  subConcept.description ? `Focus: ${subConcept.description}` : "",
-                                  Array.isArray(subConcept.components) && subConcept.components.length ? `Components: ${subConcept.components.join(", ")}` : "",
-                                  Array.isArray(subConcept.skills) && subConcept.skills.length ? `Skills: ${subConcept.skills.join(", ")}` : "",
-                                  Array.isArray(subConcept.examConnections) && subConcept.examConnections.length ? `Exam references: ${subConcept.examConnections.join("; ")}` : "",
-                                  Array.isArray(subConcept.pitfalls) && subConcept.pitfalls.length ? `Common pitfalls: ${subConcept.pitfalls.join("; ")}` : "",
-                                  subConcept.studyApproach ? `Recommended study approach: ${subConcept.studyApproach}` : "",
-                                ].filter(Boolean).join("\n");
+                                  .replace(/[^a-z0-9]+/g, '-')
+                                  .replace(/^-+|-+$/g, '');
+                                const slug = `${slugBase}-${activeHistoryMeta?.slug || 'exams'}`.slice(0, 64);
+                                const topic = concept.name;
                                 const data: StoredSubjectData = {
-                                  subject: activeHistoryMeta?.courseName || "Exam Snipe Lessons",
-                                  course_context: [(examResults.patternAnalysis || ""), (examResults.gradeInfo || "")].filter(Boolean).join("\n"),
-                                  combinedText: contextBlocks,
-                                  topics: [{ name: topic, summary: String(subConcept.description || ""), coverage: 25 }],
+                                  subject: activeHistoryMeta?.courseName || 'Exam Snipe Lessons',
+                                  course_context: (examResults.patternAnalysis || '') + "
+" + (examResults.gradeInfo || ''),
+                                  combinedText: '',
+                                  topics: [],
                                   nodes: {
                                     [topic]: {
-                                      overview: String(subConcept.description || ""),
+                                      overview: `Lessons generated from Exam Snipe for: ${topic}`,
                                       symbols: [],
-                                      lessonsMeta: [{ type: "Full Lesson", title: topic }],
-                                      lessons: [],
+                                      lessonsMeta: [{ type: 'Lesson Outline', title: planTitle }],
+                                      lessons: [
+                                        {
+                                          title: planTitle,
+                                          body: `## Lesson Summary
+${planItem.summary || ''}
+
+### Objectives
+${(planItem.objectives || [])
+                                            .map((obj: string) => `- ${obj}`)
+                                            .join('
+')}`,
+                                          quiz: [],
+                                        },
+                                      ],
                                       rawLessonJson: [],
                                     },
                                   },
@@ -1418,7 +1312,7 @@ function ExamSnipeInner() {
                                   progress: {},
                                 };
                                 await saveSubjectDataAsync(slug, data);
-                                setSelectedSubConcept(null);
+                                setSelectedConceptIndex(null);
                                 router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}`);
                               } catch {}
                             };
@@ -1431,17 +1325,66 @@ function ExamSnipeInner() {
                               }
                             };
 
+                            const triggerLessonGeneration = async () => {
+                              if (isGenerating) return;
+                              setLessonGenerating((prev) => ({ ...prev, [planId]: true }));
+                              try {
+                                const payload = {
+                                  historySlug: activeHistoryMeta?.slug || '',
+                                  courseName: activeHistoryMeta?.courseName || examResults.courseName || 'Exam Snipe Course',
+                                  conceptName: concept.name,
+                                  conceptStage: concept.learningStage,
+                                  planId,
+                                  planTitle: planItem.title,
+                                  planSummary: planItem.summary,
+                                  planObjectives: planItem.objectives,
+                                  planEstimatedTime: planItem.estimatedTime,
+                                  totalExams: examResults.totalExams,
+                                  gradeInfo: examResults.gradeInfo,
+                                  patternAnalysis: examResults.patternAnalysis,
+                                  description: concept.description,
+                                  focusAreas: plan.focusAreas,
+                                  keySkills: plan.keySkills,
+                                  practiceApproach: plan.practiceApproach,
+                                  examConnections: plan.examConnections,
+                                  detectedLanguage: examResults.detectedLanguage,
+                                  existingLessons: Object.values(generatedMap || {}),
+                                };
+                                const res = await fetch('/api/exam-snipe/generate-lesson', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  credentials: 'include',
+                                  body: JSON.stringify(payload),
+                                });
+                                const json = await res.json().catch(() => ({}));
+                                if (!res.ok || !json?.ok) throw new Error(json?.error || 'Failed to generate lesson');
+                                if (json.record) {
+                                  const updated = normalizeHistoryRecord(json.record);
+                                  setActiveHistoryMeta(updated);
+                                  setExamResults(updated.results);
+                                  setHistory((prev) => {
+                                    const filtered = prev.filter((r) => r.slug !== updated.slug);
+                                    return [updated, ...filtered].slice(0, MAX_HISTORY_ITEMS);
+                                  });
+                                }
+                              } catch (err: any) {
+                                alert(err?.message || 'Failed to generate lesson');
+                              } finally {
+                                setLessonGenerating((prev) => ({ ...prev, [planId]: false }));
+                              }
+                            };
+
                             return (
                               <li
                                 key={planId}
                                 className={`group relative flex items-center justify-between px-4 py-3 transition-colors overflow-hidden ${roundedClass} ${
-                                  generatedLesson ? "cursor-pointer bg-transparent" : "hover:bg-[var(--background)]/80 cursor-pointer"
+                                  generatedLesson ? 'cursor-pointer bg-transparent' : 'hover:bg-[var(--background)]/80 cursor-pointer'
                                 }`}
                                 role="button"
                                 tabIndex={0}
                                 onClick={handleRowClick}
                                 onKeyDown={(event) => {
-                                  if (event.key === "Enter" || event.key === " ") {
+                                  if (event.key === 'Enter' || event.key === ' ') {
                                     event.preventDefault();
                                     handleRowClick();
                                   }
@@ -1450,10 +1393,10 @@ function ExamSnipeInner() {
                                 {generatedLesson && (
                                   <div
                                     className={`pointer-events-none absolute inset-0 opacity-20 ${roundedClass}`}
-                                    style={{ backgroundImage: "linear-gradient(90deg, #00E5FF, #FF2D96)" }}
+                                    style={{ backgroundImage: 'linear-gradient(90deg, #00E5FF, #FF2D96)' }}
                                   />
                                 )}
-                                <span className={`text-sm truncate ${generatedLesson ? "text-[var(--foreground)] hover:opacity-90 transition-opacity" : "text-[var(--foreground)]/70"}`}>
+                                <span className={`text-sm truncate ${generatedLesson ? 'text-[var(--foreground)] hover:opacity-90 transition-opacity' : 'text-[var(--foreground)]/70'}`}>
                                   {planTitle}
                                 </span>
                                 <div className="flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
@@ -1499,70 +1442,64 @@ function ExamSnipeInner() {
 
                   {/* Fixed Footer */}
                   <div className="flex justify-end gap-3 p-6 pt-4 border-t border-[var(--foreground)]/10">
-                      <button
-                        onClick={() => setSelectedSubConcept(null)}
-                        className="rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/80"
-                      >
-                        Close
-                      </button>
-                      <button
-                        disabled={generatingPlan}
-                        onClick={async () => {
-                          if (!selectedSubConcept) return;
-                          try {
-                            setGeneratingPlan(true);
-                            const concept = examResults.concepts[selectedSubConcept.conceptIndex];
-                            const sub = concept.subtopics[selectedSubConcept.subConceptIndex];
-                            const payload = {
-                              historySlug: activeHistoryMeta?.slug || "",
-                              courseName: activeHistoryMeta?.courseName || examResults.courseName || "Exam Snipe Course",
-                              totalExams: examResults.totalExams,
-                              gradeInfo: examResults.gradeInfo,
-                              patternAnalysis: examResults.patternAnalysis,
-                              conceptName: concept.name,
-                              conceptStage: concept.learningStage,
-                              subConceptName: sub.name,
-                              subConceptLevel: sub.level,
-                              subConceptRole: sub.role,
-                              description: sub.description,
-                              components: sub.components,
-                              skills: sub.skills,
-                              studyApproach: sub.studyApproach,
-                              examConnections: sub.examConnections,
-                              pitfalls: sub.pitfalls,
-                              detectedLanguage: examResults.detectedLanguage,
-                            };
+                    <button
+                      onClick={() => setSelectedConceptIndex(null)}
+                      className="rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/80"
+                    >
+                      Close
+                    </button>
+                    <button
+                      disabled={generatingPlan}
+                      onClick={async () => {
+                        if (!concept) return;
+                        try {
+                          setGeneratingPlan(true);
+                          const payload = {
+                            historySlug: activeHistoryMeta?.slug || '',
+                            courseName: activeHistoryMeta?.courseName || examResults.courseName || 'Exam Snipe Course',
+                            totalExams: examResults.totalExams,
+                            gradeInfo: examResults.gradeInfo,
+                            patternAnalysis: examResults.patternAnalysis,
+                            conceptName: concept.name,
+                            conceptStage: concept.learningStage,
+                            description: concept.description,
+                            focusAreas: plan.focusAreas,
+                            keySkills: plan.keySkills,
+                            practiceApproach: plan.practiceApproach,
+                            examConnections: plan.examConnections,
+                            detectedLanguage: examResults.detectedLanguage,
+                          };
 
-                            const res = await fetch('/api/exam-snipe/generate-plan', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              credentials: 'include',
-                              body: JSON.stringify(payload),
+                          const res = await fetch('/api/exam-snipe/generate-plan', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify(payload),
+                          });
+
+                          const json = await res.json().catch(() => ({}));
+                          if (!res.ok || !json?.ok) throw new Error(json?.error || 'Failed to generate lesson plan');
+
+                          if (json.record) {
+                            const updated = normalizeHistoryRecord(json.record);
+                            setActiveHistoryMeta(updated);
+                            setExamResults(updated.results);
+                            setHistory((prev) => {
+                              const filtered = prev.filter((r) => r.slug !== updated.slug);
+                              return [updated, ...filtered].slice(0, MAX_HISTORY_ITEMS);
                             });
-
-                            const json = await res.json().catch(() => ({}));
-                            if (!res.ok || !json?.ok) throw new Error(json?.error || 'Failed to generate lesson plan');
-
-                            if (json.record) {
-                              const updated = normalizeHistoryRecord(json.record);
-                              setActiveHistoryMeta(updated);
-                              setExamResults(updated.results);
-                              setHistory((prev) => {
-                                const filtered = prev.filter((r) => r.slug !== updated.slug);
-                                return [updated, ...filtered].slice(0, MAX_HISTORY_ITEMS);
-                              });
-                              setLessonGenerating({});
-                            }
-                          } catch (e: any) {
-                            alert(e?.message || 'Failed to generate lesson plan');
-                          } finally {
-                            setGeneratingPlan(false);
+                            setLessonGenerating({});
                           }
-                        }}
-                        className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
-                      >
-                        {generatingPlan ? 'Generating…' : 'Generate Lesson Plan'}
-                      </button>
+                        } catch (e: any) {
+                          alert(e?.message || 'Failed to generate lesson plan');
+                        } finally {
+                          setGeneratingPlan(false);
+                        }
+                      }}
+                      className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
+                    >
+                      {generatingPlan ? 'Generating…' : 'Generate Lesson Plan'}
+                    </button>
                   </div>
                 </>
               );
@@ -1571,7 +1508,6 @@ function ExamSnipeInner() {
           </div>
         </div>
       )}
-
       <style jsx>{`
         .modal-scroll {
           scrollbar-width: none;

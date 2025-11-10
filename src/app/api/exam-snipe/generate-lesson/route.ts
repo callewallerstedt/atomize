@@ -27,9 +27,6 @@ export async function POST(req: NextRequest) {
       courseName,
       conceptName,
       conceptStage,
-      subConceptName,
-      subConceptLevel,
-      subConceptRole,
       planId,
       planTitle,
       planSummary,
@@ -39,16 +36,15 @@ export async function POST(req: NextRequest) {
       gradeInfo,
       patternAnalysis,
       description,
-      studyApproach,
-      components,
-      skills,
+      focusAreas,
+      keySkills,
+      practiceApproach,
       examConnections,
-      pitfalls,
       existingLessons = [],
       detectedLanguage,
     } = body || {};
 
-    if (!historySlug || !subConceptName || !conceptName || !planId || !planTitle) {
+    if (!historySlug || !conceptName || !planId || !planTitle) {
       return NextResponse.json({ ok: false, error: "Missing required fields" }, { status: 400 });
     }
 
@@ -71,11 +67,8 @@ export async function POST(req: NextRequest) {
 
     const examContext = [
       `Course Name: ${courseName || history.courseName || "Exam Snipe Course"}`,
-      `Broader Concept: ${conceptName}`,
-      `Focused Sub-Concept: ${subConceptName}`,
+      `Concept: ${conceptName}`,
       conceptStage ? `Concept Stage: ${conceptStage}` : "",
-      subConceptLevel ? `Subtopic Level: ${subConceptLevel}` : "",
-      subConceptRole ? `Instructional Role: ${subConceptRole}` : "",
       planSummary ? `Plan Summary: ${planSummary}` : "",
       planEstimatedTime ? `Estimated Study Time: ${planEstimatedTime}` : "",
       Array.isArray(planObjectives) && planObjectives.length
@@ -85,11 +78,10 @@ export async function POST(req: NextRequest) {
       gradeInfo ? `Grade requirements: ${gradeInfo}` : "",
       patternAnalysis ? `Pattern analysis: ${patternAnalysis}` : "",
       description ? `Key focus from analysis: ${description}` : "",
-      studyApproach ? `Recommended Study Approach: ${studyApproach}` : "",
-      stringifyList(components) ? `Technical components to cover: ${stringifyList(components)}` : "",
-      stringifyList(skills) ? `Skills to explicitly build: ${stringifyList(skills)}` : "",
+      stringifyList(focusAreas) ? `Focus areas to emphasize: ${stringifyList(focusAreas)}` : "",
+      stringifyList(keySkills) ? `Skills to explicitly build: ${stringifyList(keySkills)}` : "",
+      practiceApproach ? `Recommended Practice Approach: ${practiceApproach}` : "",
       stringifyList(examConnections, "\n- ") ? `Exam references:\n- ${stringifyList(examConnections, "\n- ")}` : "",
-      stringifyList(pitfalls) ? `Common pitfalls to address: ${stringifyList(pitfalls)}` : "",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -118,11 +110,11 @@ Return JSON:
 }
 
 Rules:
-- Lesson must stay laser-focused on "${subConceptName}".
-- Follow the objectives and address pitfalls explicitly (call them out and defuse them).
-- Integrate the listed technical components and skills through explanations, worked examples, and practice flows.
+- Lesson must stay laser-focused on "${conceptName}" within the provided scope.
+- Follow the objectives and explicitly reinforce the listed focus areas and key skills.
+- Integrate the provided focus areas and skills through explanations, worked examples, and practice flows.
 - Include worked examples tied to the exam references above.
-- Scaffold the narrative from the provided level toward mastery, honoring the recommended study approach.
+- Scaffold the narrative from the provided stage toward mastery, honoring the recommended practice approach.
 - End with a short recap paragraph before the quiz.
 - Quiz must include 2-3 realistic practice problems aligned with the exam references.
 `;
@@ -167,8 +159,8 @@ Rules:
 
     const results = (history.results as any) || {};
     if (!results.generatedLessons) results.generatedLessons = {};
-    if (!results.generatedLessons[subConceptName]) results.generatedLessons[subConceptName] = {};
-    results.generatedLessons[subConceptName][planId] = lesson;
+    if (!results.generatedLessons[conceptName]) results.generatedLessons[conceptName] = {};
+    results.generatedLessons[conceptName][planId] = lesson;
 
     const updated = await prisma.examSnipeHistory.update({
       where: { userId_slug: { userId: user.id, slug: historySlug } },

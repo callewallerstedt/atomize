@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
               role: 'system',
               content: `You are an expert exam analyst. Study the historic exams and convert them into a structured study blueprint.
 
-IMPORTANT: Generate ALL content (courseName, patternAnalysis, concept names, overviews, subtopic names, descriptions, components, skills, studyApproach, examConnections, pitfalls) in ${detectedLanguage.name}. Only use ${detectedLanguage.name} for the AI-generated material.
+IMPORTANT: Generate ALL content (courseName, patternAnalysis, concept names, descriptions, lesson plans, lesson titles, and objectives) in ${detectedLanguage.name}. Only use ${detectedLanguage.name} for the AI-generated material.
 
 ALWAYS FOLLOW THESE STEPS:
 1. Extract the grade requirements from the exams (e.g., "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p") and place them in "gradeInfo".
@@ -173,25 +173,25 @@ FOR EACH MAIN CONCEPT:
 - Provide:
   - "name": Broad theme that bundles several related exam topics.
   - "learningStage": one of "foundation", "core", "advanced", or "mastery".
-  - "overview": 2-3 sentences explaining what the concept covers and why it matters on the exam.
-- Include a "subtopics" array with 3 or more subtopics (keep them broad—each should combine multiple related exam questions, not single formulas).
-
-FOR EACH SUBTOPIC:
-- "name": Descriptive label a student would recognize.
-- "level": "fundamental", "intermediate", or "advanced".
-- "role": "introductory", "core", "applied", or "mastery".
-- "description": 2 sentences describing what the learner must be able to do.
-- "components": array of the essential elements/techniques/tools that must be mastered (list every key component).
-- "skills": array of 3-6 action-oriented capabilities (start items with verbs like "Analyze", "Construct", "Explain").
-- "studyApproach": 1-2 sentences describing how to practice and build fluency.
-- "examConnections": array referencing the exact exams/questions or recurring patterns that justify this subtopic (e.g., "Exam 2022 Q4 - long proof on ...").
-- "pitfalls": array of 2-3 mistakes or misconceptions to avoid.
+  - "description": 2-3 sentences explaining what the concept covers and why it matters on the exam (concise but detailed).
+  - "lessonPlan": object containing the teaching plan for the entire concept:
+    - "summary": 2-3 sentences describing how to learn the concept and how the lessons progress.
+    - "focusAreas": array of 4-6 short phrases capturing the major pillars/exam themes that the concept must cover.
+    - "keySkills": array of 4-6 action-oriented skills (start items with verbs like "Analyze", "Construct", "Explain").
+    - "practiceApproach": 1-2 sentences describing the recommended practice method.
+    - "examConnections": array referencing the exact exams/questions or recurring patterns that justify this concept (e.g., "Exam 2022 Q4 - long proof on ...").
+    - "lessons": ordered array of lessons that teach the full concept (minimum 5 lessons). Lessons must progress from fundamentals to mastery and together cover the entire concept. Each lesson must include:
+      - "title": Concise 2-5 word noun phrase (no sentences or punctuation).
+      - "summary": 2-3 sentences describing the lesson scope and why it matters for the exam.
+      - "objectives": array of 3-5 concrete, action-oriented objectives.
+      - "estimatedTime": optional string with an indicative study duration (e.g., "45m").
 
 REQUIREMENTS:
-- Ensure the very first concept contains at least one subtopic whose "role" is "introductory" AND whose "level" is "fundamental", explicitly teaching the basics and forming the student's foundation.
-- Keep the progression clear: early concepts/subtopics should build fundamentals, later ones should advance difficulty and integrate skills.
-- Do not include points, time estimates, efficiency math, or recency bonuses anywhere.
-- Cover every exam question somewhere in the structure—no omissions.
+- Concepts and lesson plans must cover every exam question—no omissions.
+- Lessons must maintain a logical sequence: fundamentals → operations/proofs → applications → integration/mastery.
+- Focus areas and exam connections must explicitly reflect repeated exam themes.
+- Do not include points, time estimates for entire exams, efficiency math, or common pitfalls.
+- Keep all arrays populated with meaningful content (no placeholders).
 
 Return JSON in this exact format:
 {
@@ -202,20 +202,22 @@ Return JSON in this exact format:
     {
       "name": "Broad Concept Name",
       "learningStage": "foundation",
-      "overview": "2-3 sentence explanation of scope and exam importance.",
-      "subtopics": [
-        {
-          "name": "Subtopic Name",
-          "level": "fundamental",
-          "role": "introductory",
-          "description": "What this subtopic teaches and how it shows up on exams.",
-          "components": ["Component A", "Component B", "Component C"],
-          "skills": ["Explain ...", "Apply ...", "Diagnose ..."],
-          "studyApproach": "Guidance on how to study/practice this subtopic.",
-          "examConnections": ["Exam 2022 Q3 - ...", "Exam 2021 Q1 - ..."],
-          "pitfalls": ["Common mistake 1", "Common mistake 2"]
-        }
-      ]
+      "description": "2-3 sentence explanation of scope and exam importance.",
+      "lessonPlan": {
+        "summary": "2-3 sentence description of how the lessons build mastery.",
+        "focusAreas": ["Focus Area A", "Focus Area B", "Focus Area C"],
+        "keySkills": ["Analyze ...", "Construct ...", "Explain ..."],
+        "practiceApproach": "Guidance on how to practice this concept.",
+        "examConnections": ["Exam 2022 Q3 - ...", "Exam 2021 Q1 - ..."],
+        "lessons": [
+          {
+            "title": "Concise Lesson Title",
+            "summary": "2-3 sentence lesson summary.",
+            "objectives": ["Objective 1", "Objective 2", "Objective 3"],
+            "estimatedTime": "45m"
+          }
+        ]
+      }
     }
   ]
 }
