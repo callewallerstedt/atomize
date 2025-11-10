@@ -51,6 +51,7 @@ type ExamSnipeResult = {
   concepts: ExamSnipeConcept[];
   lessonPlans?: Record<string, { plans: LessonPlan[] }>;
   generatedLessons?: Record<string, Record<string, GeneratedLesson>>;
+  detectedLanguage?: { code: string; name: string };
 };
 
 type ExamSnipeRecord = {
@@ -336,6 +337,12 @@ function normalizeHistoryRecord(record: any): ExamSnipeRecord {
         : null;
   const lessonPlans = normalizeLessonPlans(rawResults?.lessonPlans);
   const generatedLessons = normalizeGeneratedLessons(rawResults?.generatedLessons);
+  const detectedLanguage = rawResults?.detectedLanguage && typeof rawResults.detectedLanguage === "object"
+    ? {
+        code: String(rawResults.detectedLanguage.code || "en"),
+        name: String(rawResults.detectedLanguage.name || "English"),
+      }
+    : undefined;
   return {
     id: String(record?.id ?? record?.slug ?? crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)),
     courseName,
@@ -350,6 +357,7 @@ function normalizeHistoryRecord(record: any): ExamSnipeRecord {
       concepts,
       lessonPlans,
       generatedLessons,
+      detectedLanguage,
     },
   };
 }
@@ -656,6 +664,12 @@ function ExamSnipeInner() {
                         : null;
                   const lessonPlans = normalizeLessonPlans(rawData?.lessonPlans);
                   const generatedLessons = normalizeGeneratedLessons(rawData?.generatedLessons);
+                  const detectedLanguage = rawData?.detectedLanguage && typeof rawData.detectedLanguage === "object"
+                    ? {
+                        code: String(rawData.detectedLanguage.code || "en"),
+                        name: String(rawData.detectedLanguage.name || "English"),
+                      }
+                    : undefined;
                   const result: ExamSnipeResult = {
                     courseName,
                     totalExams: Number(rawData?.totalExams ?? rawData?.total_exams ?? examTexts.length) || examTexts.length,
@@ -664,6 +678,7 @@ function ExamSnipeInner() {
                     concepts,
                     lessonPlans,
                     generatedLessons,
+                    detectedLanguage,
                   };
                   let record: ExamSnipeRecord = {
                     id: slug,
@@ -719,6 +734,7 @@ function ExamSnipeInner() {
                                 ? savedResults.pattern_analysis
                                 : result.patternAnalysis,
                           concepts: normalizeConcepts(savedResults?.concepts ?? result.concepts),
+                          detectedLanguage: savedResults?.detectedLanguage || result.detectedLanguage,
                         },
                       };
                     } else if (!saveRes.ok && saveRes.status !== 401) {
@@ -1339,6 +1355,7 @@ function ExamSnipeInner() {
                                   examConnections: subConceptRef.examConnections,
                                   pitfalls: subConceptRef.pitfalls,
                                   existingLessons: Object.values(generatedMap || {}),
+                                  detectedLanguage: examResults.detectedLanguage,
                                 };
                                 const res = await fetch("/api/exam-snipe/generate-lesson", {
                                   method: "POST",
@@ -1513,6 +1530,7 @@ function ExamSnipeInner() {
                               studyApproach: sub.studyApproach,
                               examConnections: sub.examConnections,
                               pitfalls: sub.pitfalls,
+                              detectedLanguage: examResults.detectedLanguage,
                             };
 
                             const res = await fetch('/api/exam-snipe/generate-plan', {

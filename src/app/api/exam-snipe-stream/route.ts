@@ -122,6 +122,36 @@ export async function POST(req: NextRequest) {
         console.log(combinedText.substring(0, 1000)); // First 1000 chars
         console.log('=== END COMBINED TEXT ===');
 
+        // Detect language from exam materials
+        let detectedLanguage = { code: 'en', name: 'English' };
+        try {
+          const langPrompt = [
+            "Detect the primary human language of the provided text.",
+            "Return STRICT JSON: { code: string; name: string } where code is ISO 639-1 if possible (e.g., 'en', 'sv', 'de').",
+            "If uncertain, default to { code: 'en', name: 'English' }.",
+          ].join("\n");
+          const langResponse = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            response_format: { type: 'json_object' },
+            messages: [
+              { role: 'system', content: langPrompt },
+              { role: 'user', content: combinedText.slice(0, 4000) || '' },
+            ],
+            temperature: 0,
+            max_tokens: 50,
+          });
+          const langContent = langResponse.choices[0]?.message?.content || '{}';
+          const langData = JSON.parse(langContent);
+          detectedLanguage = {
+            code: String(langData.code || 'en'),
+            name: String(langData.name || 'English'),
+          };
+          console.log(`Detected language: ${detectedLanguage.name} (${detectedLanguage.code})`);
+        } catch (err: any) {
+          console.error('Language detection failed:', err?.message);
+          // Keep default English
+        }
+
         // Create streaming chat completion
         console.log('Creating OpenAI streaming completion...');
         const completion = await openai.chat.completions.create({
@@ -131,10 +161,12 @@ export async function POST(req: NextRequest) {
               role: 'system',
               content: `You are an expert exam analyst. Study the historic exams and convert them into a structured study blueprint.
 
+IMPORTANT: Generate ALL content (courseName, patternAnalysis, concept names, overviews, subtopic names, descriptions, components, skills, studyApproach, examConnections, pitfalls) in ${detectedLanguage.name}. Only use ${detectedLanguage.name} for the AI-generated material.
+
 ALWAYS FOLLOW THESE STEPS:
 1. Extract the grade requirements from the exams (e.g., "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p") and place them in "gradeInfo".
 2. Craft a short, broad, and generic course title (1-4 words, no punctuation or course codes) for "courseName".
-3. Write a "patternAnalysis" paragraph (2-3 sentences) summarizing which topic families dominate the exams, how question formats evolve, and how difficulty escalates.
+3. Write a "patternAnalysis" section (3-4 sentences) that maps the recurring exam blueprint: describe the usual order of question themes, the formats used (e.g., proofs, numerical problems, multiple-choice), note repeat topic clusters per position, and explain how difficulty escalates across the paper.
 4. Review EVERY single question across ALL exams. Group them into AT LEAST FOUR broad "concepts" that together cover the most important knowledge. Concepts must be ordered in the recommended teaching sequence from foundational material through advanced mastery.
 
 FOR EACH MAIN CONCEPT:
@@ -165,7 +197,7 @@ Return JSON in this exact format:
 {
   "courseName": "Short broad title",
   "gradeInfo": "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p",
-  "patternAnalysis": "2-3 sentence summary highlighting trend and focus",
+  "patternAnalysis": "3-4 sentence breakdown detailing recurring question order, formats, and topic patterns",
   "concepts": [
     {
       "name": "Broad Concept Name",
@@ -253,6 +285,7 @@ Ensure arrays contain meaningful content (no placeholders).`
               gradeInfo: analysisData?.gradeInfo || null,
               patternAnalysis: analysisData?.patternAnalysis || null,
               concepts: analysisData?.concepts || [],
+              detectedLanguage: detectedLanguage,
             }
           })}\n\n`)
         );

@@ -42,6 +42,7 @@ export async function POST(req: NextRequest) {
       skills,
       examConnections,
       pitfalls,
+      detectedLanguage,
     } = body || {};
     const requestedCount =
       typeof body?.count === "number" && Number.isFinite(body.count) && body.count > 0
@@ -80,9 +81,12 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join("\n");
 
+    const languageName = detectedLanguage?.name || "English";
     const prompt = `
 You are an elite exam coach. Create a ${requestedCount}-lesson study progression that teaches the sub-concept "${subConceptName}" inside the broader concept "${conceptName}".
 Lessons must start with foundational concept lessons and progress to applications and integration, respecting the "${subConceptRole || "core"}" role within the "${conceptStage || "core"}" concept stage and the ${subConceptLevel || "fundamental"} level.
+
+IMPORTANT: Generate ALL content (lesson titles, summaries, objectives) in ${languageName}. Only use ${languageName} for the AI-generated material.
 
 Exam context:
 ${examContext}

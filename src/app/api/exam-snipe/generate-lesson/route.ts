@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
       examConnections,
       pitfalls,
       existingLessons = [],
+      detectedLanguage,
     } = body || {};
 
     if (!historySlug || !subConceptName || !conceptName || !planId || !planTitle) {
@@ -93,8 +94,11 @@ export async function POST(req: NextRequest) {
       .filter(Boolean)
       .join("\n\n");
 
+    const languageName = detectedLanguage?.name || "English";
     const prompt = `
 You are creating a full lesson for exam preparation.
+
+IMPORTANT: Generate ALL content (title, body, quiz questions) in ${languageName}. Only use ${languageName} for the AI-generated material.
 
 Use the context below to write a thorough, exam-focused lesson that follows the planned objectives.
 
