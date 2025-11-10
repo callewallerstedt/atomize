@@ -278,16 +278,16 @@ export default function SubjectPage() {
 
       const lessonTitle = json.data.title || tempTopicName;
       quickLearnData.nodes[lessonTitle] = {
-        overview: `Quick lesson on: ${quickLearnQuery}`,
-        symbols: [],
+          overview: `Quick lesson on: ${quickLearnQuery}`,
+          symbols: [],
         lessonsMeta: [{ type: "Quick Learn", title: lessonTitle }],
-        lessons: [{
+          lessons: [{
           title: lessonTitle,
-          body: json.data.body,
-          quiz: json.data.quiz || []
-        }],
-        rawLessonJson: [json.raw || JSON.stringify(json.data)]
-      };
+            body: json.data.body,
+            quiz: json.data.quiz || []
+          }],
+          rawLessonJson: [json.raw || JSON.stringify(json.data)]
+        };
 
       // Save to server (await to ensure it's saved)
       const { saveSubjectDataAsync } = await import("@/utils/storage");
@@ -583,7 +583,7 @@ export default function SubjectPage() {
                               title="Generate AI"
                             />
                           )}
-                        {isGenerating && (
+                          {isGenerating && (
                           <span className="inline-flex items-center gap-2 rounded-full border border-[var(--foreground)]/20 bg-[var(--background)] px-2 py-0.5 text-[11px] text-[var(--foreground)]/70">
                             <GlowSpinner
                               size={28}
@@ -595,7 +595,7 @@ export default function SubjectPage() {
                             />
                             Generating…
                           </span>
-                        )}
+                          )}
                         </div>
                       )}
                       </div>
@@ -628,19 +628,19 @@ export default function SubjectPage() {
             {topics ? (
               <>
                 <div className="mt-4">
-                  <input
-                    value={query}
-                    onChange={(e) => { if (!e.target) return; setQuery(e.target.value); }}
-                    placeholder="Search topics..."
-                    className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none"
-                  />
-                </div>
-                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {topics
-                    .filter((t) =>
-                      query.trim() ? (t.name + " " + (t.summary || "")).toLowerCase().includes(query.toLowerCase()) : true
-                    )
-                    .map((t, i) => {
+              <input
+                value={query}
+                onChange={(e) => { if (!e.target) return; setQuery(e.target.value); }}
+                placeholder="Search topics..."
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none"
+              />
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {topics
+                .filter((t) =>
+                  query.trim() ? (t.name + " " + (t.summary || "")).toLowerCase().includes(query.toLowerCase()) : true
+                )
+                .map((t, i) => {
                   const p = progress[t.name];
                   const pct = p && p.totalLessons > 0 ? Math.round((p.completedLessons / p.totalLessons) * 100) : 0;
                   return (
@@ -675,8 +675,8 @@ export default function SubjectPage() {
                     </div>
                   );
                 })}
-                </div>
-              </>
+            </div>
+          </>
             ) : (
               <div className="mt-4 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-6 text-center text-sm text-[var(--foreground)]/70">
                 No topics yet.

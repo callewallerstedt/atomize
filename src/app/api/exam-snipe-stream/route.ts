@@ -133,12 +133,14 @@ export async function POST(req: NextRequest) {
 
 FIRST: Extract the grade requirements from the exams (e.g., "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p"). This should be at the top level of the JSON as "gradeInfo".
 
-SECOND: Analyze patterns across the exams and write a "patternAnalysis" text (2-3 sentences) that identifies:
+SECOND: Before any analysis, determine a short, broad, and generic course title (1-4 words). Avoid colons, punctuation, subject codes, or overly specific wording. Think of something you’d put on a study guide cover. Return it as "courseName".
+
+THIRD: Analyze patterns across the exams and write a "patternAnalysis" text (2-3 sentences) that identifies:
 - Which topic areas appear most consistently (especially in early/multiple exams)
 - Any recurring question types or concepts
 - Strategic insights about what to focus on
 
-THIRD: Go through EVERY SINGLE QUESTION in all exams and categorize them. Don't skip any questions.
+FOURTH: Go through EVERY SINGLE QUESTION in all exams and categorize them. Don't skip any questions.
 
 For each concept/method, provide:
 1. **Name** - Be slightly more GENERAL/BROAD where it makes sense. Group similar specific topics into broader concepts (e.g., instead of "Monitor-based Synchronization" and "Semaphore-based Synchronization", use "Concurrency Synchronization Primitives")
@@ -170,6 +172,7 @@ IMPORTANT:
 
 Return JSON in this EXACT format:
 {
+  "courseName": "Short, broad study guide title (3-6 plain words, no punctuation)",
   "gradeInfo": "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p",
   "patternAnalysis": "Analysis of patterns across exams (2-3 sentences explaining what appears frequently and in which exams)",
   "concepts": [
@@ -266,6 +269,7 @@ The concepts array MUST be sorted by pointsPerHour descending. Return ALL concep
             type: 'done',
             data: {
               totalExams: numExams,
+              courseName: analysisData?.courseName || null,
               gradeInfo: analysisData?.gradeInfo || null,
               patternAnalysis: analysisData?.patternAnalysis || null,
               concepts: analysisData?.concepts || [],
