@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, Fragment } from "react";
+import { Suspense, useState, useRef, useEffect, Fragment } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { saveSubjectData, saveSubjectDataAsync, StoredSubjectData } from "@/utils/storage";
 import GlowSpinner from "@/components/GlowSpinner";
@@ -358,7 +358,7 @@ const MAX_HISTORY_ITEMS = 20;
 
 // PDF.js will be dynamically imported only on client-side
 
-export default function ExamSnipePage() {
+function ExamSnipeInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -1564,6 +1564,14 @@ export default function ExamSnipePage() {
         }
       `}</style>
     </div>
+  );
+}
+
+export default function ExamSnipePage() {
+  return (
+    <Suspense fallback={null}>
+      <ExamSnipeInner />
+    </Suspense>
   );
 }
 
