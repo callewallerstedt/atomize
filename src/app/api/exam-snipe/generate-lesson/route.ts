@@ -26,7 +26,10 @@ export async function POST(req: NextRequest) {
       historySlug,
       courseName,
       conceptName,
+      conceptStage,
       subConceptName,
+      subConceptLevel,
+      subConceptRole,
       planId,
       planTitle,
       planSummary,
@@ -36,10 +39,11 @@ export async function POST(req: NextRequest) {
       gradeInfo,
       patternAnalysis,
       description,
-      example,
+      studyApproach,
       components,
-      learning_objectives,
-      common_pitfalls,
+      skills,
+      examConnections,
+      pitfalls,
       existingLessons = [],
     } = body || {};
 
@@ -54,10 +58,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "History not found" }, { status: 404 });
     }
 
+    const stringifyList = (value: any, divider = ", ") =>
+      Array.isArray(value)
+        ? value
+            .map((item) => (typeof item === "string" ? item.trim() : item != null ? String(item) : ""))
+            .filter((item) => item.length > 0)
+            .join(divider)
+        : typeof value === "string"
+          ? value
+          : "";
+
     const examContext = [
       `Course Name: ${courseName || history.courseName || "Exam Snipe Course"}`,
       `Broader Concept: ${conceptName}`,
       `Focused Sub-Concept: ${subConceptName}`,
+      conceptStage ? `Concept Stage: ${conceptStage}` : "",
+      subConceptLevel ? `Subtopic Level: ${subConceptLevel}` : "",
+      subConceptRole ? `Instructional Role: ${subConceptRole}` : "",
       planSummary ? `Plan Summary: ${planSummary}` : "",
       planEstimatedTime ? `Estimated Study Time: ${planEstimatedTime}` : "",
       Array.isArray(planObjectives) && planObjectives.length
@@ -67,10 +84,11 @@ export async function POST(req: NextRequest) {
       gradeInfo ? `Grade requirements: ${gradeInfo}` : "",
       patternAnalysis ? `Pattern analysis: ${patternAnalysis}` : "",
       description ? `Key focus from analysis: ${description}` : "",
-      example ? `Representative exam example: ${example}` : "",
-      components ? `Technical components to cover: ${components}` : "",
-      learning_objectives ? `Learning objectives from analysis: ${learning_objectives}` : "",
-      common_pitfalls ? `Common pitfalls to address: ${common_pitfalls}` : "",
+      studyApproach ? `Recommended Study Approach: ${studyApproach}` : "",
+      stringifyList(components) ? `Technical components to cover: ${stringifyList(components)}` : "",
+      stringifyList(skills) ? `Skills to explicitly build: ${stringifyList(skills)}` : "",
+      stringifyList(examConnections, "\n- ") ? `Exam references:\n- ${stringifyList(examConnections, "\n- ")}` : "",
+      stringifyList(pitfalls) ? `Common pitfalls to address: ${stringifyList(pitfalls)}` : "",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -97,10 +115,12 @@ Return JSON:
 
 Rules:
 - Lesson must stay laser-focused on "${subConceptName}".
-- Follow the objectives and address pitfalls explicitly.
-- Include worked examples tied to exam scenarios.
+- Follow the objectives and address pitfalls explicitly (call them out and defuse them).
+- Integrate the listed technical components and skills through explanations, worked examples, and practice flows.
+- Include worked examples tied to the exam references above.
+- Scaffold the narrative from the provided level toward mastery, honoring the recommended study approach.
 - End with a short recap paragraph before the quiz.
-- Quiz must include 2-3 realistic practice problems.
+- Quiz must include 2-3 realistic practice problems aligned with the exam references.
 `;
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });

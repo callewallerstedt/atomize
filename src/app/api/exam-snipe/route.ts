@@ -131,71 +131,70 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: 'system',
-          content: `You are an expert exam analyzer. Analyze the provided old exams and identify the most valuable concepts/methods to study.
+          content: `You are an expert exam analyst. Study the historic exams and convert them into a structured study blueprint.
 
-FIRST: Extract the grade requirements from the exams (e.g., "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p"). This should be at the top level of the JSON as "gradeInfo".
+ALWAYS FOLLOW THESE STEPS:
+1. Extract the grade requirements from the exams (e.g., "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p") and place them in "gradeInfo".
+2. Craft a short, broad, and generic course title (1-4 words, no punctuation or course codes) for "courseName".
+3. Write a "patternAnalysis" paragraph (2-3 sentences) summarizing which topic families dominate the exams, how question formats evolve, and how difficulty escalates.
+4. Review EVERY single question across ALL exams. Group them into AT LEAST FOUR broad "concepts" that together cover the most important knowledge. Concepts must be ordered in the recommended teaching sequence from foundational material through advanced mastery.
 
-SECOND: Analyze patterns across the exams and write a "patternAnalysis" text (2-3 sentences) that identifies:
-- Which topic areas appear most consistently (especially in early/multiple exams)
-- Any recurring question types or concepts
-- Strategic insights about what to focus on
+FOR EACH MAIN CONCEPT:
+- Provide:
+  - "name": Broad theme that bundles several related exam topics.
+  - "learningStage": one of "foundation", "core", "advanced", or "mastery".
+  - "overview": 2-3 sentences explaining what the concept covers and why it matters on the exam.
+- Include a "subtopics" array with 3 or more subtopics (keep them broad—each should combine multiple related exam questions, not single formulas).
 
-THIRD: Go through EVERY SINGLE QUESTION in all exams and categorize them. Don't skip any questions.
+FOR EACH SUBTOPIC:
+- "name": Descriptive label a student would recognize.
+- "level": "fundamental", "intermediate", or "advanced".
+- "role": "introductory", "core", "applied", or "mastery".
+- "description": 2 sentences describing what the learner must be able to do.
+- "components": array of the essential elements/techniques/tools that must be mastered (list every key component).
+- "skills": array of 3-6 action-oriented capabilities (start items with verbs like "Analyze", "Construct", "Explain").
+- "studyApproach": 1-2 sentences describing how to practice and build fluency.
+- "examConnections": array referencing the exact exams/questions or recurring patterns that justify this subtopic (e.g., "Exam 2022 Q4 - long proof on ...").
+- "pitfalls": array of 2-3 mistakes or misconceptions to avoid.
 
-For each concept/method, provide:
-1. **Name** - Be slightly more GENERAL/BROAD where it makes sense. Group similar specific topics into broader concepts (e.g., instead of "Monitor-based Synchronization" and "Semaphore-based Synchronization", use "Concurrency Synchronization Primitives")
-2. **Average points** - typical points awarded for this concept across all exams (e.g., "10p", "15p")
-3. **Frequency** - how many exams out of the total it appeared in (just the number, not a fraction)
-4. **Estimated study time** - realistic hours needed to master this broader concept (e.g., "0.5h", "1h", "2h", "3h", "5h")
-5. **Points per hour** - calculate as: (avg_points_number * frequency * recency_bonus) / study_time_hours
-   - recency_bonus = 1.3 if appears in FIRST exam, 1.2 if in first TWO exams, 1.1 if in first THREE exams, otherwise 1.0
-   - This prioritizes concepts that appear in early exams
-6. **Details** - Array of specific questions/topics found under this broader concept. For each detail include:
-   - topic: The specific question or subtopic (e.g., "Implement monitor with wait/signal")
-   - points: Points for this specific question (e.g., "8p")
-   - exam: Which exam it appeared in (e.g., "Exam 1", "Exam 2")
+REQUIREMENTS:
+- Ensure the very first concept contains at least one subtopic whose "role" is "introductory" AND whose "level" is "fundamental", explicitly teaching the basics and forming the student's foundation.
+- Keep the progression clear: early concepts/subtopics should build fundamentals, later ones should advance difficulty and integrate skills.
+- Do not include points, time estimates, efficiency math, or recency bonuses anywhere.
+- Cover every exam question somewhere in the structure—no omissions.
 
-IMPORTANT:
-- Go through ALL questions in ALL exams - don't miss any
-- Group related concepts into BROADER categories when appropriate (not too specific)
-- Prioritize concepts that appear in EARLY exams (via recency bonus)
-- Be realistic about study time - broader concepts take more time
-- Calculate Points/Hour CORRECTLY with recency bonus
-- Sort concepts by pointsPerHour in DESCENDING order (highest first)
-- Provide detailed breakdown in the "details" array so users can see exactly what questions fall under each concept
-
-Return JSON in this EXACT format:
+Return JSON in this exact format:
 {
+  "courseName": "Short broad title",
   "gradeInfo": "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p",
-  "patternAnalysis": "Analysis of patterns across exams (2-3 sentences explaining what appears frequently and in which exams)",
+  "patternAnalysis": "2-3 sentence summary highlighting trend and focus",
   "concepts": [
     {
-      "name": "Broader Concept/Topic Area",
-      "avgPoints": "10p",
-      "frequency": 2,
-      "estimatedTime": "2h",
-      "pointsPerHour": "10.0",
-      "details": [
+      "name": "Broad Concept Name",
+      "learningStage": "foundation",
+      "overview": "2-3 sentence explanation of scope and exam importance.",
+      "subtopics": [
         {
-          "topic": "Specific question or subtopic found",
-          "points": "8p",
-          "exam": "Exam 1"
-        },
-        {
-          "topic": "Another specific question",
-          "points": "10p",
-          "exam": "Exam 2"
+          "name": "Subtopic Name",
+          "level": "fundamental",
+          "role": "introductory",
+          "description": "What this subtopic teaches and how it shows up on exams.",
+          "components": ["Component A", "Component B", "Component C"],
+          "skills": ["Explain ...", "Apply ...", "Diagnose ..."],
+          "studyApproach": "Guidance on how to study/practice this subtopic.",
+          "examConnections": ["Exam 2022 Q3 - ...", "Exam 2021 Q1 - ..."],
+          "pitfalls": ["Common mistake 1", "Common mistake 2"]
         }
       ]
     }
   ]
 }
 
-The concepts array MUST be sorted by pointsPerHour descending.`
+Ensure arrays contain meaningful content (no placeholders).`
         },
         {
           role: 'user',
-          content: `Analyze these ${numExams} exam PDF(s) and return a JSON list of concepts ranked by Points/Hour.\n\n${combinedText}`
+          content: `Analyze these ${numExams} exam PDF(s) and return the structured JSON study blueprint described above.\n\n${combinedText}`
         }
       ],
       max_tokens: 4000,
@@ -229,6 +228,7 @@ The concepts array MUST be sorted by pointsPerHour descending.`
       ok: true,
       data: {
         totalExams: numExams,
+        courseName: analysisData.courseName || null,
         gradeInfo: analysisData.gradeInfo || null,
         patternAnalysis: analysisData.patternAnalysis || null,
         concepts: analysisData.concepts || [],

@@ -10,6 +10,15 @@ import { saveSubjectData, StoredSubjectData, loadSubjectData } from "@/utils/sto
 
 type Subject = { name: string; slug: string };
 
+type ExamHistoryCard = {
+  id: string;
+  slug: string;
+  courseName: string;
+  createdAt: string;
+  fileCount: number;
+  topConcept: string | null;
+};
+
 function readSubjects(): Subject[] {
   if (typeof window === "undefined") return [];
   try {
@@ -41,6 +50,8 @@ function Home() {
   const [isIOSStandalone, setIsIOSStandalone] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [examHistory, setExamHistory] = useState<ExamHistoryCard[]>([]);
+  const [loadingExamHistory, setLoadingExamHistory] = useState(false);
   
   // Check authentication and sync subjects from server
   useEffect(() => {
@@ -118,6 +129,69 @@ function Home() {
       setQuickLearnOpen(true);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (checkingAuth) return;
+    if (!isAuthenticated) {
+      setExamHistory([]);
+      setLoadingExamHistory(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingExamHistory(true);
+
+    (async () => {
+      try {
+        const res = await fetch("/api/exam-snipe/history", { credentials: "include" });
+        const json = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (res.ok && Array.isArray(json?.history)) {
+          const mapped = (json.history as any[]).map((item) => {
+            const slug = typeof item?.slug === "string" ? item.slug : "";
+            const courseName =
+              typeof item?.courseName === "string" && item.courseName.trim()
+                ? item.courseName.trim()
+                : typeof item?.results?.courseName === "string" && item.results.courseName.trim()
+                  ? item.results.courseName.trim()
+                  : "Exam Snipe Course";
+            const createdAt = typeof item?.createdAt === "string" ? item.createdAt : new Date().toISOString();
+            const fileCount = Array.isArray(item?.fileNames) ? item.fileNames.length : 0;
+            const topConcept =
+              typeof item?.results?.concepts?.[0]?.name === "string"
+                ? item.results.concepts[0].name
+                : null;
+            const idSource = item?.id ?? slug ?? (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+            return {
+              id: String(idSource),
+              slug,
+              courseName,
+              createdAt,
+              fileCount,
+              topConcept,
+            } as ExamHistoryCard;
+          });
+          const filtered = mapped.filter((item) => item.slug);
+          filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setExamHistory(filtered.slice(0, 6));
+        } else {
+          setExamHistory([]);
+        }
+      } catch {
+        if (!cancelled) {
+          setExamHistory([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingExamHistory(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [checkingAuth, isAuthenticated]);
 
   // Show login page if not authenticated
   // Don't show spinner while checking auth - let Shell's LoadingScreen handle it
@@ -537,6 +611,57 @@ function Home() {
         </div>
         {subjects.length === 0 && null}
       </div>
+
+      {examHistory.length > 0 && (
+        <div className="mx-auto mt-10 w-full max-w-5xl">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-[var(--foreground)]">Sniped exams</h2>
+            <div className="flex items-center gap-2 text-xs text-[var(--foreground)]/55">
+              {loadingExamHistory && <GlowSpinner size={18} padding={0} inline ariaLabel="Loading sniped exams" idSuffix="sniped-home" />}
+              <span>{examHistory.length} saved</span>
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {examHistory.map((record) => (
+              <div
+                key={record.id}
+                className="relative rounded-2xl bg-[var(--background)] p-5 text-[var(--foreground)] transition-all duration-200 shadow-[0_2px_8px_rgba(0,0,0,0.7)] cursor-pointer hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)]"
+                role="link"
+                tabIndex={0}
+                onClick={() => router.push(`/exam-snipe?resume=${encodeURIComponent(record.slug)}`)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    router.push(`/exam-snipe?resume=${encodeURIComponent(record.slug)}`);
+                  }
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold leading-snug truncate">{record.courseName}</div>
+                    <div className="mt-1 text-xs text-[var(--foreground)]/55">
+                      {new Date(record.createdAt).toLocaleString(undefined, { dateStyle: "medium" })}
+                    </div>
+                  </div>
+                  <div className="text-[10px] uppercase tracking-wide text-[var(--foreground)]/45">
+                    Exam Snipe
+                  </div>
+                </div>
+                <div className="mt-3 text-xs text-[var(--foreground)]/60">
+                  {record.fileCount} exam{record.fileCount === 1 ? "" : "s"}
+                  {record.topConcept ? ` • Top concept: ${record.topConcept}` : ""}
+                </div>
+                <div className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-[var(--accent-cyan)]/80">
+                  <span>Open analysis</span>
+                  <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M5 12h14M13 6l6 6-6 6" />
+                  </svg>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Note from developer */}
       <div className="mx-auto mt-8 w-full max-w-5xl relative">

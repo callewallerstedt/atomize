@@ -12,7 +12,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0",
+    "@prisma/client": "^6.19.0",
     "@types/markdown-it": "^14.1.2",
     "@types/puppeteer": "^5.4.7",
     "@types/react-syntax-highlighter": "^15.5.13",
@@ -29,7 +29,6 @@
     "pdf2text": "^1.1.0",
     "pdfjs-dist": "^5.4.394",
     "prism-react-renderer": "^2.4.1",
-    "prisma": "^5.22.0",
     "puppeteer": "^24.28.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
@@ -54,6 +53,7 @@
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.0.1",
+    "prisma": "^6.19.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

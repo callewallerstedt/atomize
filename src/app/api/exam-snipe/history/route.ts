@@ -16,7 +16,7 @@ export async function GET() {
     take: MAX_HISTORY_ITEMS,
   });
 
-  const history = rows.map((row) => ({
+  const history = rows.map((row: any) => ({
     id: row.id,
     courseName: row.courseName,
     slug: row.slug,
@@ -77,7 +77,7 @@ export async function POST(req: Request) {
     });
     if (toDelete.length > 0) {
       await prisma.examSnipeHistory.deleteMany({
-        where: { id: { in: toDelete.map((row) => row.id) } },
+        where: { id: { in: toDelete.map((row: { id: string }) => row.id) } },
       });
     }
   }

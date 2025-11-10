@@ -57,13 +57,16 @@ export default function NodePage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [larsOpen, setLarsOpen] = useState(false);
   const [practiceOpen, setPracticeOpen] = useState(false);
-  const [flashcardOptionsOpen, setFlashcardOptionsOpen] = useState(false);
-  const [flashcardModalOpen, setFlashcardModalOpen] = useState(false);
-  const [generatingFlashcards, setGeneratingFlashcards] = useState(false);
-  const [pendingFlashcardCount, setPendingFlashcardCount] = useState<number | null>(null);
-  const [flashcardError, setFlashcardError] = useState<string | null>(null);
-  const [flashcardFlipped, setFlashcardFlipped] = useState(false);
-  const [currentFlashcardIndex, setCurrentFlashcardIndex] = useState(0);
+const [flashcardOptionsOpen, setFlashcardOptionsOpen] = useState(false);
+const [flashcardModalOpen, setFlashcardModalOpen] = useState(false);
+const [generatingFlashcards, setGeneratingFlashcards] = useState(false);
+const [pendingFlashcardCount, setPendingFlashcardCount] = useState<number | null>(null);
+const [flashcardError, setFlashcardError] = useState<string | null>(null);
+const [flashcardFlipped, setFlashcardFlipped] = useState(false);
+const [currentFlashcardIndex, setCurrentFlashcardIndex] = useState(0);
+const [starredFlashcards, setStarredFlashcards] = useState<Set<string>>(new Set());
+const [showOnlyStarred, setShowOnlyStarred] = useState(false);
+const [isShuffleActive, setIsShuffleActive] = useState(false);
   const flashcardCounts = [3, 5, 7, 9] as const;
   // Multiple choice quiz state
   const [mcQuizOpen, setMcQuizOpen] = useState(false);
@@ -73,6 +76,22 @@ export default function NodePage() {
   const [generatingMcQuiz, setGeneratingMcQuiz] = useState(false);
   const currentLesson = (content?.lessons?.[currentLessonIndex] ?? null) as TopicGeneratedLesson | null;
   const lessonFlashcards: LessonFlashcard[] = currentLesson?.flashcards ?? [];
+
+  function getRandomCardIndex(filtered: Array<{ id: string }>, currentIndex: number): number {
+    if (filtered.length <= 1) return currentIndex;
+    let newIndex = currentIndex;
+    while (filtered.length > 1 && newIndex === currentIndex) {
+      newIndex = Math.floor(Math.random() * filtered.length);
+    }
+    return newIndex;
+  }
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`starredFlashcards:${slug}`);
+      if (saved) setStarredFlashcards(new Set(JSON.parse(saved)));
+    } catch {}
+  }, [slug]);
 
   async function readLesson() {
     if (isPlaying && audioRef.current) {
@@ -226,11 +245,55 @@ export default function NodePage() {
     return Array.from(new Set(names)).slice(0, 200);
   }, [subjectData]);
 
-  const openFlashcardsViewer = (index = 0, total = lessonFlashcards.length) => {
-    if (!total) return;
-    const safeIndex = Math.min(Math.max(index, 0), total - 1);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`starredFlashcards:${slug}`);
+      if (saved) setStarredFlashcards(new Set(JSON.parse(saved)));
+    } catch {}
+  }, [slug]);
+
+  const lessonCards = lessonFlashcards.map((card, index) => ({
+    ...card,
+    id: `${slug}:${title}:${currentLesson?.title || "Lesson"}:${index}:${card.prompt}`,
+    topicName: title,
+    lessonTitle: currentLesson?.title || "Lesson",
+  }));
+
+  const filteredLessonCards = showOnlyStarred
+    ? lessonCards.filter((card) => starredFlashcards.has(card.id))
+    : lessonCards;
+
+function toggleStar(flashcardId: string) {
+  const next = new Set(starredFlashcards);
+  if (next.has(flashcardId)) {
+    next.delete(flashcardId);
+  } else {
+    next.add(flashcardId);
+  }
+  setStarredFlashcards(next);
+  try {
+    localStorage.setItem(`starredFlashcards:${slug}`, JSON.stringify(Array.from(next)));
+  } catch {}
+
+  if (showOnlyStarred) {
+    const remaining = lessonCards.filter((card) => next.has(card.id));
+    if (remaining.length === 0) {
+      setShowOnlyStarred(false);
+      setCurrentFlashcardIndex(0);
+      setFlashcardFlipped(false);
+    } else if (currentFlashcardIndex >= remaining.length) {
+      setCurrentFlashcardIndex(remaining.length - 1);
+    }
+  }
+}
+
+  const openFlashcardsViewer = (index = 0) => {
+    if (!lessonCards.length) return;
+    const safeIndex = Math.min(Math.max(index, 0), lessonCards.length - 1);
     setCurrentFlashcardIndex(safeIndex);
     setFlashcardFlipped(false);
+    setShowOnlyStarred(false);
+    setIsShuffleActive(false);
     setFlashcardModalOpen(true);
     setFlashcardOptionsOpen(false);
   };
@@ -238,14 +301,29 @@ export default function NodePage() {
   const handleCloseFlashcards = () => {
     setFlashcardModalOpen(false);
     setFlashcardFlipped(false);
+    setShowOnlyStarred(false);
+    setIsShuffleActive(false);
   };
 
   useEffect(() => {
     if (!lessonFlashcards.length) {
       setFlashcardModalOpen(false);
       setFlashcardFlipped(false);
+      setShowOnlyStarred(false);
+      setIsShuffleActive(false);
+      setCurrentFlashcardIndex(0);
     }
   }, [lessonFlashcards.length]);
+
+  useEffect(() => {
+    if (!flashcardModalOpen) return;
+    if (filteredLessonCards.length === 0) {
+      setCurrentFlashcardIndex(0);
+      setFlashcardFlipped(false);
+    } else if (currentFlashcardIndex >= filteredLessonCards.length) {
+      setCurrentFlashcardIndex(filteredLessonCards.length - 1);
+    }
+  }, [flashcardModalOpen, filteredLessonCards.length, currentFlashcardIndex]);
 
   useEffect(() => {
     setFlashcardOptionsOpen(false);
@@ -255,6 +333,8 @@ export default function NodePage() {
     setFlashcardModalOpen(false);
     setFlashcardFlipped(false);
     setCurrentFlashcardIndex(0);
+    setShowOnlyStarred(false);
+    setIsShuffleActive(false);
   }, [currentLessonIndex]);
 
   async function generateFlashcards(count: number) {
@@ -306,7 +386,7 @@ export default function NodePage() {
       // Persist to local storage and server (await server sync to guarantee durability)
       await upsertNodeContentAsync(slug, title, updatedContent as any);
 
-      openFlashcardsViewer(0, cards.length);
+      openFlashcardsViewer(0);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to generate flashcards";
       setFlashcardError(message);
@@ -1405,7 +1485,7 @@ export default function NodePage() {
                     {lessonFlashcards.length > 0 && (
                       <div className="text-xs text-[var(--foreground)]/70">
                         <button
-                          onClick={() => openFlashcardsViewer(0, lessonFlashcards.length)}
+                          onClick={() => openFlashcardsViewer(0)}
                           className="hover:underline !shadow-none"
                         >
                           View saved flashcards ({lessonFlashcards.length})
@@ -1723,70 +1803,254 @@ export default function NodePage() {
         )}
       </div>
     </div>
-    {flashcardModalOpen && lessonFlashcards.length > 0 && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-        <div className="relative w-full max-w-xl rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/95 p-6 shadow-2xl">
-          <button
-            onClick={handleCloseFlashcards}
-            className="absolute right-4 top-4 h-8 w-8 rounded-full border border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 flex items-center justify-center"
-            aria-label="Close flashcards"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
-          </button>
-          <div className="mb-4 flex items-center justify-between text-sm text-[var(--foreground)]/70">
-            <span>
-              Flashcard {currentFlashcardIndex + 1} of {lessonFlashcards.length}
-            </span>
-          </div>
-          <div className="relative flex items-center justify-center gap-3">
+    {flashcardModalOpen && lessonFlashcards.length > 0 && (() => {
+      const filtered = filteredLessonCards;
+      const currentCard = filtered[currentFlashcardIndex];
+      const isStarred = currentCard ? starredFlashcards.has(currentCard.id) : false;
+      return filtered.length > 0 ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+          <div className="relative w-full max-w-xl rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/95 p-6 shadow-2xl">
             <button
-              onClick={() => {
-                if (currentFlashcardIndex === 0) return;
-                setCurrentFlashcardIndex((idx) => Math.max(idx - 1, 0));
-                setFlashcardFlipped(false);
-              }}
-              disabled={currentFlashcardIndex === 0}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--foreground)]/20 text-[var(--foreground)]/70 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 disabled:opacity-40 disabled:cursor-not-allowed"
-              aria-label="Previous flashcard"
+              onClick={handleCloseFlashcards}
+              className="absolute right-4 top-4 h-8 w-8 rounded-full border border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 flex items-center justify-center"
+              aria-label="Close flashcards"
             >
               <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M15 18l-6-6 6-6" />
+                <path d="M6 6l12 12M18 6L6 18" />
               </svg>
             </button>
-            <div
-              className="relative h-72 w-full max-w-md cursor-pointer overflow-hidden rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/80 p-6 text-center shadow-inner"
-              onClick={() => setFlashcardFlipped((f) => !f)}
-            >
-              <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 ${flashcardFlipped ? 'opacity-0' : 'opacity-100'}`}>
-                <AutoFixMarkdown>{lessonFlashcards[currentFlashcardIndex]?.prompt || ""}</AutoFixMarkdown>
+            <div className="mb-4">
+              <div className="mb-1">
+                <span className="text-sm text-[var(--foreground)]/70">
+                  Flashcard {currentFlashcardIndex + 1} of {filtered.length}
+                  {showOnlyStarred && <span className="text-xs ml-1">(starred only)</span>}
+                </span>
               </div>
-              <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 ${flashcardFlipped ? 'opacity-100' : 'opacity-0'}`}>
-                <AutoFixMarkdown>{lessonFlashcards[currentFlashcardIndex]?.answer || ""}</AutoFixMarkdown>
-              </div>
-              <div className="absolute bottom-4 left-0 right-0 text-xs text-[var(--foreground)]/60">
-                {flashcardFlipped ? "Tap to view prompt" : "Tap to reveal answer"}
+              <div className="text-xs text-[var(--foreground)]/50 text-left">
+                {currentCard?.topicName} • {currentCard?.lessonTitle}
               </div>
             </div>
-            <button
-              onClick={() => {
-                if (currentFlashcardIndex >= lessonFlashcards.length - 1) return;
-                setCurrentFlashcardIndex((idx) => Math.min(idx + 1, lessonFlashcards.length - 1));
-                setFlashcardFlipped(false);
-              }}
-              disabled={currentFlashcardIndex >= lessonFlashcards.length - 1}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--foreground)]/20 text-[var(--foreground)]/70 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 disabled:opacity-40 disabled:cursor-not-allowed"
-              aria-label="Next flashcard"
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 6l6 6-6 6" />
-              </svg>
-            </button>
+            <div className="relative flex items-center justify-center gap-3">
+              <div
+                className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                style={{
+                  padding: '1.5px',
+                  background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+                  opacity: (!isShuffleActive && currentFlashcardIndex === 0) ? 0.4 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (!(!isShuffleActive && currentFlashcardIndex === 0)) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!(!isShuffleActive && currentFlashcardIndex === 0)) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                  }
+                }}
+              >
+                <button
+                  onClick={() => {
+                    if (isShuffleActive) {
+                      const newIndex = getRandomCardIndex(filtered, currentFlashcardIndex);
+                      setCurrentFlashcardIndex(newIndex);
+                    } else {
+                      if (currentFlashcardIndex === 0) return;
+                      setCurrentFlashcardIndex((idx) => Math.max(idx - 1, 0));
+                    }
+                    setFlashcardFlipped(false);
+                  }}
+                  disabled={!isShuffleActive && currentFlashcardIndex === 0}
+                  className="flex h-10 w-10 items-center justify-center text-white bg-[var(--background)]/90 backdrop-blur-md transition-all duration-300 ease-out disabled:cursor-not-allowed"
+                  style={{ borderRadius: 'calc(0.75rem - 1.5px)' }}
+                  aria-label="Previous flashcard"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M15 18l-6-6 6-6" />
+                  </svg>
+                </button>
+              </div>
+              <div
+                className="relative h-72 w-full max-w-md cursor-pointer overflow-hidden rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/80 p-6 text-center shadow-inner"
+                onClick={() => setFlashcardFlipped((f) => !f)}
+              >
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ opacity: 0.08 }}>
+                  <GlowSpinner size={120} ariaLabel="" idSuffix="flashcard-bg-lesson" />
+                </div>
+                {currentCard && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); e.preventDefault(); toggleStar(currentCard.id); }}
+                    onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                    className="absolute right-2 top-2 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/90 backdrop-blur-sm text-[var(--foreground)]/70 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 transition-colors pointer-events-auto"
+                    aria-label={isStarred ? "Unstar flashcard" : "Star flashcard"}
+                  >
+                    <svg className={`h-5 w-5 transition-colors ${isStarred ? 'fill-yellow-400 text-yellow-400' : ''}`} viewBox="0 0 24 24" fill={isStarred ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                    </svg>
+                  </button>
+                )}
+                <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-0' : 'opacity-100'}`}>
+                  <div className="pointer-events-auto">
+                    <AutoFixMarkdown>{currentCard?.prompt || ""}</AutoFixMarkdown>
+                  </div>
+                </div>
+                <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-100' : 'opacity-0'}`}>
+                  <div className="pointer-events-auto">
+                    <AutoFixMarkdown>{currentCard?.answer || ""}</AutoFixMarkdown>
+                  </div>
+                </div>
+                <div className="absolute bottom-4 left-0 right-0 text-xs text-[var(--foreground)]/60 z-10 pointer-events-none">
+                  {flashcardFlipped ? "Tap to view prompt" : "Tap to reveal answer"}
+                </div>
+              </div>
+              <div
+                className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                style={{
+                  padding: '1.5px',
+                  background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+                  opacity: (!isShuffleActive && currentFlashcardIndex >= filtered.length - 1) ? 0.4 : 1,
+                }}
+                onMouseEnter={(e) => {
+                  if (!(!isShuffleActive && currentFlashcardIndex >= filtered.length - 1)) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!(!isShuffleActive && currentFlashcardIndex >= filtered.length - 1)) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                  }
+                }}
+              >
+                <button
+                  onClick={() => {
+                    if (isShuffleActive) {
+                      const newIndex = getRandomCardIndex(filtered, currentFlashcardIndex);
+                      setCurrentFlashcardIndex(newIndex);
+                    } else {
+                      if (currentFlashcardIndex >= filtered.length - 1) return;
+                      setCurrentFlashcardIndex((idx) => Math.min(idx + 1, filtered.length - 1));
+                    }
+                    setFlashcardFlipped(false);
+                  }}
+                  disabled={!isShuffleActive && currentFlashcardIndex >= filtered.length - 1}
+                  className="flex h-10 w-10 items-center justify-center text-white bg-[var(--background)]/90 backdrop-blur-md transition-all duration-300 ease-out disabled:cursor-not-allowed"
+                  style={{ borderRadius: 'calc(0.75rem - 1.5px)' }}
+                  aria-label="Next flashcard"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 6l6 6-6 6" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="mt-4 flex justify-center gap-3">
+              <div
+                className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                style={{
+                  padding: '1.5px',
+                  background: isShuffleActive
+                    ? 'linear-gradient(135deg, rgba(0, 229, 255, 1), rgba(255, 45, 150, 1))'
+                    : 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                  boxShadow: isShuffleActive
+                    ? '0 0 20px rgba(0, 229, 255, 0.4), 0 0 40px rgba(255, 45, 150, 0.2)'
+                    : '0 2px 8px rgba(0, 0, 0, 0.3)',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isShuffleActive) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isShuffleActive) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                  }
+                }}
+              >
+                <button
+                  onClick={() => setIsShuffleActive(!isShuffleActive)}
+                  className="flex h-10 items-center justify-center px-3 text-xs font-medium text-white bg-[var(--background)]/90 backdrop-blur-md transition-all duration-300 ease-out"
+                  style={{ borderRadius: 'calc(0.75rem - 1.5px)' }}
+                  aria-label={isShuffleActive ? "Disable shuffle mode" : "Enable shuffle mode"}
+                >
+                  Shuffle
+                </button>
+              </div>
+              <div
+                className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                style={{
+                  padding: '1.5px',
+                  background: showOnlyStarred
+                    ? 'linear-gradient(135deg, rgba(251, 191, 36, 0.8), rgba(245, 158, 11, 0.8))'
+                    : 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                  boxShadow: showOnlyStarred
+                    ? '0 0 20px rgba(251, 191, 36, 0.3), 0 0 40px rgba(245, 158, 11, 0.15)'
+                    : '0 2px 8px rgba(0, 0, 0, 0.3)',
+                }}
+                onMouseEnter={(e) => {
+                  if (!showOnlyStarred) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!showOnlyStarred) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                  }
+                }}
+              >
+                <button
+                  onClick={() => {
+                    setShowOnlyStarred(!showOnlyStarred);
+                    setCurrentFlashcardIndex(0);
+                    setFlashcardFlipped(false);
+                  }}
+                  className="flex h-10 items-center gap-1.5 px-3 text-xs font-medium text-white bg-[var(--background)]/90 backdrop-blur-md transition-all duration-300 ease-out"
+                  style={{ borderRadius: 'calc(0.75rem - 1.5px)' }}
+                  aria-label={showOnlyStarred ? "Show all flashcards" : "Show only starred flashcards"}
+                >
+                  <svg className={`h-4 w-4 ${showOnlyStarred ? 'fill-yellow-400 text-yellow-400' : ''}`} viewBox="0 0 24 24" fill={showOnlyStarred ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                  </svg>
+                  {showOnlyStarred ? 'Starred Only' : 'Show Starred'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    )}
+      ) : (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+          <div className="relative w-full max-w-xl rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/95 p-6 shadow-2xl">
+            <button
+              onClick={() => { setFlashcardModalOpen(false); setShowOnlyStarred(false); }}
+              className="absolute right-4 top-4 h-8 w-8 rounded-full border border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 flex items-center justify-center"
+              aria-label="Close flashcards"
+            >
+              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+            <div className="text-center py-8">
+              <p className="text-[var(--foreground)] mb-4">No starred flashcards yet.</p>
+              <button
+                onClick={() => { setShowOnlyStarred(false); setCurrentFlashcardIndex(0); }}
+                className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
+              >
+                Show All Flashcards
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
     {/* Word explanation box - rendered as portal to avoid parent CSS transforms */}
     {showExplanation && createPortal(
       <div

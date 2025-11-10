@@ -28,6 +28,26 @@ body {
   color: var(--foreground);
 }
 
+/* Globally hide scrollbars while preserving scrollability */
+html, body {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none;    /* Firefox */
+}
+* {
+  scrollbar-width: none;    /* Firefox - all elements */
+}
+*::-webkit-scrollbar {
+  display: none;            /* Chrome, Safari, Opera */
+  width: 0 !important;
+  height: 0 !important;
+}
+
+@media (max-width: 1440px) and (min-width: 900px) {
+  html {
+    zoom: 0.8;
+  }
+}
+
 .hoverable-word {
   position: relative;
   cursor: pointer;

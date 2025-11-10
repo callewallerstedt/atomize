@@ -72,3 +72,4 @@ Return the shortened lesson in the same markdown format, but much more concise. 
   }
 }
 
+

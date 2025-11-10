@@ -129,90 +129,70 @@ export async function POST(req: NextRequest) {
           messages: [
             {
               role: 'system',
-              content: `You are an expert exam analyzer. Analyze the provided old exams and identify the most valuable concepts/methods to study.
+              content: `You are an expert exam analyst. Study the historic exams and convert them into a structured study blueprint.
 
-FIRST: Extract the grade requirements from the exams (e.g., "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p"). This should be at the top level of the JSON as "gradeInfo".
+ALWAYS FOLLOW THESE STEPS:
+1. Extract the grade requirements from the exams (e.g., "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p") and place them in "gradeInfo".
+2. Craft a short, broad, and generic course title (1-4 words, no punctuation or course codes) for "courseName".
+3. Write a "patternAnalysis" paragraph (2-3 sentences) summarizing which topic families dominate the exams, how question formats evolve, and how difficulty escalates.
+4. Review EVERY single question across ALL exams. Group them into AT LEAST FOUR broad "concepts" that together cover the most important knowledge. Concepts must be ordered in the recommended teaching sequence from foundational material through advanced mastery.
 
-SECOND: Before any analysis, determine a short, broad, and generic course title (1-4 words). Avoid colons, punctuation, subject codes, or overly specific wording. Think of something you’d put on a study guide cover. Return it as "courseName".
+FOR EACH MAIN CONCEPT:
+- Provide:
+  - "name": Broad theme that bundles several related exam topics.
+  - "learningStage": one of "foundation", "core", "advanced", or "mastery".
+  - "overview": 2-3 sentences explaining what the concept covers and why it matters on the exam.
+- Include a "subtopics" array with 3 or more subtopics (keep them broad—each should combine multiple related exam questions, not single formulas).
 
-THIRD: Analyze patterns across the exams and write a "patternAnalysis" text (2-3 sentences) that identifies:
-- Which topic areas appear most consistently (especially in early/multiple exams)
-- Any recurring question types or concepts
-- Strategic insights about what to focus on
+FOR EACH SUBTOPIC:
+- "name": Descriptive label a student would recognize.
+- "level": "fundamental", "intermediate", or "advanced".
+- "role": "introductory", "core", "applied", or "mastery".
+- "description": 2 sentences describing what the learner must be able to do.
+- "components": array of the essential elements/techniques/tools that must be mastered (list every key component).
+- "skills": array of 3-6 action-oriented capabilities (start items with verbs like "Analyze", "Construct", "Explain").
+- "studyApproach": 1-2 sentences describing how to practice and build fluency.
+- "examConnections": array referencing the exact exams/questions or recurring patterns that justify this subtopic (e.g., "Exam 2022 Q4 - long proof on ...").
+- "pitfalls": array of 2-3 mistakes or misconceptions to avoid.
 
-FOURTH: Go through EVERY SINGLE QUESTION in all exams and categorize them. Don't skip any questions.
+REQUIREMENTS:
+- Ensure the very first concept contains at least one subtopic whose "role" is "introductory" AND whose "level" is "fundamental", explicitly teaching the basics and forming the student's foundation.
+- Keep the progression clear: early concepts/subtopics should build fundamentals, later ones should advance difficulty and integrate skills.
+- Do not include points, time estimates, efficiency math, or recency bonuses anywhere.
+- Cover every exam question somewhere in the structure—no omissions.
 
-For each concept/method, provide:
-1. **Name** - Be slightly more GENERAL/BROAD where it makes sense. Group similar specific topics into broader concepts (e.g., instead of "Monitor-based Synchronization" and "Semaphore-based Synchronization", use "Concurrency Synchronization Primitives")
-2. **Average points** - typical points awarded for this concept across all exams (e.g., "10p", "15p")
-3. **Frequency** - how many exams out of the total it appeared in (just the number, not a fraction)
-4. **Estimated study time** - realistic hours needed to master this broader concept (e.g., "0.5h", "1h", "2h", "3h", "5h")
-5. **Points per hour** - calculate as: (avg_points_number * frequency * recency_bonus) / study_time_hours
-   - recency_bonus = 1.3 if appears in FIRST exam, 1.2 if in first TWO exams, 1.1 if in first THREE exams, otherwise 1.0
-   - This prioritizes concepts that appear in early exams
-6. **Details** - Array of specific sub-concepts you should learn under this broader concept. For each detail include:
-   - name: A specific concept/topic to learn (e.g., "Monitor Synchronization", "Semaphore Operations", "Race Condition Detection")
-   - description: 1-2 sentences explaining what this specific concept is
-   - example: A more detailed example showing the concept in action (5-15 words, e.g., "Using wait() to block a thread and signal() to wake it up", "Producer adds items to buffer, consumer removes them safely")
-   - difficulty: "beginner", "intermediate", or "advanced"
-   - priority: "high", "medium", or "low" based on how fundamental it is
-   - components: Comma-separated list of specific technical components/skills to master (e.g., "wait() method, signal() method, condition variables, mutual exclusion")
-   - learning_objectives: 3-5 specific learning objectives (e.g., "Implement wait() and signal() operations correctly, Understand condition variable semantics, Prevent race conditions")
-   - common_pitfalls: 2-3 common mistakes students make (e.g., "Calling signal() before wait(), Forgetting to recheck conditions after waking")
-
-IMPORTANT:
-- Go through ALL questions in ALL exams - don't miss any
-- Group related concepts into BROADER categories when appropriate (not too specific)
-- Prioritize concepts that appear in EARLY exams (via recency bonus)
-- Be realistic about study time - broader concepts take more time
-- Calculate Points/Hour CORRECTLY with recency bonus
-- Sort concepts by pointsPerHour in DESCENDING order (highest first)
-- Provide detailed breakdown in the "details" array so users can see exactly what questions fall under each concept
-- CRITICAL COVERAGE RULE: Include ALL concepts that appear in at least ONE exam (frequency >= 1). Do NOT cap the number of concepts returned. Return ALL concepts from ALL exams.
-
-Return JSON in this EXACT format:
+Return JSON in this exact format:
 {
-  "courseName": "Short, broad study guide title (3-6 plain words, no punctuation)",
+  "courseName": "Short broad title",
   "gradeInfo": "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p",
-  "patternAnalysis": "Analysis of patterns across exams (2-3 sentences explaining what appears frequently and in which exams)",
+  "patternAnalysis": "2-3 sentence summary highlighting trend and focus",
   "concepts": [
     {
-      "name": "Broader Concept/Topic Area",
-      "avgPoints": "10p",
-      "frequency": 2,
-      "estimatedTime": "2h",
-      "pointsPerHour": "10.0",
-      "details": [
+      "name": "Broad Concept Name",
+      "learningStage": "foundation",
+      "overview": "2-3 sentence explanation of scope and exam importance.",
+      "subtopics": [
         {
-          "name": "Monitor Synchronization",
-          "description": "Monitors provide a high-level synchronization mechanism using condition variables for thread coordination.",
-          "example": "Using wait() to block a thread when a condition is false and signal() to wake waiting threads",
-          "difficulty": "intermediate",
-          "priority": "high",
-          "components": "wait() method, signal() method, condition variables, mutual exclusion, deadlock prevention",
-          "learning_objectives": "Implement wait() and signal() operations correctly, Understand condition variable semantics, Prevent race conditions in monitor usage, Handle deadlock scenarios",
-          "common_pitfalls": "Calling signal() before wait(), Forgetting to recheck conditions after waking, Not understanding monitor mutual exclusion"
-        },
-        {
-          "name": "Thread Communication",
-          "description": "Threads communicate and coordinate through shared memory and synchronization primitives.",
-          "example": "Producer thread adds items to shared buffer, consumer thread safely removes them",
-          "difficulty": "intermediate",
-          "priority": "high",
-          "components": "shared memory, producer-consumer pattern, thread-safe queues, synchronization barriers",
-          "learning_objectives": "Implement producer-consumer patterns with thread-safe queues, Use synchronization barriers for thread coordination, Handle race conditions in shared memory",
-          "common_pitfalls": "Accessing shared data without proper synchronization, Deadlock from incorrect lock ordering, Missing memory barriers"
+          "name": "Subtopic Name",
+          "level": "fundamental",
+          "role": "introductory",
+          "description": "What this subtopic teaches and how it shows up on exams.",
+          "components": ["Component A", "Component B", "Component C"],
+          "skills": ["Explain ...", "Apply ...", "Diagnose ..."],
+          "studyApproach": "Guidance on how to study/practice this subtopic.",
+          "examConnections": ["Exam 2022 Q3 - ...", "Exam 2021 Q1 - ..."],
+          "pitfalls": ["Common mistake 1", "Common mistake 2"]
         }
       ]
     }
   ]
 }
 
-The concepts array MUST be sorted by pointsPerHour descending. Return ALL concepts that appear in any exam.`
+Ensure arrays contain meaningful content (no placeholders).`
             },
             {
               role: 'user',
-              content: `Analyze these ${numExams} exam PDF(s) and return a JSON list of concepts ranked by Points/Hour.\n\n${combinedText}`
+              content: `Analyze these ${numExams} exam PDF(s) and return the structured JSON study blueprint described above.\n\n${combinedText}`
             }
           ],
           stream: true,

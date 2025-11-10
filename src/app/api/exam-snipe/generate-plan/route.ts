@@ -32,19 +32,35 @@ export async function POST(req: NextRequest) {
       gradeInfo,
       patternAnalysis,
       conceptName,
+      conceptStage,
       subConceptName,
+      subConceptLevel,
+      subConceptRole,
       description,
-      example,
+      studyApproach,
       components,
-      learning_objectives,
-      common_pitfalls,
+      skills,
+      examConnections,
+      pitfalls,
     } = body || {};
     const requestedCount =
-      typeof body?.count === "number" && Number.isFinite(body.count) && body.count > 0 ? Math.min(Math.floor(body.count), 10) : 3;
+      typeof body?.count === "number" && Number.isFinite(body.count) && body.count > 0
+        ? Math.min(Math.max(Math.floor(body.count), 5), 12)
+        : 6;
 
     if (!historySlug || !subConceptName || !conceptName) {
       return NextResponse.json({ ok: false, error: "Missing required fields" }, { status: 400 });
     }
+
+    const stringifyList = (value: any) =>
+      Array.isArray(value)
+        ? value
+            .map((item) => (typeof item === "string" ? item.trim() : item != null ? String(item) : ""))
+            .filter((item) => item.length > 0)
+            .join(", ")
+        : typeof value === "string"
+          ? value
+          : "";
 
     const examContext = [
       `Course Name: ${courseName || "Exam Snipe Course"}`,
@@ -52,37 +68,59 @@ export async function POST(req: NextRequest) {
       gradeInfo ? `Grade requirements: ${gradeInfo}` : "",
       patternAnalysis ? `Pattern analysis: ${patternAnalysis}` : "",
       description ? `Key focus: ${description}` : "",
-      example ? `Example from exams: ${example}` : "",
-      components ? `Technical components: ${components}` : "",
-      learning_objectives ? `Learning objectives from analysis: ${learning_objectives}` : "",
-      common_pitfalls ? `Common pitfalls to address: ${common_pitfalls}` : "",
+      conceptStage ? `Concept stage: ${conceptStage}` : "",
+      subConceptLevel ? `Subtopic level: ${subConceptLevel}` : "",
+      subConceptRole ? `Subtopic role: ${subConceptRole}` : "",
+      studyApproach ? `Recommended study approach: ${studyApproach}` : "",
+      stringifyList(components) ? `Technical components: ${stringifyList(components)}` : "",
+      stringifyList(skills) ? `Target skills: ${stringifyList(skills)}` : "",
+      stringifyList(examConnections) ? `Exam references: ${stringifyList(examConnections)}` : "",
+      stringifyList(pitfalls) ? `Common pitfalls: ${stringifyList(pitfalls)}` : "",
     ]
       .filter(Boolean)
       .join("\n");
 
     const prompt = `
-You are an elite exam coach. Create a ${requestedCount}-lesson study plan that teaches the sub-concept "${subConceptName}" inside the broader concept "${conceptName}".
+You are an elite exam coach. Create a ${requestedCount}-lesson study progression that teaches the sub-concept "${subConceptName}" inside the broader concept "${conceptName}".
+Lessons must start with foundational concept lessons and progress to applications and integration, respecting the "${subConceptRole || "core"}" role within the "${conceptStage || "core"}" concept stage and the ${subConceptLevel || "fundamental"} level.
 
 Exam context:
 ${examContext}
+
+Style constraints for lesson TITLES (critical):
+- Use concise 2–5 word noun phrases that name the concept (not sentences). Examples: "Semaphores", "Locks", "Deadlock Patterns", "Critical Sections", "Mutual Exclusion".
+- Avoid tutorial phrasing like "Understanding ...", "Applying ...", "Diagnosing ...". Prefer the bare concept name or concise noun phrase.
+- No ending punctuation.
+
+Sequencing policy (teach concepts first):
+1) Foundations (first 2–3 lessons): one lesson per core primitive/concept from the provided components. Prioritize the most basic building blocks first.
+2) Core Operations & Invariants: correctness properties, typical APIs, constraints, and guarantees (map to skills).
+3) Applications & Patterns: common usage patterns, scenarios, and workflows (map to examConnections).
+4) Integration & Mastery: multi-step problems and combined reasoning across concepts; exam-style synthesis.
+
+Coverage policy:
+- The early lessons MUST map one-to-one with distinct fundamentals from "Technical components" (when available). Do not merge multiple fundamentals into one early lesson.
+- Later lessons may combine concepts for applied practice and exam alignment.
+- Ensure each lesson is distinct with non-overlapping objectives.
 
 Return JSON in this exact format:
 {
   "plans": [
     {
-      "title": "Short actionable lesson title",
-      "summary": "2-3 sentences describing what this lesson covers",
-      "objectives": ["List of concrete learning objectives"],
+      "title": "Concise concept title (2–5 words)",
+      "summary": "2–3 sentences describing what this lesson covers and why it matters on the exam",
+      "objectives": ["3–5 concrete, action-oriented objectives"],
       "estimatedTime": "e.g. 45m"
     }
   ]
 }
 
 Rules:
-- Titles must be 4-8 words, no punctuation at the end.
-- Objectives must be action-oriented (start with verbs like "Apply", "Explain", "Solve").
-- Ensure the sequence builds from fundamentals to exam-level mastery.
-- Align coverage with the exam patterns and pitfalls above.
+- Objectives must begin with verbs like "Explain", "Define", "Prove", "Apply", "Analyze".
+- Sequence lessons strictly from fundamentals ➝ operations/invariants ➝ applications/patterns ➝ integration/mastery.
+- Explicitly incorporate the provided components, skills, and exam connections across the plan.
+- Address the listed pitfalls by baking preventative strategies into summaries/objectives.
+- Reference the recommended study approach when suggesting activities or practice in the summaries.
 `;
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
@@ -172,7 +210,7 @@ Rules:
       });
       if (pruning.length) {
         await prisma.examSnipeHistory.deleteMany({
-          where: { id: { in: pruning.map((r) => r.id) } },
+          where: { id: { in: pruning.map((r: { id: string }) => r.id) } },
         });
       }
     }
