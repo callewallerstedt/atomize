@@ -32,7 +32,6 @@ export async function POST(req: NextRequest) {
       gradeInfo,
       patternAnalysis,
       conceptName,
-      conceptStage,
       description,
       focusAreas,
       keySkills,
@@ -65,7 +64,6 @@ export async function POST(req: NextRequest) {
       gradeInfo ? `Grade requirements: ${gradeInfo}` : "",
       patternAnalysis ? `Pattern analysis: ${patternAnalysis}` : "",
       description ? `Concept description: ${description}` : "",
-      conceptStage ? `Concept stage: ${conceptStage}` : "",
       stringifyList(focusAreas) ? `Focus areas: ${stringifyList(focusAreas)}` : "",
       stringifyList(keySkills) ? `Key skills: ${stringifyList(keySkills)}` : "",
       practiceApproach ? `Recommended practice approach: ${practiceApproach}` : "",
@@ -77,7 +75,7 @@ export async function POST(req: NextRequest) {
     const languageName = detectedLanguage?.name || "English";
     const prompt = `
 You are an elite exam coach. Create a ${requestedCount}-lesson study progression that fully teaches the concept "${conceptName}".
-Lessons must start with foundational work and progress toward integrated mastery, respecting the "${conceptStage || "core"}" stage described in the exam analysis.
+Lessons must start with foundational work and progress toward integrated mastery.
 
 IMPORTANT: Generate ALL content (lesson titles, summaries, objectives) in ${languageName}. Only use ${languageName} for the AI-generated material.
 

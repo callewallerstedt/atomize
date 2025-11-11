@@ -26,7 +26,7 @@ import GlowSpinner from "@/components/GlowSpinner";
 
 // Regex patterns moved inside component to avoid any global scope issues
 
-export default function NodePage() {
+export default function NodePage({ lessonIndexFromUrl }: { lessonIndexFromUrl?: number } = {}) {
 
   const params = useParams<{ slug: string; name: string }>();
   const slug = params.slug;
@@ -45,7 +45,10 @@ export default function NodePage() {
   const [userAnswers, setUserAnswers] = useState<{ [key: number]: string }>({});
   const [quizResults, setQuizResults] = useState<{ [key: number]: { correct: boolean; explanation: string; hint?: string; fullSolution?: string } } | null>(null);
   const [checkingAnswers, setCheckingAnswers] = useState(false);
-  const [currentLessonIndex, setCurrentLessonIndex] = useState(0);
+  const [currentLessonIndex, setCurrentLessonIndex] = useState(lessonIndexFromUrl ?? 0);
+  
+  // Use lessonIndexFromUrl if provided, otherwise use state
+  const activeLessonIndex = lessonIndexFromUrl !== undefined ? lessonIndexFromUrl : currentLessonIndex;
   const [hoveredParagraph, setHoveredParagraph] = useState<string | null>(null);
   const [simplifyingParagraph, setSimplifyingParagraph] = useState<string | null>(null);
   const [showHints, setShowHints] = useState<{ [key: number]: boolean }>({});
@@ -74,7 +77,7 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
   const [mcAnswers, setMcAnswers] = useState<{ [key: number]: number }>({});
   const [mcResults, setMcResults] = useState<{ [key: number]: { correct: boolean; explanation: string } } | null>(null);
   const [generatingMcQuiz, setGeneratingMcQuiz] = useState(false);
-  const currentLesson = (content?.lessons?.[currentLessonIndex] ?? null) as TopicGeneratedLesson | null;
+  const currentLesson = (content?.lessons?.[activeLessonIndex] ?? null) as TopicGeneratedLesson | null;
   const lessonFlashcards: LessonFlashcard[] = currentLesson?.flashcards ?? [];
 
   function getRandomCardIndex(filtered: Array<{ id: string }>, currentIndex: number): number {
@@ -103,7 +106,7 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
 
     try {
       setAudioLoading(true);
-      const lessonBody = content?.lessons?.[currentLessonIndex]?.body || "";
+      const lessonBody = content?.lessons?.[activeLessonIndex]?.body || "";
       if (!lessonBody) return;
 
       // Extract plain text from lesson content
@@ -335,7 +338,16 @@ function toggleStar(flashcardId: string) {
     setCurrentFlashcardIndex(0);
     setShowOnlyStarred(false);
     setIsShuffleActive(false);
-  }, [currentLessonIndex]);
+  }, [activeLessonIndex]);
+
+  // Helper function to preserve examSnipeMeta when updating content
+  function preserveExamSnipeMeta(updatedContent: TopicGeneratedContent): TopicGeneratedContent {
+    const examSnipeMeta = (content as any)?.examSnipeMeta;
+    if (examSnipeMeta) {
+      (updatedContent as any).examSnipeMeta = examSnipeMeta;
+    }
+    return updatedContent;
+  }
 
   async function generateFlashcards(count: number) {
     if (!currentLesson?.body) {
@@ -373,13 +385,13 @@ function toggleStar(flashcardId: string) {
         throw new Error("Lesson content not available. Try again.");
       }
       const nextLessons = [...prevContent.lessons];
-      const existing = nextLessons[currentLessonIndex];
+      const existing = nextLessons[activeLessonIndex];
       if (!existing) {
         throw new Error("Lesson not available. Try again.");
       }
       const updatedLesson: TopicGeneratedLesson = { ...(existing as TopicGeneratedLesson), flashcards: cards };
-      nextLessons[currentLessonIndex] = updatedLesson;
-      const updatedContent: TopicGeneratedContent = { ...prevContent, lessons: nextLessons };
+      nextLessons[activeLessonIndex] = updatedLesson;
+      const updatedContent: TopicGeneratedContent = preserveExamSnipeMeta({ ...prevContent, lessons: nextLessons });
 
       // Update UI immediately
       setContent(updatedContent);
@@ -493,7 +505,7 @@ function toggleStar(flashcardId: string) {
           subject: subjectData?.subject || slug,
           topic: title,
           paragraph: paragraphText,
-          lessonContent: content?.lessons?.[currentLessonIndex]?.body || "",
+          lessonContent: content?.lessons?.[activeLessonIndex]?.body || "",
           courseContext: subjectData?.course_context || "",
           languageName: subjectData?.course_language_name || ""
         })
@@ -526,8 +538,8 @@ function toggleStar(flashcardId: string) {
 
   // Load any saved quiz state for the current lesson
   useEffect(() => {
-    if (!content?.lessons?.[currentLessonIndex]) return;
-    const lesson = content.lessons[currentLessonIndex] as any;
+    if (!content?.lessons?.[activeLessonIndex]) return;
+    const lesson = content.lessons[activeLessonIndex] as any;
     // Load answers
     if (Array.isArray(lesson?.userAnswers)) {
       const map: { [k: number]: string } = {};
@@ -542,20 +554,38 @@ function toggleStar(flashcardId: string) {
     } else {
       setQuizResults(null);
     }
-  }, [content, currentLessonIndex]);
+    // Load MC quiz questions
+    if (Array.isArray(lesson?.mcQuiz) && lesson.mcQuiz.length > 0) {
+      setMcQuestions(lesson.mcQuiz);
+    } else {
+      setMcQuestions([]);
+    }
+    // Load MC quiz answers
+    if (lesson?.mcAnswers && typeof lesson.mcAnswers === 'object') {
+      setMcAnswers(lesson.mcAnswers);
+    } else {
+      setMcAnswers({});
+    }
+    // Load MC quiz results
+    if (lesson?.mcResults && typeof lesson.mcResults === 'object') {
+      setMcResults(lesson.mcResults);
+    } else {
+      setMcResults(null);
+    }
+  }, [content, activeLessonIndex]);
 
   // Build paragraph groups when lesson changes
   useEffect(() => {
-    if (!content?.lessons?.[currentLessonIndex]?.body) {
+    if (!content?.lessons?.[activeLessonIndex]?.body) {
       setParagraphGroups({});
       return;
     }
 
-    const body = content.lessons[currentLessonIndex].body;
+    const body = content.lessons[activeLessonIndex].body;
     const sections = body.split(/(?=^#+ )/m); // Split on headings but keep them
     const groups: { [key: string]: string[] } = {};
     
-    console.log('📚 Building paragraph groups for lesson:', currentLessonIndex);
+    console.log('📚 Building paragraph groups for lesson:', activeLessonIndex);
     
     for (const section of sections) {
       if (!section.trim()) continue;
@@ -600,7 +630,7 @@ function toggleStar(flashcardId: string) {
     
     console.log('✅ Built groups:', Object.keys(groups).length, 'total items');
     setParagraphGroups(groups);
-  }, [content, currentLessonIndex]);
+  }, [content, activeLessonIndex]);
 
 
   return (
@@ -629,7 +659,170 @@ function toggleStar(flashcardId: string) {
               </div>
             </div>
           </div>
-        ) : content && content.lessons && content.lessons.length > 0 ? (
+        ) : content && content.lessonsMeta && content.lessonsMeta[activeLessonIndex] && !content.lessons?.[activeLessonIndex]?.body ? (
+          // Ungenerated lesson - show Start button UI
+          <div className="relative mx-auto mt-24 flex max-w-md flex-col items-center justify-center gap-6">
+            <div className="pointer-events-none absolute -inset-10 -z-10 rounded-full blur-2xl" style={{ background: 'radial-gradient(circle at center, rgba(0, 229, 255, 0.25), rgba(255, 45, 150, 0.12) 60%, transparent 70%)' }} />
+            {lessonLoading && (
+              <div className="flex flex-col items-center gap-2">
+                <GlowSpinner size={150} ariaLabel="Generating lesson" idSuffix="node-start" />
+                <div className="text-sm text-[var(--foreground)]/75">Generating lesson…</div>
+              </div>
+            )}
+            <button
+              className="relative inline-flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white font-semibold text-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity shadow-[0_4px_12px_rgba(0,0,0,0.5)]"
+              onClick={async () => {
+                try {
+                  setLessonLoading(true);
+                  setError(null);
+
+                  // Check if this is an exam snipe lesson
+                  const examSnipeMeta = (content as any)?.examSnipeMeta;
+                  if (examSnipeMeta && examSnipeMeta.historySlug && examSnipeMeta.planIdMapping) {
+                    // This is an exam snipe lesson - use exam snipe generation flow
+                    const planId = examSnipeMeta.planIdMapping[activeLessonIndex];
+                    if (!planId) {
+                      throw new Error("Plan ID not found for this lesson");
+                    }
+
+                    // Fetch the exam snipe history to get full context
+                    const historyRes = await fetch(`/api/exam-snipe/history?slug=${encodeURIComponent(examSnipeMeta.historySlug)}`, {
+                      credentials: "include",
+                    });
+                    const historyJson = await historyRes.json().catch(() => ({}));
+                    if (!historyRes.ok || !historyJson?.record) {
+                      throw new Error("Failed to load exam snipe history");
+                    }
+
+                    const historyRecord = historyJson.record;
+                    const results = historyRecord.results || {};
+                    const concepts = results.concepts || [];
+                    const concept = concepts.find((c: any) => c.name === examSnipeMeta.conceptName);
+                    const lessonPlans = results.lessonPlans || {};
+                    const conceptPlan = lessonPlans[examSnipeMeta.conceptName] || concept?.lessonPlan;
+                    const planItem = conceptPlan?.lessons?.find((l: any) => String(l.id) === planId);
+
+                    if (!planItem) {
+                      throw new Error("Lesson plan not found");
+                    }
+
+                    // Generate lesson via exam-snipe API (it handles context properly with other lessons)
+                    const lessonRes = await fetch("/api/exam-snipe/generate-lesson", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      credentials: "include",
+                      body: JSON.stringify({
+                        historySlug: examSnipeMeta.historySlug,
+                        courseName: historyRecord.courseName || subjectData?.subject || slug,
+                        patternAnalysis: results.patternAnalysis,
+                        conceptName: examSnipeMeta.conceptName,
+                        conceptDescription: concept?.description || "",
+                        keySkills: conceptPlan?.keySkills || [],
+                        examConnections: conceptPlan?.examConnections || [],
+                        planId,
+                        planTitle: planItem.title,
+                        planSummary: planItem.summary,
+                        planObjectives: planItem.objectives || [],
+                        detectedLanguage: results.detectedLanguage,
+                        // Don't pass lessonData - let it generate with proper context including other lessons
+                      }),
+                    });
+                    const lessonJson = await lessonRes.json().catch(() => ({}));
+                    if (!lessonRes.ok || !lessonJson?.ok) throw new Error(lessonJson?.error || `Server error (${lessonRes.status})`);
+
+                    // Update local content - PRESERVE flashcards only (this is initial generation)
+                    const updatedContent = preserveExamSnipeMeta({ ...(content || { overview: "", symbols: [], lessons: [] }) } as TopicGeneratedContent);
+                    if (!updatedContent.lessons) updatedContent.lessons = [];
+                    while (updatedContent.lessons.length <= activeLessonIndex) {
+                      updatedContent.lessons.push(null);
+                    }
+                    // Preserve only flashcards from existing lesson (if any)
+                    const existingLesson = updatedContent.lessons[activeLessonIndex] || {};
+                    const existingFlashcards = (existingLesson as any)?.flashcards;
+                    updatedContent.lessons[activeLessonIndex] = {
+                      title: String(lessonJson.lesson?.title || planItem.title),
+                      body: String(lessonJson.lesson?.body || ""),
+                      quiz: Array.isArray(lessonJson.lesson?.quiz) ? lessonJson.lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : [],
+                      ...(existingFlashcards ? { flashcards: existingFlashcards } : {}),
+                    };
+                    if (!updatedContent.lessonsMeta) updatedContent.lessonsMeta = [];
+                    if (updatedContent.lessonsMeta[activeLessonIndex]) {
+                      (updatedContent.lessonsMeta[activeLessonIndex] as any).type = 'Generated Lesson';
+                      (updatedContent.lessonsMeta[activeLessonIndex] as any).title = String(lessonJson.lesson?.title || planItem.title);
+                      (updatedContent.lessonsMeta[activeLessonIndex] as any).planId = planId;
+                    }
+                    updatedContent.rawLessonJson = Array.isArray(updatedContent.rawLessonJson) ? [...updatedContent.rawLessonJson] : [];
+                    while (updatedContent.rawLessonJson.length <= activeLessonIndex) {
+                      updatedContent.rawLessonJson.push(null);
+                    }
+                    updatedContent.rawLessonJson[activeLessonIndex] = typeof lessonJson.raw === 'string' ? lessonJson.raw : JSON.stringify(lessonJson.lesson);
+
+                    setContent(updatedContent);
+                    await upsertNodeContentAsync(slug, title, updatedContent);
+                    return;
+                  }
+
+                  // Regular course lesson generation
+                  const topicMeta = (subjectData?.topics || []).find((t: any) => String(t.name) === title);
+                  const res = await fetch("/api/node-lesson", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      subject: subjectData?.subject || slug,
+                      topic: title,
+                      course_context: subjectData?.course_context || "",
+                      combinedText: subjectData?.combinedText || "",
+                      topicSummary: topicMeta?.summary || "",
+                      lessonsMeta: content?.lessonsMeta || [],
+                      lessonIndex: activeLessonIndex,
+                      previousLessons: content?.lessons?.filter((l): l is TopicGeneratedLesson => l !== null) || [],
+                      generatedLessons: content?.lessons?.filter((l): l is TopicGeneratedLesson => l !== null).map((l, i) => ({ index: i, title: l.title, body: l.body })) || [],
+                      otherLessonsMeta: (content?.lessonsMeta || []).slice(activeLessonIndex + 1).map((m, i) => ({ index: activeLessonIndex + 1 + i, type: m.type, title: m.title })),
+                      courseTopics,
+                      languageName: subjectData?.course_language_name || "",
+                    })
+                  });
+                  const json = await res.json().catch(() => ({}));
+                  if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
+                  const lesson = json.data || {};
+                  const next = { ...(content as TopicGeneratedContent) };
+                  next.lessons = next.lessons ? [...next.lessons] : [];
+                  while (next.lessons.length <= activeLessonIndex) {
+                    next.lessons.push(null);
+                  }
+                  next.lessons[activeLessonIndex] = {
+                    title: String(lesson.title || (content?.lessonsMeta?.[activeLessonIndex]?.title || `Lesson ${activeLessonIndex + 1}`)),
+                    body: String(lesson.body || ""),
+                    quiz: Array.isArray(lesson.quiz) ? lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : []
+                  };
+                  next.rawLessonJson = Array.isArray(next.rawLessonJson) ? [...next.rawLessonJson] : [];
+                  while (next.rawLessonJson.length <= activeLessonIndex) {
+                    next.rawLessonJson.push(null);
+                  }
+                  next.rawLessonJson[activeLessonIndex] = typeof json.raw === 'string' ? json.raw : JSON.stringify(lesson);
+                  setContent(next);
+                  upsertNodeContent(slug, title, next as any);
+                } catch (err: any) {
+                  console.error('Failed to generate lesson:', err);
+                  setError(err?.message || 'Failed to generate lesson');
+                } finally {
+                  setLessonLoading(false);
+                }
+              }}
+              disabled={lessonLoading}
+            >
+              {lessonLoading ? '...' : 'Start'}
+            </button>
+            <div className="text-center space-y-1">
+              <div className="text-lg font-medium text-[var(--foreground)]">
+                {content?.lessonsMeta?.[activeLessonIndex]?.title || 'Lesson'}
+              </div>
+              <div className="text-sm text-[var(--foreground)]/60">
+                Click to generate
+              </div>
+            </div>
+          </div>
+        ) : content && content.lessons && content.lessons[activeLessonIndex]?.body ? (
             <div className="space-y-6">
               
               <div className="rounded-2xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 p-5 text-[var(--foreground)] shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
@@ -657,8 +850,8 @@ function toggleStar(flashcardId: string) {
                       if (shorteningLesson || lessonLoading) return;
                       setShorteningLesson(true);
                       try {
-                        const currentLessonIndex = content.lessons.length - 1;
-                        const currentLesson = content.lessons[currentLessonIndex];
+                        const lessonIdx = activeLessonIndex;
+                        const currentLesson = content.lessons[lessonIdx];
                         if (!currentLesson) {
                           alert("No lesson content to shorten");
                           return;
@@ -676,8 +869,8 @@ function toggleStar(flashcardId: string) {
                         const json = await res.json().catch(() => ({}));
                         if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
                         const shortenedLesson = json.data || {};
-                        const next = { ...(content as TopicGeneratedContent) };
-                        next.lessons[currentLessonIndex] = {
+                        const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) });
+                        next.lessons[lessonIdx] = {
                           ...currentLesson,
                           body: String(shortenedLesson.body || currentLesson.body),
                         };
@@ -728,7 +921,88 @@ function toggleStar(flashcardId: string) {
                       if (lessonLoading) return;
                       setLessonLoading(true);
                       try {
-                        const currentLessonIndex = content.lessons.length - 1;
+                        const lessonIdx = activeLessonIndex;
+                        
+                        // Check if this is an exam snipe lesson
+                        const examSnipeMeta = (content as any)?.examSnipeMeta;
+                        if (examSnipeMeta && examSnipeMeta.historySlug && examSnipeMeta.planIdMapping) {
+                          // This is an exam snipe lesson - regenerate via exam snipe API
+                          const planId = examSnipeMeta.planIdMapping[lessonIdx];
+                          if (!planId) {
+                            throw new Error("Plan ID not found for this lesson");
+                          }
+
+                          // Fetch exam snipe history to get context
+                          const historyRes = await fetch(`/api/exam-snipe/history?slug=${encodeURIComponent(examSnipeMeta.historySlug)}`, {
+                            credentials: "include",
+                          });
+                          const historyJson = await historyRes.json().catch(() => ({}));
+                          if (!historyRes.ok || !historyJson?.record) {
+                            throw new Error("Failed to load exam snipe history");
+                          }
+
+                          const historyRecord = historyJson.record;
+                          const results = historyRecord.results || {};
+                          const concepts = results.concepts || [];
+                          const concept = concepts.find((c: any) => c.name === examSnipeMeta.conceptName);
+                          const lessonPlans = results.lessonPlans || {};
+                          const conceptPlan = lessonPlans[examSnipeMeta.conceptName] || concept?.lessonPlan;
+                          const planItem = conceptPlan?.lessons?.find((l: any) => String(l.id) === planId);
+
+                          if (!planItem) {
+                            throw new Error("Lesson plan not found");
+                          }
+
+                          // Generate new lesson via exam-snipe API (it handles context properly with other lessons)
+                          const lessonRes = await fetch("/api/exam-snipe/generate-lesson", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            credentials: "include",
+                            body: JSON.stringify({
+                              historySlug: examSnipeMeta.historySlug,
+                              courseName: historyRecord.courseName || subjectData?.subject || slug,
+                              patternAnalysis: results.patternAnalysis,
+                              conceptName: examSnipeMeta.conceptName,
+                              conceptDescription: concept?.description || "",
+                              keySkills: conceptPlan?.keySkills || [],
+                              examConnections: conceptPlan?.examConnections || [],
+                              planId,
+                              planTitle: planItem.title,
+                              planSummary: planItem.summary,
+                              planObjectives: planItem.objectives || [],
+                              detectedLanguage: results.detectedLanguage,
+                              // Don't pass lessonData - let it generate with proper context including other lessons
+                            }),
+                          });
+                          const lessonJson = await lessonRes.json().catch(() => ({}));
+                          if (!lessonRes.ok || !lessonJson?.ok) throw new Error(lessonJson?.error || `Server error (${lessonRes.status})`);
+
+                          // Update local content
+                          const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) });
+                          const existingLesson = next.lessons[lessonIdx];
+                          // Preserve flashcards but replace lesson content
+                          next.lessons[lessonIdx] = {
+                            ...(existingLesson as any),
+                            title: String(lessonJson.lesson?.title || planItem.title),
+                            body: String(lessonJson.lesson?.body || ""),
+                            quiz: Array.isArray(lessonJson.lesson?.quiz) ? lessonJson.lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : [],
+                            // Clear old quiz data
+                            userAnswers: undefined,
+                            quizResults: undefined,
+                            quizCompletedAt: undefined,
+                          };
+                          next.rawLessonJson = Array.isArray(next.rawLessonJson) ? [...next.rawLessonJson] : [];
+                          next.rawLessonJson[lessonIdx] = typeof lessonJson.raw === 'string' ? lessonJson.raw : JSON.stringify(lessonJson.lesson);
+                          setContent(next);
+                          await upsertNodeContentAsync(slug, title, next);
+                          
+                          // Reset quiz state
+                          setUserAnswers({});
+                          setQuizResults(null);
+                          return;
+                        }
+
+                        // Regular course lesson regeneration
                         const topicMeta = (subjectData?.topics || []).find((t: any) => String(t.name) === title);
                         const res = await fetch("/api/node-lesson", {
                           method: "POST",
@@ -740,10 +1014,10 @@ function toggleStar(flashcardId: string) {
                             combinedText: subjectData?.combinedText || "",
                             topicSummary: topicMeta?.summary || "",
                             lessonsMeta: content?.lessonsMeta || [],
-                            lessonIndex: currentLessonIndex,
-                            previousLessons: content.lessons.slice(0, currentLessonIndex),
-                            generatedLessons: content.lessons.slice(0, currentLessonIndex).filter((l): l is TopicGeneratedLesson => l !== null).map((l, i) => ({ index: i, title: l.title, body: l.body })),
-                            otherLessonsMeta: (content?.lessonsMeta || []).slice(currentLessonIndex + 1).map((m, i) => ({ index: currentLessonIndex + 1 + i, type: m.type, title: m.title })),
+                            lessonIndex: lessonIdx,
+                            previousLessons: content.lessons.slice(0, lessonIdx),
+                            generatedLessons: content.lessons.slice(0, lessonIdx).filter((l): l is TopicGeneratedLesson => l !== null).map((l, i) => ({ index: i, title: l.title, body: l.body })),
+                            otherLessonsMeta: (content?.lessonsMeta || []).slice(lessonIdx + 1).map((m, i) => ({ index: lessonIdx + 1 + i, type: m.type, title: m.title })),
                             courseTopics,
                             languageName: subjectData?.course_language_name || "",
                           })
@@ -751,14 +1025,21 @@ function toggleStar(flashcardId: string) {
                         const json = await res.json().catch(() => ({}));
                         if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
                         const lesson = json.data || {};
-                        const next = { ...(content as TopicGeneratedContent) };
-                        next.lessons[currentLessonIndex] = {
-                          title: String(lesson.title || next.lessons[currentLessonIndex]?.title || content?.lessonsMeta?.[currentLessonIndex]?.title || `Lesson ${currentLessonIndex + 1}`),
+                        const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) });
+                        const existingLesson = next.lessons[lessonIdx];
+                        // Preserve flashcards but replace lesson content
+                        next.lessons[lessonIdx] = {
+                          ...(existingLesson as any),
+                          title: String(lesson.title || next.lessons[lessonIdx]?.title || content?.lessonsMeta?.[activeLessonIndex]?.title || `Lesson ${lessonIdx + 1}`),
                           body: String(lesson.body || ""),
-                          quiz: Array.isArray(lesson.quiz) ? lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : next.lessons[currentLessonIndex]?.quiz || []
+                          quiz: Array.isArray(lesson.quiz) ? lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : [],
+                          // Clear old quiz data
+                          userAnswers: undefined,
+                          quizResults: undefined,
+                          quizCompletedAt: undefined,
                         };
                         next.rawLessonJson = Array.isArray(next.rawLessonJson) ? [...next.rawLessonJson] : [];
-                        next.rawLessonJson[currentLessonIndex] = typeof json.raw === 'string' ? json.raw : JSON.stringify(lesson);
+                        next.rawLessonJson[lessonIdx] = typeof json.raw === 'string' ? json.raw : JSON.stringify(lesson);
                         setContent(next);
                         upsertNodeContent(slug, title, next as any);
 
@@ -803,10 +1084,10 @@ function toggleStar(flashcardId: string) {
                     </div>
                   </div>
                 )}
-                {content.lessons[currentLessonIndex]?.body ? (
+                {content.lessons[activeLessonIndex]?.body ? (
                   <>
                     <div className="flex items-center justify-between mb-2">
-                      <div className="text-sm text-[var(--foreground)]/70">{content.lessonsMeta?.[currentLessonIndex]?.title}</div>
+                      <div className="text-sm text-[var(--foreground)]/70">{content.lessonsMeta?.[activeLessonIndex]?.title}</div>
                       <button
                         onClick={readLesson}
                         disabled={audioLoading}
@@ -893,7 +1174,7 @@ function toggleStar(flashcardId: string) {
                                       if (simplified && simplified !== paragraphText) {
                                         // Replace the paragraph in the lesson content
                                         // Use a more robust replacement by finding similar text
-                                        const currentBody = content.lessons[currentLessonIndex]?.body || '';
+                                        const currentBody = content.lessons[activeLessonIndex]?.body || '';
 
                                         // Simple whitespace normalization without regex
                                         const normalizeWhitespace = (text: string) => {
@@ -931,11 +1212,11 @@ function toggleStar(flashcardId: string) {
                                           }
                                         }
 
-                                        const next = { ...(content as TopicGeneratedContent) };
+                                        const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) });
                                         next.lessons = next.lessons ? [...next.lessons] : [];
-                                        const currentLesson = next.lessons[currentLessonIndex];
-                                        next.lessons[currentLessonIndex] = {
-                                          title: currentLesson?.title || content?.lessonsMeta?.[currentLessonIndex]?.title || `Lesson ${currentLessonIndex + 1}`,
+                                        const currentLesson = next.lessons[activeLessonIndex];
+                                        next.lessons[activeLessonIndex] = {
+                                          title: currentLesson?.title || content?.lessonsMeta?.[activeLessonIndex]?.title || `Lesson ${activeLessonIndex + 1}`,
                                           body: newBody,
                                           quiz: currentLesson?.quiz || []
                                         };
@@ -1023,7 +1304,7 @@ function toggleStar(flashcardId: string) {
                                       try {
                                         const simplified = await simplifyParagraph(itemText);
                                         if (simplified && simplified !== itemText) {
-                                          const currentBody = content.lessons[currentLessonIndex]?.body || '';
+                                          const currentBody = content.lessons[activeLessonIndex]?.body || '';
                                           const normalizeWhitespace = (text: string) => {
                                             let result = '';
                                             let wasSpace = false;
@@ -1055,11 +1336,11 @@ function toggleStar(flashcardId: string) {
                                             }
                                           }
 
-                                          const next = { ...(content as TopicGeneratedContent) };
+                                          const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) });
                                           next.lessons = next.lessons ? [...next.lessons] : [];
-                                          const currentLesson = next.lessons[currentLessonIndex];
-                                          next.lessons[currentLessonIndex] = {
-                                            title: currentLesson?.title || content?.lessonsMeta?.[currentLessonIndex]?.title || `Lesson ${currentLessonIndex + 1}`,
+                                          const currentLesson = next.lessons[activeLessonIndex];
+                                          next.lessons[activeLessonIndex] = {
+                                            title: currentLesson?.title || content?.lessonsMeta?.[activeLessonIndex]?.title || `Lesson ${activeLessonIndex + 1}`,
                                             body: newBody,
                                             quiz: currentLesson?.quiz || []
                                           };
@@ -1167,7 +1448,7 @@ function toggleStar(flashcardId: string) {
                     >
                       {(() => {
                         // Convert LaTeX bracket notation to dollar signs and fix common errors
-                        let processedBody = content.lessons[currentLessonIndex].body;
+                        let processedBody = content.lessons[activeLessonIndex].body;
                         
                         // Remove metadata header if present
                         processedBody = processedBody
@@ -1194,7 +1475,7 @@ function toggleStar(flashcardId: string) {
                   <div className="flex flex-col items-center justify-center py-16 space-y-4">
                     <div className="text-center">
                       <div className="text-lg font-medium text-[#E5E7EB] mb-2">
-                        {content.lessonsMeta?.[currentLessonIndex]?.type}: {content.lessonsMeta?.[currentLessonIndex]?.title}
+                        {content.lessonsMeta?.[activeLessonIndex]?.type}: {content.lessonsMeta?.[activeLessonIndex]?.title}
                       </div>
                       <div className="text-sm text-[#A7AFBE] mb-6">
                         This lesson hasn't been generated yet.
@@ -1215,10 +1496,10 @@ function toggleStar(flashcardId: string) {
                                 combinedText: subjectData?.combinedText || "",
                                 topicSummary: topicMeta?.summary || "",
                                 lessonsMeta: content?.lessonsMeta || [],
-                                lessonIndex: currentLessonIndex,
+                                lessonIndex: activeLessonIndex,
                                 previousLessons: content.lessons.filter((l): l is TopicGeneratedLesson => l !== null),
                                 generatedLessons: content.lessons.filter((l): l is TopicGeneratedLesson => l !== null).map((l, i) => ({ index: i, title: l.title, body: l.body })),
-                                otherLessonsMeta: (content?.lessonsMeta || []).slice(currentLessonIndex + 1).map((m, i) => ({ index: currentLessonIndex + 1 + i, type: m.type, title: m.title })),
+                                otherLessonsMeta: (content?.lessonsMeta || []).slice(activeLessonIndex + 1).map((m, i) => ({ index: activeLessonIndex + 1 + i, type: m.type, title: m.title })),
                                 courseTopics,
                                 languageName: subjectData?.course_language_name || "",
                               })
@@ -1229,19 +1510,19 @@ function toggleStar(flashcardId: string) {
                             const next = { ...(content as TopicGeneratedContent) };
                             next.lessons = next.lessons ? [...next.lessons] : [];
                             // Fill in any missing lessons
-                            while (next.lessons.length <= currentLessonIndex) {
+                            while (next.lessons.length <= activeLessonIndex) {
                               next.lessons.push(null);
                             }
-                            next.lessons[currentLessonIndex] = {
-                              title: String(lesson.title || (content?.lessonsMeta?.[currentLessonIndex]?.title || `Lesson ${currentLessonIndex + 1}`)),
+                            next.lessons[activeLessonIndex] = {
+                              title: String(lesson.title || (content?.lessonsMeta?.[activeLessonIndex]?.title || `Lesson ${activeLessonIndex + 1}`)),
                               body: String(lesson.body || ""),
                               quiz: Array.isArray(lesson.quiz) ? lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : []
                             };
                             next.rawLessonJson = Array.isArray(next.rawLessonJson) ? [...next.rawLessonJson] : [];
-                            while (next.rawLessonJson.length <= currentLessonIndex) {
+                            while (next.rawLessonJson.length <= activeLessonIndex) {
                               next.rawLessonJson.push(null);
                             }
-                            next.rawLessonJson[currentLessonIndex] = typeof json.raw === 'string' ? json.raw : JSON.stringify(lesson);
+                            next.rawLessonJson[activeLessonIndex] = typeof json.raw === 'string' ? json.raw : JSON.stringify(lesson);
                             setContent(next);
                             upsertNodeContent(slug, title, next as any);
                           } catch (err: any) {
@@ -1282,10 +1563,10 @@ function toggleStar(flashcardId: string) {
                     <path d="M19 9l-7 7-7-7"/>
                   </svg>
                 </button>
-                {practiceOpen && content.lessons[currentLessonIndex]?.quiz && content.lessons[currentLessonIndex].quiz.length > 0 && (
+                {practiceOpen && content.lessons[activeLessonIndex]?.quiz && content.lessons[activeLessonIndex].quiz.length > 0 && (
                   <div className="px-4 pt-4 pb-4">
                     <div className="space-y-6">
-                      {content.lessons[currentLessonIndex].quiz.map((q, qi) => (
+                      {content.lessons[activeLessonIndex].quiz.map((q, qi) => (
                         <div key={qi} className="space-y-3 p-4 rounded-lg bg-[var(--background)]/60 border border-[var(--foreground)]/10">
                           <div className="text-sm font-medium text-[var(--foreground)]">
                             {qi + 1}. <AutoFixMarkdown>{q.question}</AutoFixMarkdown>
@@ -1298,14 +1579,14 @@ function toggleStar(flashcardId: string) {
                                 setUserAnswers(prev => ({ ...prev, [qi]: nextVal }));
                                 try {
                                   if (!content) return;
-                                  const next = { ...(content as TopicGeneratedContent) } as any;
+                                  const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) } as any);
                                   next.lessons = Array.isArray(next.lessons) ? [...next.lessons] : [];
-                                  const l = { ...(next.lessons[currentLessonIndex] as any) };
+                                  const l = { ...(next.lessons[activeLessonIndex] as any) };
                                   const answersArr: string[] = Array.isArray(l.userAnswers) ? [...l.userAnswers] : [];
-                                  while (answersArr.length < (content.lessons[currentLessonIndex]?.quiz?.length || 0)) answersArr.push("");
+                                  while (answersArr.length < (content.lessons[activeLessonIndex]?.quiz?.length || 0)) answersArr.push("");
                                   answersArr[qi] = nextVal;
                                   l.userAnswers = answersArr;
-                                  next.lessons[currentLessonIndex] = l;
+                                  next.lessons[activeLessonIndex] = l;
                                   upsertNodeContent(slug, title, next);
                                 } catch {}
                               }}
@@ -1382,7 +1663,7 @@ function toggleStar(flashcardId: string) {
                           if (checkingAnswers) return;
                           setCheckingAnswers(true);
                           try {
-                            const currentLesson = content.lessons[currentLessonIndex];
+                            const currentLesson = content.lessons[activeLessonIndex];
                             if (!currentLesson) {
                               alert("No lesson content to check answers for");
                               return;
@@ -1411,16 +1692,16 @@ function toggleStar(flashcardId: string) {
                             const results = json.results || {};
                             setQuizResults(results);
                             try {
-                              const next = { ...(content as TopicGeneratedContent) } as any;
+                              const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) } as any);
                               next.lessons = Array.isArray(next.lessons) ? [...next.lessons] : [];
-                              const l = { ...(next.lessons[currentLessonIndex] as any) };
+                              const l = { ...(next.lessons[activeLessonIndex] as any) };
                               const answersArr: string[] = [];
                               const numQ = (currentLesson.quiz || []).length;
                               for (let i = 0; i < numQ; i++) answersArr[i] = userAnswers[i] || "";
                               l.userAnswers = answersArr;
                               l.quizResults = results;
                               l.quizCompletedAt = Date.now();
-                              next.lessons[currentLessonIndex] = l;
+                              next.lessons[activeLessonIndex] = l;
                               upsertNodeContent(slug, title, next);
                             } catch {}
                           } catch (err: any) {
@@ -1561,7 +1842,19 @@ function toggleStar(flashcardId: string) {
                               });
                               const json = await res.json().catch(() => ({}));
                               if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
-                              setMcQuestions(json.questions || []);
+                              const questions = json.questions || [];
+                              setMcQuestions(questions);
+                              
+                              // Save MC quiz questions to lesson
+                              try {
+                                if (!content) return;
+                                const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) } as any);
+                                next.lessons = Array.isArray(next.lessons) ? [...next.lessons] : [];
+                                const l = { ...(next.lessons[activeLessonIndex] as any) };
+                                l.mcQuiz = questions;
+                                next.lessons[activeLessonIndex] = l;
+                                upsertNodeContent(slug, title, next);
+                              } catch {}
                             } catch (err: any) {
                               alert(err?.message || "Failed to generate quiz");
                             } finally {
@@ -1603,7 +1896,20 @@ function toggleStar(flashcardId: string) {
                                     checked={mcAnswers[qi] === oi}
                                     onChange={() => {
                                       if (!mcResults) {
-                                        setMcAnswers(prev => ({ ...prev, [qi]: oi }));
+                                        setMcAnswers(prev => {
+                                          const updated = { ...prev, [qi]: oi };
+                                          // Save MC quiz answers to lesson
+                                          try {
+                                            if (!content) return updated;
+                                            const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) } as any);
+                                            next.lessons = Array.isArray(next.lessons) ? [...next.lessons] : [];
+                                            const l = { ...(next.lessons[activeLessonIndex] as any) };
+                                            l.mcAnswers = updated;
+                                            next.lessons[activeLessonIndex] = l;
+                                            upsertNodeContent(slug, title, next);
+                                          } catch {}
+                                          return updated;
+                                        });
                                       }
                                     }}
                                     disabled={!!mcResults}
@@ -1630,6 +1936,19 @@ function toggleStar(flashcardId: string) {
                                   };
                                 });
                                 setMcResults(results);
+                                
+                                // Save MC quiz results to lesson
+                                try {
+                                  if (!content) return;
+                                  const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) } as any);
+                                  next.lessons = Array.isArray(next.lessons) ? [...next.lessons] : [];
+                                  const l = { ...(next.lessons[activeLessonIndex] as any) };
+                                  l.mcAnswers = mcAnswers;
+                                  l.mcResults = results;
+                                  l.mcQuizCompletedAt = Date.now();
+                                  next.lessons[activeLessonIndex] = l;
+                                  upsertNodeContent(slug, title, next);
+                                } catch {}
                               }}
                               disabled={Object.keys(mcAnswers).length !== mcQuestions.length}
                               className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60 transition-opacity"
@@ -1671,7 +1990,7 @@ function toggleStar(flashcardId: string) {
 
             <div className="flex flex-col items-center gap-4 mt-8">
               {/* Review Rating */}
-              {!reviewedThisSession.has(currentLessonIndex) ? (
+              {!reviewedThisSession.has(activeLessonIndex) ? (
                 <div className="w-full max-w-md">
                   <div className="p-4 rounded-lg bg-[var(--background)]/60 border border-[var(--foreground)]/20 space-y-3">
                     <div className="text-sm text-[var(--foreground)] font-medium text-center">How well did you understand this lesson?</div>
@@ -1687,8 +2006,8 @@ function toggleStar(flashcardId: string) {
                         <button
                           key={item.value}
                           onClick={() => {
-                            markLessonReviewed(slug, title, currentLessonIndex, item.value);
-                            setReviewedThisSession(prev => new Set([...prev, currentLessonIndex]));
+                            markLessonReviewed(slug, title, activeLessonIndex, item.value);
+                            setReviewedThisSession(prev => new Set([...prev, activeLessonIndex]));
                           }}
                           className="flex flex-col items-center p-2 rounded-lg bg-[var(--background)]/80 border border-[var(--foreground)]/10 hover:bg-[var(--background)]/60 hover:border-[var(--accent-cyan)]/30 transition-colors"
                           title={item.desc}
@@ -1729,6 +2048,98 @@ function toggleStar(flashcardId: string) {
                   setLessonLoading(true);
                   setError(null);
 
+                  // Check if this is an exam snipe lesson
+                  const examSnipeMeta = (content as any)?.examSnipeMeta;
+                  if (examSnipeMeta && examSnipeMeta.historySlug && examSnipeMeta.planIdMapping) {
+                    // This is an exam snipe lesson - use exam snipe API
+                    const planId = examSnipeMeta.planIdMapping[activeLessonIndex];
+                    if (!planId) {
+                      throw new Error("Plan ID not found for this lesson");
+                    }
+
+                    // Get the lesson plan details from the lessonsMeta
+                    const lessonMeta = content?.lessonsMeta?.[activeLessonIndex];
+                    const planTitle = lessonMeta?.title || title;
+                    const planSummary = ""; // We don't have this in the stored data
+                    const planObjectives: string[] = []; // We don't have this either
+
+                    // We need to fetch the exam snipe history to get full context
+                    const historyRes = await fetch(`/api/exam-snipe/history?slug=${encodeURIComponent(examSnipeMeta.historySlug)}`, {
+                      credentials: "include",
+                    });
+                    const historyJson = await historyRes.json().catch(() => ({}));
+                    if (!historyRes.ok || !historyJson?.record) {
+                      throw new Error("Failed to load exam snipe history");
+                    }
+
+                    const historyRecord = historyJson.record;
+                    const results = historyRecord.results || {};
+                    const concepts = results.concepts || [];
+                    const concept = concepts.find((c: any) => c.name === examSnipeMeta.conceptName);
+                    const lessonPlans = results.lessonPlans || {};
+                    const conceptPlan = lessonPlans[examSnipeMeta.conceptName] || concept?.lessonPlan;
+                    const planItem = conceptPlan?.lessons?.find((l: any) => String(l.id) === planId);
+
+                    if (!planItem) {
+                      throw new Error("Lesson plan not found");
+                    }
+
+                    // Generate lesson using exam snipe API
+                    const lessonRes = await fetch("/api/exam-snipe/generate-lesson", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      credentials: "include",
+                      body: JSON.stringify({
+                        historySlug: examSnipeMeta.historySlug,
+                        courseName: historyRecord.courseName || subjectData?.subject || slug,
+                        patternAnalysis: results.patternAnalysis,
+                        conceptName: examSnipeMeta.conceptName,
+                        conceptDescription: concept?.description || "",
+                        keySkills: conceptPlan?.keySkills || [],
+                        examConnections: conceptPlan?.examConnections || [],
+                        planId,
+                        planTitle: planItem.title,
+                        planSummary: planItem.summary,
+                        planObjectives: planItem.objectives || [],
+                        detectedLanguage: results.detectedLanguage,
+                      }),
+                    });
+                    const lessonJson = await lessonRes.json().catch(() => ({}));
+                    if (!lessonRes.ok || !lessonJson?.ok) throw new Error(lessonJson?.error || `Server error (${lessonRes.status})`);
+
+                    // Update the lesson in the content - PRESERVE flashcards only (this is initial generation)
+                    const updatedContent = preserveExamSnipeMeta({ ...(content || { overview: "", symbols: [], lessons: [] }) } as TopicGeneratedContent);
+                    if (!updatedContent.lessons) updatedContent.lessons = [];
+                    while (updatedContent.lessons.length <= activeLessonIndex) {
+                      updatedContent.lessons.push(null);
+                    }
+                    // Preserve only flashcards from existing lesson (if any)
+                    const existingLesson = updatedContent.lessons[activeLessonIndex] || {};
+                    const existingFlashcards = (existingLesson as any)?.flashcards;
+                    updatedContent.lessons[activeLessonIndex] = {
+                      title: String(lessonJson.lesson?.title || planTitle),
+                      body: String(lessonJson.lesson?.body || ""),
+                      quiz: Array.isArray(lessonJson.lesson?.quiz) ? lessonJson.lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : [],
+                      ...(existingFlashcards ? { flashcards: existingFlashcards } : {}),
+                    };
+                    if (!updatedContent.lessonsMeta) updatedContent.lessonsMeta = [];
+                    if (updatedContent.lessonsMeta[activeLessonIndex]) {
+                      (updatedContent.lessonsMeta[activeLessonIndex] as any).type = 'Generated Lesson';
+                      (updatedContent.lessonsMeta[activeLessonIndex] as any).title = String(lessonJson.lesson?.title || planTitle);
+                      (updatedContent.lessonsMeta[activeLessonIndex] as any).planId = planId;
+                    }
+                    updatedContent.rawLessonJson = Array.isArray(updatedContent.rawLessonJson) ? [...updatedContent.rawLessonJson] : [];
+                    while (updatedContent.rawLessonJson.length <= activeLessonIndex) {
+                      updatedContent.rawLessonJson.push(null);
+                    }
+                    updatedContent.rawLessonJson[activeLessonIndex] = typeof lessonJson.raw === 'string' ? lessonJson.raw : JSON.stringify(lessonJson.lesson);
+
+                    setContent(updatedContent);
+                    await upsertNodeContentAsync(slug, title, updatedContent);
+                    return;
+                  }
+
+                  // Regular lesson generation (non-exam snipe)
                   // First, get the topic plan
                   const planRes = await fetch("/api/node-plan", {
                     method: "POST",
@@ -2087,13 +2498,13 @@ function toggleStar(flashcardId: string) {
       </div>
     , document.body)}
     {/* Bottom utilities: subtle Export PDF */}
-    {content && content.lessons && content.lessons[currentLessonIndex]?.body && (
+    {content && content.lessons && content.lessons[activeLessonIndex]?.body && (
       <div className="mx-auto w-full max-w-3xl px-6 pb-10">
         <div className="flex items-center justify-center mt-4">
           <button
             onClick={async () => {
               try {
-                const lesson = content.lessons[currentLessonIndex];
+                const lesson = content.lessons[activeLessonIndex];
                 if (!lesson) return;
                 const res = await fetch('/api/export-pdf', {
                   method: 'POST',

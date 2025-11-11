@@ -131,60 +131,77 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: 'system',
-          content: `You are an expert exam analyst. Study the historic exams and convert them into a structured study blueprint.
+          content: `You are an expert exam analyst focused on efficiency. Your goal is to identify the highest-value concepts and methods that appear most frequently across exams, enabling students to maximize their points while minimizing study time.
 
-ALWAYS FOLLOW THESE STEPS:
+ANALYSIS APPROACH:
 1. Extract the grade requirements from the exams (e.g., "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p") and place them in "gradeInfo".
 2. Craft a short, broad, and generic course title (1-4 words, no punctuation or course codes) for "courseName".
-3. Write a "patternAnalysis" paragraph (2-3 sentences) summarizing which topic families dominate the exams, how question formats evolve, and how difficulty escalates.
-4. Review EVERY single question across ALL exams. Group them into AT LEAST FOUR broad "concepts" that together cover the most important knowledge. Concepts must be ordered in the recommended teaching sequence from foundational material through advanced mastery.
+3. Write a "patternAnalysis" paragraph (2-3 sentences) summarizing which methods, techniques, or concept families appear most frequently across exams and how they're typically tested.
+
+4. IDENTIFY MOST COMMON EXAM QUESTIONS:
+   - Review ALL questions across ALL exams and identify the most frequently appearing question types.
+   - Extract up to 7 of the most common question patterns (or fewer if there are fewer distinct patterns).
+   - Write each question in a generic format with placeholders (e.g., "Calculate the Laplace transform of [function]" instead of specific values).
+   - CRITICAL: If any question appears on EVERY exam, it MUST be included in the list, regardless of how many other questions there are or how small the question is.
+   - For each question, count how many exams it appears on (out of the total number of exams analyzed).
+   - For each question, calculate the average points it gives across all exams where it appears. If point values are not explicitly stated, estimate based on question complexity and typical exam structure.
+   - Order questions from most common (appears on most exams) to least common.
+   - Store in "commonQuestions" as an array of objects with "question" (generic format), "examCount" (number of exams it appears on), and "averagePoints" (average points the question gives, as a number).
+
+5. IDENTIFY HIGH-VALUE CONCEPTS:
+   - Review EVERY question across ALL exams and identify recurring methods, techniques, or specific concepts that multiple questions test.
+   - Focus on concepts that are: (1) frequently tested, (2) high point-value, or (3) foundational to solving multiple question types.
+   - Each concept should be specific enough to be actionable (not overly broad), but wide enough to cover a family of related exam questions.
+   - Think in terms of "methods" or "techniques" that can be mastered to tackle multiple question variations.
+   - You MUST identify AT LEAST 5 main concepts (more if the exams cover diverse topics). This is critical for exam coverage.
+   - Order concepts by value: highest-value first (most frequently tested, highest point potential), then descending. This prioritizes the most impactful study areas.
 
 FOR EACH MAIN CONCEPT:
-- Provide:
-  - "name": Broad theme that bundles several related exam topics.
-  - "learningStage": one of "foundation", "core", "advanced", or "mastery".
-  - "description": 2-3 sentences explaining what the concept covers and why it matters on the exam (concise but detailed).
-  - "lessonPlan": object containing the teaching plan for the concept:
-    - "summary": 2-3 sentences describing how the lessons progress and why the concept is exam-critical.
-    - "focusAreas": array of 4-6 short phrases capturing the major pillars/exam themes for this concept.
-    - "keySkills": array of 4-6 action-oriented skills (start with verbs like "Analyze", "Construct", "Explain").
-    - "practiceApproach": 1-2 sentences describing the recommended practice method.
-    - "examConnections": array referencing the exact exams/questions or recurring patterns that justify this concept (e.g., "Exam 2022 Q4 - long proof on ...").
-    - "lessons": ordered array of lessons that teach the full concept (minimum 5 lessons). Lessons must progress from fundamentals to mastery and together cover the entire concept. Each lesson must include:
-      - "title": Concise 2-5 word noun phrase (no sentences or punctuation).
-      - "summary": 2-3 sentences describing the lesson scope and why it matters for the exam.
-      - "objectives": array of 3-5 concrete, action-oriented objectives.
-      - "estimatedTime": optional string with an indicative study duration (e.g., "45m").
+- "name": A specific method, technique, or concept theme that bundles related exam questions. Should be specific enough to be actionable but wide enough to cover multiple question variations.
+- "description": 2-3 sentences explaining what this concept/method covers, why it appears frequently on exams, and why mastering it maximizes point potential.
+- "lessonPlan": object containing the teaching plan focused on building deep understanding:
+  - "keySkills": array of 4-6 action-oriented skills students must master to handle any question related to this concept (start with verbs like "Analyze", "Construct", "Apply", "Prove").
+  - "examConnections": array referencing the exact exams/questions that test this concept (e.g., "Exam 2022 Q4 - proof using method X", "Exam 2021 Q7 - application of technique Y"). Include at least 3-5 specific references showing this concept's frequency.
+  - "lessons": ordered array of lessons that build deep mastery of this concept. DEFAULT to 4-5 lessons per concept. Use 3 lessons ONLY for very simple/narrow concepts that appear in fewer than 3 exam questions. If you're unsure, err on the side of more lessons rather than fewer. The number of lessons must adapt to the concept's complexity and width: most concepts should have 4-6 lessons, and wide/complex concepts should have 6+ lessons. IMPORTANT: If a main concept contains multiple methods, techniques, or sub-topics, it requires separate lessons for each. Use these guidelines: If the concept covers 2+ distinct methods → use 5+ lessons. If the concept appears in 5+ different exam questions → use 4+ lessons. If the concept requires multiple steps or prerequisites → use 5+ lessons. Ensure the lesson plan comprehensively covers everything needed to master this concept. Lessons must progress from fundamentals to mastery and together enable students to tackle any question variation related to this concept. Each lesson must include:
+    - "title": Concise 2-5 word noun phrase (no sentences or punctuation).
+    - "summary": 2-3 sentences describing the lesson scope and why it matters for mastering this concept on exams.
+    - "objectives": array of 3-5 concrete, action-oriented objectives that build toward deep understanding.
 
 REQUIREMENTS:
-- Concepts and lesson plans must cover every exam question—no omissions.
-- Lessons must maintain a logical sequence: fundamentals → operations/proofs → applications → integration/mastery.
-- Focus areas and exam connections must explicitly reflect repeated exam themes.
-- Do not include points, time estimates for entire exams, efficiency math, or common pitfalls.
+- You MUST provide AT LEAST 5 main concepts (more if needed to cover all exam content). This is non-negotiable.
+- Order concepts by value: highest-value (most frequent/highest points) first, then descending.
+- Prioritize concepts that appear most frequently or carry the most point value across exams.
+- Concepts should be specific methods/techniques, not overly broad topics.
+- Each concept must be justified by multiple exam question references.
+- Lesson count must adapt to concept complexity: DEFAULT to 4-5 lessons per concept. Use 3 lessons ONLY for very simple/narrow concepts. If a concept contains multiple methods, techniques, or sub-topics, it requires separate lessons for each. Use these guidelines: If the concept covers 2+ distinct methods → use 5+ lessons. If the concept appears in 5+ different exam questions → use 4+ lessons. If the concept requires multiple steps or prerequisites → use 5+ lessons. If you're unsure, err on the side of more lessons rather than fewer. The lesson plan must comprehensively cover everything needed to master the concept.
+- Lessons must build deep, transferable understanding so students can handle any question variation related to the concept.
+- Lesson sequence: fundamentals → core method/technique → applications → advanced variations/mastery.
 - Keep all arrays populated with meaningful content (no placeholders).
 
 Return JSON in this exact format:
 {
   "courseName": "Short broad title",
   "gradeInfo": "Grade 3: 28-41p, Grade 4: 42-55p, Grade 5: 56-70p",
-  "patternAnalysis": "2-3 sentence summary highlighting trend and focus",
+  "patternAnalysis": "2-3 sentence summary highlighting the most frequently tested methods/techniques and how they appear on exams",
+  "commonQuestions": [
+    {
+      "question": "Generic question format with placeholders (e.g., 'Calculate the Laplace transform of [function]')",
+      "examCount": 5,
+      "averagePoints": 8
+    }
+  ],
   "concepts": [
     {
-      "name": "Broad Concept Name",
-      "learningStage": "foundation",
-      "description": "2-3 sentence explanation of scope and exam importance.",
+      "name": "Specific Method or Concept Name",
+      "description": "2-3 sentence explanation of what this concept covers and why it's high-value for exams.",
       "lessonPlan": {
-        "summary": "2-3 sentence description of how the lessons build mastery.",
-        "focusAreas": ["Focus Area A", "Focus Area B", "Focus Area C"],
-        "keySkills": ["Analyze ...", "Construct ...", "Explain ..."],
-        "practiceApproach": "Guidance on how to practice this concept.",
-        "examConnections": ["Exam 2022 Q3 - ...", "Exam 2021 Q1 - ..."],
+        "keySkills": ["Analyze ...", "Construct ...", "Apply ...", "Prove ..."],
+        "examConnections": ["Exam 2022 Q4 - ...", "Exam 2021 Q7 - ...", "Exam 2023 Q2 - ..."],
         "lessons": [
           {
             "title": "Concise Lesson Title",
-            "summary": "2-3 sentence lesson summary.",
-            "objectives": ["Objective 1", "Objective 2", "Objective 3"],
-            "estimatedTime": "45m"
+            "summary": "2-3 sentence lesson summary explaining scope and exam relevance.",
+            "objectives": ["Objective 1", "Objective 2", "Objective 3"]
           }
         ]
       }
@@ -192,15 +209,15 @@ Return JSON in this exact format:
   ]
 }
 
-Ensure arrays contain meaningful content (no placeholders).`
+Ensure arrays contain meaningful content (no placeholders). Focus on efficiency: identify the concepts that give the best return on study time investment.`
         },
         {
           role: 'user',
           content: `Analyze these ${numExams} exam PDF(s) and return the structured JSON study blueprint described above.\n\n${combinedText}`
         }
       ],
-      max_tokens: 4000,
-      temperature: 0.3
+      max_tokens: 8000,
+      temperature: 0.5
     });
 
     const responseText = completion.choices[0]?.message?.content || '';
@@ -233,6 +250,7 @@ Ensure arrays contain meaningful content (no placeholders).`
         courseName: analysisData.courseName || null,
         gradeInfo: analysisData.gradeInfo || null,
         patternAnalysis: analysisData.patternAnalysis || null,
+        commonQuestions: Array.isArray(analysisData.commonQuestions) ? analysisData.commonQuestions : [],
         concepts: analysisData.concepts || [],
       },
     });

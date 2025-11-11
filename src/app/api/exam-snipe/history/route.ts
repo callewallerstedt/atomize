@@ -4,12 +4,38 @@ import { prisma } from "@/lib/db";
 
 const MAX_HISTORY_ITEMS = 20;
 
-export async function GET() {
+export async function GET(req: Request) {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
+  const url = new URL(req.url);
+  const slug = url.searchParams.get("slug")?.trim();
+
+  if (slug) {
+    // Fetch single record by slug
+    const row = await prisma.examSnipeHistory.findUnique({
+      where: { userId_slug: { userId: user.id, slug } },
+    });
+
+    if (!row) {
+      return NextResponse.json({ ok: false, error: "Record not found" }, { status: 404 });
+    }
+
+    const record = {
+      id: row.id,
+      courseName: row.courseName,
+      slug: row.slug,
+      createdAt: row.createdAt.toISOString(),
+      fileNames: Array.isArray(row.fileNames) ? (row.fileNames as string[]) : [],
+      results: row.results,
+    };
+
+    return NextResponse.json({ ok: true, record });
+  }
+
+  // Fetch all records
   const rows = await prisma.examSnipeHistory.findMany({
     where: { userId: user.id },
     orderBy: { createdAt: "desc" },

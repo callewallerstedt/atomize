@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 
@@ -7,6 +6,7 @@ type GeneratedLesson = {
   planId: string;
   title: string;
   body: string;
+  quiz: Array<{ question: string }>;
   createdAt: string;
 };
 
@@ -25,23 +25,17 @@ export async function POST(req: NextRequest) {
     const {
       historySlug,
       courseName,
+      patternAnalysis,
       conceptName,
-      conceptStage,
+      conceptDescription,
+      keySkills = [],
+      examConnections = [],
       planId,
       planTitle,
       planSummary,
-      planObjectives,
-      planEstimatedTime,
-      totalExams,
-      gradeInfo,
-      patternAnalysis,
-      description,
-      focusAreas,
-      keySkills,
-      practiceApproach,
-      examConnections,
-      existingLessons = [],
+      planObjectives = [],
       detectedLanguage,
+      lessonData, // Optional: pre-generated lesson data from node-lesson
     } = body || {};
 
     if (!historySlug || !conceptName || !planId || !planTitle) {
@@ -55,6 +49,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "History not found" }, { status: 404 });
     }
 
+    // Get all concepts and lessons from history to avoid overlap
+    const historyResults = (history.results as any) || {};
+    const allConcepts = historyResults.concepts || [];
+    const allGeneratedLessons = historyResults.generatedLessons || {};
+    
+    // Get other concepts (excluding current one) and their lessons
+    const otherConcepts = allConcepts
+      .filter((c: any) => c.name !== conceptName)
+      .map((c: any) => ({
+        name: c.name,
+        description: c.description,
+        lessons: (c.lessonPlan?.lessons || []).map((l: any) => l.title),
+      }));
+    
+    // Get other lessons from the same concept
+    const otherLessonsInConcept = Object.values(allGeneratedLessons[conceptName] || {})
+      .map((l: any) => l.title)
+      .filter((title: string) => title && title !== planTitle);
+
     const stringifyList = (value: any, divider = ", ") =>
       Array.isArray(value)
         ? value
@@ -65,87 +78,102 @@ export async function POST(req: NextRequest) {
           ? value
           : "";
 
+    // Build exam-snipe specific course context - PRIORITIZE THE LESSON, not the concept
     const examContext = [
-      `Course Name: ${courseName || history.courseName || "Exam Snipe Course"}`,
-      `Concept: ${conceptName}`,
-      conceptStage ? `Concept Stage: ${conceptStage}` : "",
-      planSummary ? `Plan Summary: ${planSummary}` : "",
-      planEstimatedTime ? `Estimated Study Time: ${planEstimatedTime}` : "",
+      `Course: ${courseName || history.courseName || "Exam Snipe Course"}`,
+      patternAnalysis ? `Exam Pattern: ${patternAnalysis}` : "",
+      "",
+      `=== LESSON TO TEACH: ${planTitle} ===`,
+      planSummary ? `Lesson Summary: ${planSummary}` : "",
       Array.isArray(planObjectives) && planObjectives.length
-        ? `Lesson Objectives:\n- ${planObjectives.join("\n- ")}`
+        ? `Lesson Objectives:\n${planObjectives.map((o: string) => `- ${o}`).join("\n")}`
         : "",
-      `Exams analyzed: ${Number(totalExams) || 0}`,
-      gradeInfo ? `Grade requirements: ${gradeInfo}` : "",
-      patternAnalysis ? `Pattern analysis: ${patternAnalysis}` : "",
-      description ? `Key focus from analysis: ${description}` : "",
-      stringifyList(focusAreas) ? `Focus areas to emphasize: ${stringifyList(focusAreas)}` : "",
-      stringifyList(keySkills) ? `Skills to explicitly build: ${stringifyList(keySkills)}` : "",
-      practiceApproach ? `Recommended Practice Approach: ${practiceApproach}` : "",
-      stringifyList(examConnections, "\n- ") ? `Exam references:\n- ${stringifyList(examConnections, "\n- ")}` : "",
+      "",
+      `Context: This lesson is part of the broader concept "${conceptName}"`,
+      conceptDescription ? `Concept Overview (for context only): ${conceptDescription}` : "",
+      "",
+      stringifyList(keySkills) ? `Key Skills to Master (from exam analysis):\n${keySkills.map((s: string) => `- ${s}`).join("\n")}` : "",
+      stringifyList(examConnections, "\n") ? `Exam References:\n${examConnections.map((e: string) => `- ${e}`).join("\n")}` : "",
     ]
       .filter(Boolean)
       .join("\n\n");
 
     const languageName = detectedLanguage?.name || "English";
-    const prompt = `
-You are creating a full lesson for exam preparation.
+    
+    // Build other concepts and lessons for overlap prevention
+    const otherConceptsList = otherConcepts.map((c: any) => `- ${c.name}: ${c.description || ""} (lessons: ${c.lessons.join(", ") || "none"})`).join("\n");
+    const otherLessonsList = otherLessonsInConcept.map((t: string) => `- ${t}`).join("\n");
+    
+    const topicSummary = [
+      `=== PRIMARY FOCUS: Teach the lesson "${planTitle}" ===`,
+      planSummary ? `Lesson Summary: ${planSummary}` : "",
+      Array.isArray(planObjectives) && planObjectives.length
+        ? `Lesson Objectives:\n${planObjectives.map((o: string) => `- ${o}`).join("\n")}`
+        : "",
+      "",
+      `Context: This lesson is part of the broader concept "${conceptName}"`,
+      conceptDescription ? `Concept Overview (for context only): ${conceptDescription}` : "",
+      "",
+      examContext,
+      otherConcepts.length > 0 ? `\n\nOther Main Concepts in this Course (avoid overlap):\n${otherConceptsList}` : "",
+      otherLessonsInConcept.length > 0 ? `\n\nOther Lessons Already Generated for "${conceptName}" (avoid duplication):\n${otherLessonsList}` : "",
+    ].filter(Boolean).join("\n");
 
-IMPORTANT: Generate ALL content (title, body, quiz questions) in ${languageName}. Only use ${languageName} for the AI-generated material.
+    // Get previous lessons and other lessons meta for context
+    const conceptPlan = (historyResults.lessonPlans || {})[conceptName] || allConcepts.find((c: any) => c.name === conceptName)?.lessonPlan;
+    const allLessonsInConcept = conceptPlan?.lessons || [];
+    const currentLessonIndex = allLessonsInConcept.findIndex((l: any) => String(l.id) === planId);
+    const previousLessonsInConcept = allLessonsInConcept.slice(0, currentLessonIndex);
+    const otherLessonsMetaInConcept = allLessonsInConcept.slice(currentLessonIndex + 1).map((l: any, idx: number) => ({
+      type: "Lesson Outline",
+      title: l.title,
+    }));
+    
+    // Get generated lessons from the same concept
+    const generatedLessonsInConcept = Object.values(allGeneratedLessons[conceptName] || {})
+      .map((l: any, idx: number) => ({
+        index: idx,
+        title: l.title,
+        body: l.body || "",
+      }));
 
-Use the context below to write a thorough, exam-focused lesson that follows the planned objectives.
-
-${examContext}
-
-Existing lessons for this concept (avoid duplication): ${
-      Array.isArray(existingLessons) && existingLessons.length
-        ? existingLessons.map((l: any) => l.title).join(", ")
-        : "None"
-    }
-
-Return JSON:
-{
-  "title": "Lesson title (use the plan title or improved version)",
-  "body": "Markdown lesson content with headings, explanations, worked examples, and practice.",
-  "quiz": [{ "question": "Practice question" }]
-}
-
-Rules:
-- Lesson must stay laser-focused on "${conceptName}" within the provided scope.
-- Follow the objectives and explicitly reinforce the listed focus areas and key skills.
-- Integrate the provided focus areas and skills through explanations, worked examples, and practice flows.
-- Include worked examples tied to the exam references above.
-- Scaffold the narrative from the provided stage toward mastery, honoring the recommended practice approach.
-- End with a short recap paragraph before the quiz.
-- Quiz must include 2-3 realistic practice problems aligned with the exam references.
-`;
-
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o",
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: "You generate comprehensive lessons for exam preparation." },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.75,
-      max_tokens: 6000,
-    });
-
-    const content = completion.choices[0]?.message?.content || "{}";
+    // Use pre-generated lesson data if provided, otherwise generate via node-lesson
     let data: any = {};
-    try {
-      data = JSON.parse(content);
-    } catch {
-      const match = content.match(/\{[\s\S]*\}/);
-      if (match) {
-        try {
-          data = JSON.parse(match[0]);
-        } catch {
-          data = {};
-        }
+    if (lessonData && lessonData.body) {
+      // Use provided lesson data (from node-lesson)
+      data = lessonData;
+    } else {
+      // Generate lesson via node-lesson endpoint internally
+      const nodeLessonModule = await import("../../node-lesson/route");
+      const nodeLessonRequest = new Request(new URL("/api/node-lesson", req.url), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: courseName || history.courseName || "Exam Snipe Course",
+          topic: planTitle,
+          course_context: examContext + (otherConcepts.length > 0 ? `\n\nOther Main Concepts in this Course (avoid overlap):\n${otherConceptsList}` : "") + (otherLessonsInConcept.length > 0 ? `\n\nOther Lessons Already Generated for "${conceptName}" (avoid duplication):\n${otherLessonsList}` : ""),
+          combinedText: "", // Exam snipe doesn't use combinedText
+          topicSummary: topicSummary,
+          lessonsMeta: [{ type: "Concept", title: planTitle }],
+          lessonIndex: 0,
+          previousLessons: generatedLessonsInConcept.slice(0, currentLessonIndex),
+          generatedLessons: generatedLessonsInConcept.slice(0, currentLessonIndex),
+          otherLessonsMeta: otherLessonsMetaInConcept,
+          courseTopics: allConcepts.map((c: any) => c.name),
+          languageName: languageName,
+        }),
+      });
+      
+      const nodeLessonResponse = await nodeLessonModule.POST(nodeLessonRequest);
+      const nodeLessonJson = await nodeLessonResponse.json().catch(() => ({}));
+      
+      if (!nodeLessonResponse.ok || !nodeLessonJson?.ok) {
+        return NextResponse.json({ ok: false, error: nodeLessonJson?.error || "Lesson generation failed" }, { status: 500 });
       }
-    }
 
+      data = nodeLessonJson.data || {};
+    }
+    
     if (!data?.body) {
       return NextResponse.json({ ok: false, error: "Lesson generation failed" }, { status: 500 });
     }
@@ -154,10 +182,13 @@ Rules:
       planId,
       title: data?.title || planTitle,
       body: data?.body || "",
+      quiz: Array.isArray(data?.quiz) 
+        ? data.quiz.map((q: any) => ({ question: String(q?.question || q || "") }))
+        : [],
       createdAt: new Date().toISOString(),
     };
 
-    const results = (history.results as any) || {};
+    const results = historyResults;
     if (!results.generatedLessons) results.generatedLessons = {};
     if (!results.generatedLessons[conceptName]) results.generatedLessons[conceptName] = {};
     results.generatedLessons[conceptName][planId] = lesson;
