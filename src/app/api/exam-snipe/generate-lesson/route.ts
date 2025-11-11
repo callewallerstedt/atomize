@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
           course_context: examContext + (otherConcepts.length > 0 ? `\n\nOther Main Concepts in this Course (avoid overlap):\n${otherConceptsList}` : "") + (otherLessonsInConcept.length > 0 ? `\n\nOther Lessons Already Generated for "${conceptName}" (avoid duplication):\n${otherLessonsList}` : ""),
           combinedText: "", // Exam snipe doesn't use combinedText
           topicSummary: topicSummary,
-          lessonsMeta: [{ type: "Concept", title: planTitle }],
+          lessonsMeta: [{ type: "Full Lesson", title: planTitle }],
           lessonIndex: 0,
           previousLessons: generatedLessonsInConcept.slice(0, currentLessonIndex),
           generatedLessons: generatedLessonsInConcept.slice(0, currentLessonIndex),
@@ -178,26 +178,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Lesson generation failed" }, { status: 500 });
     }
 
+    // Sanitize helper: remove null bytes and control characters from strings
+    const sanitizeString = (s: string) => s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+    const sanitizeDeep = (value: any): any => {
+      if (typeof value === "string") return sanitizeString(value);
+      if (Array.isArray(value)) return value.map(sanitizeDeep);
+      if (value && typeof value === "object") {
+        const out: any = Array.isArray(value) ? [] : {};
+        for (const k of Object.keys(value)) out[k] = sanitizeDeep(value[k]);
+        return out;
+      }
+      return value;
+    };
+
     const lesson: GeneratedLesson = {
       planId,
-      title: data?.title || planTitle,
-      body: data?.body || "",
+      title: sanitizeString(data?.title || planTitle),
+      body: sanitizeString(data?.body || ""),
       quiz: Array.isArray(data?.quiz) 
-        ? data.quiz.map((q: any) => ({ question: String(q?.question || q || "") }))
+        ? data.quiz.map((q: any) => ({ question: sanitizeString(String(q?.question || q || "")) }))
         : [],
       createdAt: new Date().toISOString(),
     };
 
+    // Merge lesson into results, then sanitize the whole structure before persisting
     const results = historyResults;
     if (!results.generatedLessons) results.generatedLessons = {};
     if (!results.generatedLessons[conceptName]) results.generatedLessons[conceptName] = {};
     results.generatedLessons[conceptName][planId] = lesson;
+    const sanitizedResults = sanitizeDeep(results);
 
     const updated = await prisma.examSnipeHistory.update({
       where: { userId_slug: { userId: user.id, slug: historySlug } },
       data: {
         courseName: courseName || history.courseName,
-        results,
+        results: sanitizedResults,
       },
     });
 

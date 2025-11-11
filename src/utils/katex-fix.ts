@@ -66,6 +66,34 @@ export function extractMathBlocks(text: string): Array<{
     });
   }
 
+  // Find block math using \\[ ... \\]
+  const bracketBlockRegex = /\\\[([\s\S]*?)\\\]/g;
+  while ((match = bracketBlockRegex.exec(text)) !== null) {
+    const content = match[1].trim();
+    const validation = validateKaTeX(content, true);
+    blocks.push({
+      type: 'block',
+      content,
+      start: match.index,
+      end: match.index + match[0].length,
+      error: validation.error,
+    });
+  }
+
+  // Find inline math using \\( ... \\)
+  const parenInlineRegex = /\\\(([^]*?)\\\)/g;
+  while ((match = parenInlineRegex.exec(text)) !== null) {
+    const content = match[1].trim();
+    const validation = validateKaTeX(content, false);
+    blocks.push({
+      type: 'inline',
+      content,
+      start: match.index,
+      end: match.index + match[0].length,
+      error: validation.error,
+    });
+  }
+
   // Sort by position
   blocks.sort((a, b) => a.start - b.start);
 
