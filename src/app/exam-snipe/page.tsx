@@ -2,8 +2,84 @@
 
 import { Suspense, useState, useRef, useEffect, Fragment } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { saveSubjectData, saveSubjectDataAsync, StoredSubjectData } from "@/utils/storage";
+import { saveSubjectData, saveSubjectDataAsync, loadSubjectData, StoredSubjectData } from "@/utils/storage";
 import GlowSpinner from "@/components/GlowSpinner";
+
+// Generate stable dots that don't change on re-render
+function generateDots(count: number) {
+  return Array.from({ length: count }).map((_, i) => {
+    const size = Math.random() * 2 + 1;
+    const isCyan = Math.random() > 0.5;
+    const color = isCyan ? '#00E5FF' : '#FF2D96';
+    const left = Math.random() * 100;
+    const top = Math.random() * 100;
+    const glowSize = Math.random() * 4 + 2;
+    const duration = Math.random() * 20 + 15;
+    const delay = Math.random() * 5;
+    return {
+      key: `loading-dot-${i}`,
+      size,
+      color,
+      left,
+      top,
+      glowSize,
+      duration,
+      delay,
+      animation: `float-${i % 3}`,
+    };
+  });
+}
+
+// Loading Screen Component (matches welcome screen style without text)
+function LoadingScreen() {
+  const [loadingDots, setLoadingDots] = useState<ReturnType<typeof generateDots>>([]);
+  
+  // Generate dots only on client side to avoid hydration mismatch
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setLoadingDots(generateDots(80));
+    }
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--background)]">
+      {/* Animated background dots */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {loadingDots.map((dot) => (
+          <div
+            key={dot.key}
+            className="absolute rounded-full opacity-40"
+            style={{
+              width: `${dot.size}px`,
+              height: `${dot.size}px`,
+              left: `${dot.left}%`,
+              top: `${dot.top}%`,
+              background: dot.color,
+              boxShadow: `0 0 ${dot.glowSize}px ${dot.color}`,
+              animation: `${dot.animation} ${dot.duration}s linear infinite`,
+              animationDelay: `${dot.delay}s`,
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Spinning gradient ring - centered */}
+      <div className="logo-wrap" style={{ width: 240, aspectRatio: "1 / 1", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ transform: "scale(1.3)", transformOrigin: "center" }}>
+          <img
+            src="/spinner.png"
+            alt=""
+            width={320}
+            height={320}
+            style={{ width: 320, height: 320, objectFit: "contain", transformOrigin: "center" }}
+            className="animate-spin"
+            loading="eager"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type LessonPlan = {
   id: string;
@@ -26,16 +102,20 @@ type GeneratedLesson = {
   planId: string;
   title: string;
   body: string;
+  quiz?: Array<{ question: string }>;
   createdAt: string;
 };
 
-type ConceptStage = "foundation" | "core" | "advanced" | "mastery";
-
 type ExamSnipeConcept = {
   name: string;
-  learningStage: ConceptStage;
   description: string;
   lessonPlan: ConceptLessonPlan;
+};
+
+type CommonQuestion = {
+  question: string;
+  examCount: number;
+  averagePoints: number;
 };
 
 type ExamSnipeResult = {
@@ -43,6 +123,7 @@ type ExamSnipeResult = {
   totalExams: number;
   gradeInfo: string | null;
   patternAnalysis: string | null;
+  commonQuestions: CommonQuestion[];
   concepts: ExamSnipeConcept[];
   lessonPlans?: Record<string, ConceptLessonPlan>;
   generatedLessons?: Record<string, Record<string, GeneratedLesson>>;
@@ -91,26 +172,6 @@ function normalizeStringArray(source: any, { allowSentence = false }: { allowSen
   return [];
 }
 
-function formatLabel(value: string | null | undefined): string {
-  if (!value) return "";
-  return value
-    .split(/[\s_-]+/)
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ");
-}
-
-function coerceConceptStage(value: any, index: number): ConceptStage {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  switch (normalized) {
-    case "foundation":
-    case "core":
-    case "advanced":
-    case "mastery":
-      return normalized as ConceptStage;
-    default:
-      return ["foundation", "core", "advanced", "mastery"][Math.min(index, 3)] as ConceptStage;
-  }
-}
 
 function normalizeLesson(plan: any, index: number, conceptName: string): LessonPlan {
   const title =
@@ -189,8 +250,6 @@ function normalizeConcept(
       ? raw.name.trim()
       : `Concept ${index + 1}`;
 
-  const learningStage = coerceConceptStage(raw?.learningStage ?? raw?.stage, index);
-
   const descriptionSource =
     typeof raw?.description === "string" && raw.description.trim()
       ? raw.description.trim()
@@ -228,7 +287,6 @@ function normalizeConcept(
 
   return {
     name,
-    learningStage,
     description: descriptionSource,
     lessonPlan,
   };
@@ -311,6 +369,13 @@ function normalizeHistoryRecord(record: any): ExamSnipeRecord {
       : typeof rawResults?.pattern_analysis === "string"
         ? rawResults.pattern_analysis
         : null;
+  const commonQuestions = Array.isArray(rawResults?.commonQuestions)
+    ? rawResults.commonQuestions.map((q: any) => ({
+        question: String(q?.question || ""),
+        examCount: Number(q?.examCount || 0),
+        averagePoints: Number(q?.averagePoints || 0),
+      }))
+    : [];
   const generatedLessons = normalizeGeneratedLessons(rawResults?.generatedLessons);
   const detectedLanguage = rawResults?.detectedLanguage && typeof rawResults.detectedLanguage === "object"
     ? {
@@ -329,6 +394,7 @@ function normalizeHistoryRecord(record: any): ExamSnipeRecord {
       totalExams,
       gradeInfo,
       patternAnalysis,
+      commonQuestions,
       concepts,
       lessonPlans,
       generatedLessons,
@@ -362,6 +428,9 @@ function ExamSnipeInner() {
   const [history, setHistory] = useState<ExamSnipeRecord[]>([]);
   const [activeHistoryMeta, setActiveHistoryMeta] = useState<ExamSnipeRecord | null>(null);
   const [currentFileNames, setCurrentFileNames] = useState<string[]>([]);
+  const [loadingExamHistory, setLoadingExamHistory] = useState(false);
+  const [examMenuOpenFor, setExamMenuOpenFor] = useState<string | null>(null);
+  const [loadingResume, setLoadingResume] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamContainerRef = useRef<HTMLDivElement>(null);
 
@@ -412,35 +481,95 @@ function ExamSnipeInner() {
     }
   }, [selectedConceptIndex]);
 
+  const resumeSlug = searchParams?.get("resume");
+
   useEffect(() => {
     if (!isClient) return;
+    if (resumeSlug) return; // Skip if we're resuming (handled by resume effect)
+    let cancelled = false;
+    setLoadingExamHistory(true);
     (async () => {
       try {
         const res = await fetch("/api/exam-snipe/history", { credentials: "include" });
         const json = await res.json().catch(() => ({}));
-        if (!res.ok || !Array.isArray(json?.history)) return;
+        if (cancelled) return;
+        if (!res.ok || !Array.isArray(json?.history)) {
+          setHistory([]);
+          return;
+        }
         const normalized = (json.history as any[]).map((record) => normalizeHistoryRecord(record));
         setHistory(normalized.slice(0, MAX_HISTORY_ITEMS));
-      } catch {}
+      } catch {
+        if (!cancelled) {
+          setHistory([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingExamHistory(false);
+        }
+      }
     })();
-  }, [isClient]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isClient, resumeSlug]);
 
-  const resumeSlug = searchParams?.get("resume");
-
+  // Close dropdown when clicking outside
   useEffect(() => {
+    if (!examMenuOpenFor) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('[data-menu-dropdown]') && !target.closest('[data-menu-button]')) {
+        setExamMenuOpenFor(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [examMenuOpenFor]);
+
+  // Load resume record immediately if resumeSlug exists
+  useEffect(() => {
+    if (!isClient) return;
     if (!resumeSlug) return;
-    if (history.length === 0) return;
-    const record = history.find((item) => item.slug === resumeSlug);
-    if (!record) return;
-    setExamResults(record.results);
-    setActiveHistoryMeta(record);
-    setExpandedConcept(null);
-    setSelectedConceptIndex(null);
-    setStreamingText("");
-    setExamFiles([]);
-    setCurrentFileNames(record.fileNames);
-    router.replace("/exam-snipe");
-  }, [resumeSlug, history, router]);
+    
+    let cancelled = false;
+    setLoadingResume(true);
+    
+    (async () => {
+      try {
+        const res = await fetch("/api/exam-snipe/history", { credentials: "include" });
+        const json = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        
+        if (res.ok && Array.isArray(json?.history)) {
+          const normalized = (json.history as any[]).map((record) => normalizeHistoryRecord(record));
+          const record = normalized.find((item) => item.slug === resumeSlug);
+          
+          if (record && !cancelled) {
+            setExamResults(record.results);
+            setActiveHistoryMeta(record);
+            setExpandedConcept(null);
+            setSelectedConceptIndex(null);
+            setStreamingText("");
+            setExamFiles([]);
+            setCurrentFileNames(record.fileNames);
+            setHistory(normalized.slice(0, MAX_HISTORY_ITEMS));
+            router.replace("/exam-snipe");
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load resume record:", err);
+      } finally {
+        if (!cancelled) {
+          setLoadingResume(false);
+        }
+      }
+    })();
+    
+    return () => {
+      cancelled = true;
+    };
+  }, [isClient, resumeSlug, router]);
 
   useEffect(() => {
     if (streamContainerRef.current) {
@@ -450,14 +579,12 @@ function ExamSnipeInner() {
 
   // Prevent SSR to avoid PDF.js DOMMatrix issues
   if (!isClient) {
-    return (
-      <div className="min-h-screen bg-[#0F1216] text-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00E5FF] mx-auto mb-4"></div>
-          <p>Loading Exam Snipe...</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen />;
+  }
+
+  // Show loading state while resuming
+  if (loadingResume) {
+    return <LoadingScreen />;
   }
 
   // Extract text from PDF file client-side
@@ -600,8 +727,6 @@ function ExamSnipeInner() {
                     streamProgress = 45; // Found grade analysis
                   } else if (content.includes('pattern') || content.includes('consistent')) {
                     streamProgress = 50; // Found pattern analysis
-                  } else if (content.includes('learningstage') || content.includes('concept stage') || content.includes('progression')) {
-                    streamProgress = 65; // Identifying staged concepts
                   } else if (content.includes('lessonplan') || content.includes('lesson plan') || content.includes('focusareas')) {
                     streamProgress = 80; // Drafting lesson plans
                   } else if (content.includes('keyskills') || content.includes('practiceapproach') || content.includes('examconnections')) {
@@ -635,6 +760,13 @@ function ExamSnipeInner() {
                       : typeof rawData?.pattern_analysis === 'string'
                         ? rawData.pattern_analysis
                         : null;
+                  const commonQuestionsValue = Array.isArray(rawData?.commonQuestions)
+                    ? rawData.commonQuestions.map((q: any) => ({
+                        question: String(q?.question || ""),
+                        examCount: Number(q?.examCount || 0),
+                        averagePoints: Number(q?.averagePoints || 0),
+                      }))
+                    : [];
                   const generatedLessons = normalizeGeneratedLessons(rawData?.generatedLessons);
                   const detectedLanguage = rawData?.detectedLanguage && typeof rawData.detectedLanguage === "object"
                     ? {
@@ -647,6 +779,7 @@ function ExamSnipeInner() {
                     totalExams: Number(rawData?.totalExams ?? rawData?.total_exams ?? examTexts.length) || examTexts.length,
                     gradeInfo: gradeInfoValue,
                     patternAnalysis: patternValue,
+                    commonQuestions: commonQuestionsValue,
                     concepts,
                     lessonPlans,
                     generatedLessons,
@@ -709,6 +842,13 @@ function ExamSnipeInner() {
                               : typeof savedResults?.pattern_analysis === 'string'
                                 ? savedResults.pattern_analysis
                                 : result.patternAnalysis,
+                          commonQuestions: Array.isArray(savedResults?.commonQuestions) && savedResults.commonQuestions.length > 0
+                            ? savedResults.commonQuestions.map((q: any) => ({
+                                question: String(q?.question || ""),
+                                examCount: Number(q?.examCount || 0),
+                                averagePoints: Number(q?.averagePoints || 0),
+                              }))
+                            : result.commonQuestions,
                           lessonPlans: mergedLessonPlans,
                           generatedLessons: mergedGeneratedLessons,
                           concepts: normalizeConcepts(savedResults?.concepts ?? result.concepts, mergedLessonPlans),
@@ -761,6 +901,107 @@ function ExamSnipeInner() {
       setExamAnalyzing(false);
     }
   }
+
+  const renameSnipedExam = async (slug: string, currentName: string) => {
+    const next = window.prompt("Rename exam", currentName)?.trim();
+    if (!next || next === currentName) return;
+    try {
+      const res = await fetch("/api/exam-snipe/history", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ slug, courseName: next }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `Failed to rename exam (${res.status})`);
+      setHistory((prev) =>
+        prev.map((item) =>
+          item.slug === slug
+            ? {
+                ...item,
+                courseName: next,
+                results:
+                  item.results && typeof item.results === "object"
+                    ? { ...item.results, courseName: next }
+                    : item.results,
+              }
+            : item
+        )
+      );
+      // Update activeHistoryMeta if it's the current one
+      if (activeHistoryMeta?.slug === slug) {
+        setActiveHistoryMeta((prev) =>
+          prev?.slug === slug
+            ? {
+                ...prev,
+                courseName: next,
+                results:
+                  prev.results && typeof prev.results === "object"
+                    ? { ...prev.results, courseName: next }
+                    : prev.results,
+              }
+            : prev
+        );
+      }
+    } catch (err: any) {
+      alert(err?.message || "Failed to rename exam");
+    } finally {
+      setExamMenuOpenFor(null);
+    }
+  };
+
+  const deleteSnipedExam = async (slug: string) => {
+    const ok = window.confirm("Delete this exam analysis?");
+    if (!ok) return;
+    try {
+      const res = await fetch(`/api/exam-snipe/history?slug=${encodeURIComponent(slug)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `Failed to delete exam (${res.status})`);
+      setHistory((prev) => prev.filter((item) => item.slug !== slug));
+      // Clear activeHistoryMeta if it's the deleted one
+      if (activeHistoryMeta?.slug === slug) {
+        setExamResults(null);
+        setActiveHistoryMeta(null);
+        setCurrentFileNames([]);
+      }
+    } catch (err: any) {
+      alert(err?.message || "Failed to delete exam");
+    } finally {
+      setExamMenuOpenFor(null);
+    }
+  };
+
+  const exportSnipedExam = (record: ExamSnipeRecord) => {
+    try {
+      const payload = {
+        courseName: record.courseName,
+        slug: record.slug,
+        createdAt: record.createdAt,
+        fileNames: record.fileNames,
+        results: record.results,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const safeName =
+        record.slug ||
+        record.courseName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") ||
+        "exam-snipe";
+      a.href = url;
+      a.download = `${safeName}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Failed to export exam data");
+    } finally {
+      setExamMenuOpenFor(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
@@ -823,26 +1064,39 @@ function ExamSnipeInner() {
                 </button>
 
                 {history.length > 0 && (
-                  <div className="mt-10 w-full max-w-2xl rounded-2xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 p-5 shadow-lg backdrop-blur-sm">
-                    <div className="mb-4 flex items-center justify-between">
-                      <h3 className="text-base font-semibold text-[var(--foreground)]">Previously Sniped Exams</h3>
-                      <span className="text-xs text-[var(--foreground)]/60">{history.length} saved</span>
+                  <div className="mt-10 w-full">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-xl font-semibold text-[var(--foreground)]">Sniped exams</h2>
+                      <div className="flex items-center gap-2 text-xs text-[var(--foreground)]/55">
+                        {loadingExamHistory && <GlowSpinner size={18} padding={0} inline ariaLabel="Loading sniped exams" idSuffix="sniped-exam" />}
+                        <span>{history.length} saved</span>
+                      </div>
                     </div>
-                    <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-                      {history.map((record) => (
-                        <div key={record.id} className="rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/80 p-3 flex flex-col gap-2">
-                          <div>
-                            <div className="text-sm font-semibold text-[var(--foreground)]">{record.courseName}</div>
-                            <div className="text-xs text-[var(--foreground)]/60">
-                              {new Date(record.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
-                            </div>
-                          </div>
-                          <div className="text-xs text-[var(--foreground)]/60">
-                            {record.fileNames.length} exam{record.fileNames.length === 1 ? "" : "s"} • Top concept: {record.results.concepts?.[0]?.name || "—"}
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              onClick={() => {
+                    <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      {history.map((record) => {
+                        const topConcept =
+                          record.results?.concepts?.[0]?.name && typeof record.results.concepts[0].name === "string"
+                            ? String(record.results.concepts[0].name)
+                            : null;
+                        const fileCount = record.fileNames.length;
+                        return (
+                          <div
+                            key={record.id}
+                            className="relative rounded-2xl bg-[var(--background)] p-5 text-[var(--foreground)] transition-all duration-200 shadow-[0_2px_8px_rgba(0,0,0,0.7)] cursor-pointer hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)]"
+                            role="link"
+                            tabIndex={0}
+                            onClick={() => {
+                              setExamResults(record.results);
+                              setActiveHistoryMeta(record);
+                              setExpandedConcept(null);
+                              setSelectedConceptIndex(null);
+                              setStreamingText("");
+                              setExamFiles([]);
+                              setCurrentFileNames(record.fileNames);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
                                 setExamResults(record.results);
                                 setActiveHistoryMeta(record);
                                 setExpandedConcept(null);
@@ -850,14 +1104,77 @@ function ExamSnipeInner() {
                                 setStreamingText("");
                                 setExamFiles([]);
                                 setCurrentFileNames(record.fileNames);
-                              }}
-                              className="inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-2 text-xs font-medium text-white hover:opacity-90 transition-opacity"
-                            >
-                              View analysis
-                            </button>
+                              }
+                            }}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-semibold leading-snug truncate">{record.courseName}</div>
+                                <div className="mt-1 text-xs text-[var(--foreground)]/55">
+                                  {new Date(record.createdAt).toLocaleString(undefined, { dateStyle: "medium" })}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="text-[10px] uppercase tracking-wide text-[var(--foreground)]/45">
+                                  Exam Snipe
+                                </div>
+                                <button
+                                  data-menu-button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExamMenuOpenFor((cur) => (cur === record.slug ? null : record.slug));
+                                  }}
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[var(--foreground)]/60 hover:text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors !shadow-none"
+                                  aria-label="More actions"
+                                  title="More actions"
+                                >
+                                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <circle cx="5" cy="12" r="2" fill="currentColor" />
+                                    <circle cx="12" cy="12" r="2" fill="currentColor" />
+                                    <circle cx="19" cy="12" r="2" fill="currentColor" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+                            <div className="mt-3 text-xs text-[var(--foreground)]/60">
+                              {fileCount} exam{fileCount === 1 ? "" : "s"}
+                              {topConcept ? ` • Top concept: ${topConcept}` : ""}
+                            </div>
+                            <div className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-[var(--accent-cyan)]/80">
+                              <span>Open analysis</span>
+                              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M5 12h14M13 6l6 6-6 6" />
+                              </svg>
+                            </div>
+                            {examMenuOpenFor === record.slug && (
+                              <div
+                                data-menu-dropdown
+                                className="absolute right-4 top-14 z-50 w-40 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-lg p-2 space-y-2"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <button
+                                  onClick={() => renameSnipedExam(record.slug, record.courseName)}
+                                  className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
+                                >
+                                  Rename
+                                </button>
+                                <button
+                                  onClick={() => deleteSnipedExam(record.slug)}
+                                  className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[#FFC0DA] hover:bg-[#FF2D96]/20 transition-colors"
+                                >
+                                  Delete
+                                </button>
+                                <button
+                                  onClick={() => exportSnipedExam(record)}
+                                  className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
+                                >
+                                  Export JSON
+                                </button>
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -968,16 +1285,43 @@ function ExamSnipeInner() {
               {examResults.gradeInfo && (
                 <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--accent-cyan)]/20 mb-4">
                   <div className="text-sm font-semibold text-[var(--foreground)] mb-2">Grade Requirements</div>
-                  <div className="text-sm text-[var(--foreground)]">{examResults.gradeInfo}</div>
+                  <div className="text-sm text-[var(--foreground)]">
+                    {examResults.gradeInfo.split(',').map((grade: string, idx: number) => (
+                      <div key={idx} className={idx > 0 ? 'mt-1' : ''}>
+                        {grade.trim()}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
               {examResults.patternAnalysis && (
                 <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--accent-cyan)]/20">
                   <div className="text-sm font-semibold text-[var(--foreground)] mb-2">Pattern Analysis</div>
-                  <div className="text-sm text-[var(--foreground)] leading-relaxed">
+                  <div className="text-sm text-[var(--foreground)] leading-relaxed mb-4">
                     {examResults.patternAnalysis}
                   </div>
+                  
+                  {examResults.commonQuestions && examResults.commonQuestions.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-[var(--foreground)]/10">
+                      <div className="text-xs font-semibold text-[var(--foreground)]/80 mb-2 uppercase tracking-wide">
+                        Most Common Exam Questions
+                      </div>
+                      <ol className="space-y-2 text-sm text-[var(--foreground)]/90">
+                        {examResults.commonQuestions.map((q: CommonQuestion, idx: number) => (
+                          <li key={idx} className="flex items-start gap-2">
+                            <span className="text-[var(--foreground)]/50 font-mono text-xs mt-0.5">{idx + 1}.</span>
+                            <div className="flex-1">
+                              <span>{q.question}</span>
+                              <span className="ml-2 text-xs text-[var(--foreground)]/60">
+                                ({q.examCount} of {examResults.totalExams} exam{q.examCount !== 1 ? 's' : ''}) ~ {q.averagePoints || 0}p
+                              </span>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1010,7 +1354,7 @@ function ExamSnipeInner() {
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-[var(--foreground)] text-sm">{concept.name}</div>
                       <div className="text-xs text-[var(--foreground)]/60 mt-1">
-                        Stage: {formatLabel(concept.learningStage)} • {concept.lessonPlan?.lessons?.length || 0} lesson{(concept.lessonPlan?.lessons?.length || 0) === 1 ? "" : "s"}
+                        {concept.lessonPlan?.lessons?.length || 0} lesson{(concept.lessonPlan?.lessons?.length || 0) === 1 ? "" : "s"}
                       </div>
                       {concept.description && (
                         <div className="text-xs text-[var(--foreground)]/55 mt-2 leading-relaxed line-clamp-2">
@@ -1026,63 +1370,353 @@ function ExamSnipeInner() {
                   </div>
                   
 
-{expandedConcept === i && (
-  <div className="border-t border-[var(--foreground)]/10 bg-[var(--background)]/60 p-4">
-    <div className="mb-4">
-      <div className="text-xs uppercase tracking-wide text-[var(--foreground)]/40 mb-1">Concept Overview</div>
-      <div className="text-sm text-[var(--foreground)]/80 leading-relaxed">{concept.description}</div>
-    </div>
-    <div className="mb-4">
-      <div className="text-xs uppercase tracking-wide text-[var(--foreground)]/40 mb-1">Lesson Strategy</div>
-      <div className="text-sm text-[var(--foreground)]/80 leading-relaxed">
-        {concept.lessonPlan?.summary}
+{expandedConcept === i && (() => {
+  const plan = concept.lessonPlan;
+  const lessons = plan?.lessons || [];
+  const generatedMap = (activeHistoryMeta?.results as any)?.generatedLessons?.[concept.name] || {};
+  const lessonGeneratingState = lessonGenerating;
+  
+  return (
+    <div className="border-t border-[var(--foreground)]/10 bg-[var(--background)]/60 p-4">
+      <div className="mb-4">
+        <div className="text-xs uppercase tracking-wide text-[var(--foreground)]/40 mb-1">Concept Overview</div>
+        <div className="text-sm text-[var(--foreground)]/80 leading-relaxed">{concept.description}</div>
       </div>
-    </div>
-    <div className="grid gap-3">
-      <div className="rounded-xl bg-[var(--background)]/70 p-3 border border-[var(--foreground)]/12">
-        <h4 className="text-xs font-semibold text-[var(--foreground)] mb-2">Key Focus Areas</h4>
-        <div className="flex flex-wrap gap-1">
-          {(concept.lessonPlan?.focusAreas || []).map((area: string, idx: number) => (
-            <span
-              key={idx}
-              className="px-2 py-1 bg-[var(--background)]/80 border border-[var(--foreground)]/15 rounded text-[10px] text-[var(--foreground)]/70"
-            >
-              {area}
-            </span>
-          ))}
-        </div>
-      </div>
-      <div className="rounded-xl bg-[var(--background)]/70 p-3 border border-[var(--foreground)]/12">
+      <div className="rounded-xl bg-[var(--background)]/70 p-3 border border-[var(--foreground)]/12 mb-4">
         <h4 className="text-xs font-semibold text-[var(--foreground)] mb-2">Key Skills</h4>
         <ul className="text-xs text-[var(--foreground)]/85 space-y-1 list-disc list-inside">
-          {(concept.lessonPlan?.keySkills || []).map((skill: string, idx: number) => (
+          {(plan?.keySkills || []).map((skill: string, idx: number) => (
             <li key={idx}>{skill}</li>
           ))}
         </ul>
       </div>
-      <div className="rounded-xl bg-[var(--background)]/70 p-3 border border-[var(--foreground)]/12">
-        <h4 className="text-xs font-semibold text-[var(--foreground)] mb-2">Practice Approach</h4>
-        <p className="text-xs text-[var(--foreground)]/80 leading-relaxed">{concept.lessonPlan?.practiceApproach}</p>
-      </div>
-      <div className="rounded-xl bg-[var(--background)]/70 p-3 border border-[var(--foreground)]/12">
+      <div className="rounded-xl bg-[var(--background)]/70 p-3 border border-[var(--foreground)]/12 mb-4">
         <h4 className="text-xs font-semibold text-[var(--foreground)] mb-2">Exam Connections</h4>
         <ul className="text-xs text-[var(--foreground)]/85 space-y-1 list-disc list-inside">
-          {(concept.lessonPlan?.examConnections || []).map((connection: string, idx: number) => (
+          {(plan?.examConnections || []).map((connection: string, idx: number) => (
             <li key={idx}>{connection}</li>
           ))}
         </ul>
       </div>
+      
+      {lessons.length > 0 && (
+        <div className="mt-4">
+          <div className="text-sm font-semibold text-[var(--foreground)] mb-3">Lesson Plan</div>
+          <ul className="divide-y divide-[var(--foreground)]/10 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]">
+            {lessons.map((planItem: any, lessonIdx: number) => {
+              const planId = String(planItem.id);
+              const generatedLesson = generatedMap?.[planId] as GeneratedLesson | undefined;
+              const isGenerating = !!lessonGeneratingState[planId];
+              const isFirst = lessonIdx === 0;
+              const isLast = lessonIdx === lessons.length - 1;
+              const isOnly = lessons.length === 1;
+              const roundedClass = isOnly
+                ? 'rounded-t-2xl rounded-b-2xl'
+                : isFirst
+                ? 'rounded-t-2xl'
+                : isLast
+                ? 'rounded-b-2xl'
+                : '';
+              const planTitle = String(planItem.title || `Lesson ${lessonIdx + 1}`);
+
+              const handleRowClick = async () => {
+                try {
+                  const slugBase = (activeHistoryMeta?.courseName || 'Exam Snipe Lessons')
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, '-')
+                    .replace(/^-+|-+$/g, '');
+                  const slug = `${slugBase}-${activeHistoryMeta?.slug || 'exams'}`.slice(0, 64);
+                  const topic = concept.name;
+                  
+                  // Load existing subject data if it exists
+                  const existingData = loadSubjectData(slug) || null;
+                  
+                  // Build lessonsMeta and lessons arrays from all lesson plans
+                  const lessonsMeta: Array<{ type: string; title: string; planId?: string }> = [];
+                  const lessonsArray: Array<any> = [];
+                  const planIdMapping: Record<number, string> = {}; // Map lesson index to planId
+                  let clickedLessonIndex = -1;
+                  
+                  // Get existing lessons to preserve user data (flashcards, quiz answers, etc.)
+                  const existingLessons = (existingData?.nodes?.[topic] && typeof existingData.nodes[topic] === 'object' && !Array.isArray(existingData.nodes[topic])) 
+                    ? (existingData.nodes[topic] as any).lessons || []
+                    : [];
+                  
+                  (lessons || []).forEach((lessonPlanItem: any, idx: number) => {
+                    const lessonPlanId = String(lessonPlanItem.id);
+                    const lessonGenerated = generatedMap?.[lessonPlanId] as GeneratedLesson | undefined;
+                    const lessonTitle = String(lessonPlanItem.title || `Lesson ${idx + 1}`);
+                    
+                    // Track which lesson was clicked
+                    if (lessonPlanId === planId) {
+                      clickedLessonIndex = idx;
+                    }
+                    
+                    // Store mapping of lesson index to planId
+                    planIdMapping[idx] = lessonPlanId;
+                    
+                    // Get existing lesson data to preserve user progress
+                    const existingLesson = existingLessons[idx] || {};
+                    
+                    if (lessonGenerated) {
+                      lessonsMeta.push({ type: 'Generated Lesson', title: String(lessonGenerated.title || lessonTitle), planId: lessonPlanId });
+                      // MERGE with existing lesson data to preserve flashcards, quiz answers, etc.
+                      lessonsArray.push({
+                        ...existingLesson, // Keep all existing data (flashcards, quiz progress, etc.)
+                        title: String(lessonGenerated.title || lessonTitle),
+                        body: String(lessonGenerated.body || ''),
+                        // Only update quiz if there's no existing quiz (to preserve user answers/results)
+                        quiz: (existingLesson as any)?.quiz?.length 
+                          ? (existingLesson as any).quiz 
+                          : (Array.isArray(lessonGenerated.quiz) 
+                              ? lessonGenerated.quiz.map((q: any) => ({ question: String(q?.question || q || "") }))
+                              : []),
+                      });
+                    } else {
+                      lessonsMeta.push({ type: 'Lesson Outline', title: lessonTitle, planId: lessonPlanId });
+                      // MERGE with existing lesson data, but keep empty body for Start button
+                      lessonsArray.push({
+                        ...existingLesson, // Keep all existing data
+                        title: lessonTitle,
+                        body: '', // Empty body to trigger Start button
+                        // Only clear quiz if there's no existing quiz (preserve user data)
+                        quiz: (existingLesson as any)?.quiz?.length ? (existingLesson as any).quiz : [],
+                      });
+                    }
+                  });
+                  
+                  // Merge with existing data
+                  const data: StoredSubjectData = {
+                    subject: activeHistoryMeta?.courseName || existingData?.subject || 'Exam Snipe Lessons',
+                    course_context: (examResults.patternAnalysis || '') + "\n" + (examResults.gradeInfo || '') || existingData?.course_context || '',
+                    combinedText: existingData?.combinedText || '',
+                    topics: existingData?.topics || [],
+                    nodes: {
+                      ...(existingData?.nodes || {}),
+                      [topic]: {
+                        overview: `Lessons generated from Exam Snipe for: ${topic}`,
+                        symbols: (existingData?.nodes?.[topic] && typeof existingData.nodes[topic] === 'object' && !Array.isArray(existingData.nodes[topic])) ? (existingData.nodes[topic] as any).symbols || [] : [],
+                        lessonsMeta,
+                        lessons: lessonsArray,
+                        rawLessonJson: (existingData?.nodes?.[topic] && typeof existingData.nodes[topic] === 'object' && !Array.isArray(existingData.nodes[topic])) ? (existingData.nodes[topic] as any).rawLessonJson || [] : [],
+                        // Store exam snipe metadata for saving back to history
+                        examSnipeMeta: {
+                          historySlug: activeHistoryMeta?.slug || '',
+                          conceptName: concept.name,
+                          planIdMapping,
+                        },
+                      } as any,
+                    },
+                    files: existingData?.files || [],
+                    progress: existingData?.progress || {},
+                  };
+                  
+                  await saveSubjectDataAsync(slug, data);
+                  
+                  // Always navigate to the lesson page - if generated, show lesson; if not, show Start button
+                  if (clickedLessonIndex >= 0) {
+                    router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}/lesson/${clickedLessonIndex}`);
+                  } else {
+                    router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}`);
+                  }
+                } catch {}
+              };
+
+              const triggerLessonGeneration = async () => {
+                if (isGenerating) return;
+                setLessonGenerating((prev) => ({ ...prev, [planId]: true }));
+                try {
+                  // Build exam-snipe specific context
+                  const allLessonsInConcept = plan?.lessons || [];
+                  const currentLessonIdx = allLessonsInConcept.findIndex((l: any) => String(l.id) === planId);
+                  const otherLessonsMetaInConcept = allLessonsInConcept.slice(currentLessonIdx + 1).map((l: any) => ({
+                    type: "Lesson Outline",
+                    title: l.title,
+                  }));
+                  
+                  // Get generated lessons from the same concept
+                  const allGeneratedLessons = examResults.generatedLessons || {};
+                  const generatedLessonsInConcept = Object.values(allGeneratedLessons[concept.name] || {})
+                    .map((l: any, idx: number) => ({
+                      index: idx,
+                      title: l.title,
+                      body: l.body || "",
+                    }));
+
+                  // Build exam-snipe specific course context
+                  const examContext = [
+                    `Course: ${activeHistoryMeta?.courseName || examResults.courseName || 'Exam Snipe Course'}`,
+                    examResults.patternAnalysis ? `Exam Pattern: ${examResults.patternAnalysis}` : "",
+                    "",
+                    `Main Concept: ${concept.name}`,
+                    concept.description ? `Concept Overview: ${concept.description}` : "",
+                    "",
+                    (plan?.keySkills || []).length > 0 ? `Key Skills to Master (from exam analysis):\n${(plan?.keySkills || []).map((s: string) => `- ${s}`).join("\n")}` : "",
+                    (plan?.examConnections || []).length > 0 ? `Exam References:\n${(plan?.examConnections || []).map((e: string) => `- ${e}`).join("\n")}` : "",
+                    "",
+                    `This Lesson: ${planItem.title}`,
+                    planItem.summary ? `Lesson Summary: ${planItem.summary}` : "",
+                    Array.isArray(planItem.objectives) && planItem.objectives.length > 0
+                      ? `Lesson Objectives:\n${planItem.objectives.map((o: string) => `- ${o}`).join("\n")}`
+                      : "",
+                  ].filter(Boolean).join("\n\n");
+
+                  // Build other concepts and lessons for overlap prevention
+                  const otherConcepts = (examResults.concepts || []).filter((c: any) => c.name !== concept.name);
+                  const otherConceptsList = otherConcepts.map((c: any) => `- ${c.name}: ${c.description || ""} (lessons: ${(c.lessonPlan?.lessons || []).map((l: any) => l.title).join(", ") || "none"})`).join("\n");
+                  const otherLessonsInConceptTitles = Object.values(allGeneratedLessons[concept.name] || {})
+                    .map((l: any) => l.title)
+                    .filter((t: string) => t && t !== planItem.title);
+                  const otherLessonsList = otherLessonsInConceptTitles.map((t: string) => `- ${t}`).join("\n");
+                  
+                  const topicSummary = [
+                    examContext,
+                    otherConcepts.length > 0 ? `\n\nOther Main Concepts in this Course (avoid overlap):\n${otherConceptsList}` : "",
+                    otherLessonsInConceptTitles.length > 0 ? `\n\nOther Lessons Already Generated for "${concept.name}" (avoid duplication):\n${otherLessonsList}` : "",
+                  ].filter(Boolean).join("");
+
+                  // Generate lesson using /api/node-lesson (same as courses)
+                  const lessonRes = await fetch('/api/node-lesson', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      subject: activeHistoryMeta?.courseName || examResults.courseName || 'Exam Snipe Course',
+                      topic: planItem.title,
+                      course_context: examContext + (otherConcepts.length > 0 ? `\n\nOther Main Concepts in this Course (avoid overlap):\n${otherConceptsList}` : "") + (otherLessonsInConceptTitles.length > 0 ? `\n\nOther Lessons Already Generated for "${concept.name}" (avoid duplication):\n${otherLessonsList}` : ""),
+                      combinedText: "",
+                      topicSummary: topicSummary,
+                      lessonsMeta: [{ type: "Concept", title: planItem.title }],
+                      lessonIndex: 0,
+                      previousLessons: generatedLessonsInConcept.slice(0, currentLessonIdx),
+                      generatedLessons: generatedLessonsInConcept.slice(0, currentLessonIdx),
+                      otherLessonsMeta: otherLessonsMetaInConcept,
+                      courseTopics: (examResults.concepts || []).map((c: any) => c.name),
+                      languageName: examResults.detectedLanguage?.name || "English",
+                    }),
+                  });
+                  const lessonJson = await lessonRes.json().catch(() => ({}));
+                  if (!lessonRes.ok || !lessonJson?.ok) throw new Error(lessonJson?.error || 'Failed to generate lesson');
+
+                  // Save the lesson to exam-snipe history (pass the generated lesson data)
+                  const saveRes = await fetch('/api/exam-snipe/generate-lesson', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                      historySlug: activeHistoryMeta?.slug || '',
+                      courseName: activeHistoryMeta?.courseName || examResults.courseName || 'Exam Snipe Course',
+                      patternAnalysis: examResults.patternAnalysis,
+                      conceptName: concept.name,
+                      conceptDescription: concept.description,
+                      keySkills: plan?.keySkills || [],
+                      examConnections: plan?.examConnections || [],
+                      planId,
+                      planTitle: planItem.title,
+                      planSummary: planItem.summary,
+                      planObjectives: planItem.objectives || [],
+                      detectedLanguage: examResults.detectedLanguage,
+                      lessonData: lessonJson.data, // Pass the generated lesson data
+                    }),
+                  });
+                  const saveJson = await saveRes.json().catch(() => ({}));
+                  
+                  if (saveJson.record) {
+                    const updated = normalizeHistoryRecord(saveJson.record);
+                    setActiveHistoryMeta(updated);
+                    setExamResults(updated.results);
+                    setHistory((prev) => {
+                      const filtered = prev.filter((r) => r.slug !== updated.slug);
+                      return [updated, ...filtered].slice(0, MAX_HISTORY_ITEMS);
+                    });
+                    
+                    // Navigate to the lesson page after generation (like courses do)
+                    const slugBase = (updated.courseName || 'Exam Snipe Lessons')
+                      .toLowerCase()
+                      .replace(/[^a-z0-9]+/g, '-')
+                      .replace(/^-+|-+$/g, '');
+                    const slug = `${slugBase}-${updated.slug || 'exams'}`.slice(0, 64);
+                    const topic = concept.name;
+                    
+                    // Find the lesson index
+                    const lessonIdx = (lessons || []).findIndex((l: any) => String(l.id) === planId);
+                    if (lessonIdx >= 0) {
+                      router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}/lesson/${lessonIdx}`);
+                    }
+                  }
+                } catch (err: any) {
+                  alert(err?.message || 'Failed to generate lesson');
+                } finally {
+                  setLessonGenerating((prev) => ({ ...prev, [planId]: false }));
+                }
+              };
+
+              return (
+                <li
+                  key={planId}
+                  className={`group relative flex items-center justify-between px-4 py-3 transition-colors overflow-hidden ${roundedClass} ${
+                    generatedLesson ? 'cursor-pointer bg-transparent' : 'hover:bg-[var(--background)]/80 cursor-pointer'
+                  }`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={handleRowClick}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      handleRowClick();
+                    }
+                  }}
+                >
+                  {generatedLesson && (
+                    <div
+                      className={`pointer-events-none absolute inset-0 opacity-20 ${roundedClass}`}
+                      style={{ backgroundImage: 'linear-gradient(90deg, #00E5FF, #FF2D96)' }}
+                    />
+                  )}
+                  <span className={`text-sm truncate ${generatedLesson ? 'text-[var(--foreground)] hover:opacity-90 transition-opacity' : 'text-[var(--foreground)]/70'}`}>
+                    {planTitle}
+                  </span>
+                  <div className="flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                    {generatedLesson ? (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-green-300 bg-green-50 px-2 py-0.5 text-[11px] text-green-700 dark:border-green-500/40 dark:bg-green-500/10 dark:text-green-200">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                          <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        Done
+                      </span>
+                    ) : isGenerating ? (
+                      <span className="inline-flex items-center gap-2 rounded-full border border-[var(--foreground)]/20 bg-[var(--background)] px-2 py-0.5 text-[11px] text-[var(--foreground)]/70">
+                        <GlowSpinner
+                          size={9}
+                          padding={0}
+                          inline
+                          className="shrink-0"
+                          ariaLabel="Generating lesson"
+                          idSuffix={`lesson-${planId}`}
+                        />
+                        Generating…
+                      </span>
+                    ) : (
+                      <button
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void triggerLessonGeneration();
+                        }}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-[11px] text-white shadow cursor-pointer opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:shadow-lg hover:bg-gradient-to-r hover:from-[#00E5FF]/80 hover:to-[#FF2D96]/80 transition-all duration-300 focus-visible:opacity-100 focus-visible:scale-100"
+                        aria-label="Generate AI"
+                        title="Generate AI"
+                      />
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
     </div>
-    <div className="flex justify-end mt-4">
-      <button
-        onClick={() => setSelectedConceptIndex(i)}
-        className="inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-5 py-2 text-xs font-medium text-white hover:opacity-90 transition-opacity"
-      >
-        Start
-      </button>
-    </div>
-  </div>
-)}
+  );
+})()}
 
                 </div>
               ))}
@@ -1093,7 +1727,7 @@ function ExamSnipeInner() {
               <h3 className="text-base font-semibold text-[var(--foreground)] mb-3">Study Strategy</h3>
               <p className="text-sm text-[var(--foreground)] mb-4">
                 Move through the concepts in order—they build from foundational understanding to advanced exam execution.
-                Use the stage badge and lesson count to set expectations for depth and pacing.
+                Use the lesson count to set expectations for depth and pacing.
               </p>
               <div className="text-sm text-[var(--foreground)]/70">
                 <strong>Recommended flow:</strong> Secure the fundamentals in Concept 1, then advance sequentially.
@@ -1143,11 +1777,6 @@ function ExamSnipeInner() {
                       <div className="text-xs uppercase tracking-wide text-[var(--foreground)]/40">Main Concept</div>
                       <h3 className="text-lg font-semibold text-[var(--foreground)] mt-0.5">{concept.name}</h3>
                       <div className="mt-1 inline-flex items-center gap-2 text-xs text-[var(--foreground)]/60">
-                        <span
-                          className="inline-flex items-center rounded-full px-3 py-1 bg-[var(--background)]/80 border border-[var(--foreground)]/15"
-                        >
-                          Stage: {formatLabel(concept.learningStage)}
-                        </span>
                         <span className="inline-flex items-center rounded-full px-3 py-1 bg-[var(--background)]/80 border border-[var(--foreground)]/15">
                           Lessons: {lessons.length}
                         </span>
@@ -1171,36 +1800,12 @@ function ExamSnipeInner() {
                       </div>
 
                       <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
-                        <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Lesson Strategy</h4>
-                        <p className="text-sm text-[var(--foreground)]/80 leading-relaxed">{plan.summary}</p>
-                      </div>
-
-                      <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
-                        <h4 className="text-sm font-semibold text-[var(--foreground)] mb-3">Key Focus Areas</h4>
-                        <div className="flex flex-wrap gap-1">
-                          {(plan.focusAreas || []).map((area: string, idx: number) => (
-                            <span
-                              key={idx}
-                              className="px-2 py-1 bg-[var(--background)]/80 border border-[var(--foreground)]/15 rounded text-xs text-[var(--foreground)]/80 font-medium"
-                            >
-                              {area}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
                         <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Skills to Master</h4>
                         <ul className="text-xs text-[var(--foreground)]/85 space-y-1 list-disc list-inside">
                           {(plan.keySkills || []).map((skill: string, idx: number) => (
                             <li key={idx}>{skill}</li>
                           ))}
                         </ul>
-                      </div>
-
-                      <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
-                        <h4 className="text-sm font-semibold text-[var(--foreground)] mb-2">Practice Approach</h4>
-                        <p className="text-sm text-[var(--foreground)]/80 leading-relaxed">{plan.practiceApproach}</p>
                       </div>
 
                       <div className="rounded-xl bg-[var(--background)]/70 p-4 border border-[var(--foreground)]/12">
@@ -1212,232 +1817,6 @@ function ExamSnipeInner() {
                         </ul>
                       </div>
                     </div>
-
-                    {lessons.length > 0 && (
-                      <div>
-                        <div className="text-sm font-semibold text-[var(--foreground)] mb-3">Lesson Plan</div>
-                        <ul className="divide-y divide-[var(--foreground)]/10 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]">
-                          {lessons.map((planItem: any, i: number) => {
-                            const planId = String(planItem.id);
-                            const generatedLesson = generatedMap?.[planId] as GeneratedLesson | undefined;
-                            const isGenerating = !!lessonGenerating[planId];
-                            const isFirst = i === 0;
-                            const isLast = i === lessons.length - 1;
-                            const isOnly = lessons.length === 1;
-                            const roundedClass = isOnly
-                              ? 'rounded-t-2xl rounded-b-2xl'
-                              : isFirst
-                              ? 'rounded-t-2xl'
-                              : isLast
-                              ? 'rounded-b-2xl'
-                              : '';
-                            const planTitle = String(planItem.title || `Lesson ${i + 1}`);
-
-                            const openGeneratedLesson = async () => {
-                              if (!generatedLesson) return;
-                              try {
-                                const slugBase = (activeHistoryMeta?.courseName || 'Exam Snipe Lessons')
-                                  .toLowerCase()
-                                  .replace(/[^a-z0-9]+/g, '-')
-                                  .replace(/^-+|-+$/g, '');
-                                const slug = `${slugBase}-${activeHistoryMeta?.slug || 'exams'}`.slice(0, 64);
-                                const topic = concept.name;
-                                const data: StoredSubjectData = {
-                                  subject: activeHistoryMeta?.courseName || 'Exam Snipe Lessons',
-                                  course_context: (examResults.patternAnalysis || '') + "
-" + (examResults.gradeInfo || ''),
-                                  combinedText: '',
-                                  topics: [],
-                                  nodes: {
-                                    [topic]: {
-                                      overview: `Lessons generated from Exam Snipe for: ${topic}`,
-                                      symbols: [],
-                                      lessonsMeta: [{ type: 'Generated Lesson', title: String(generatedLesson.title || planTitle) }],
-                                      lessons: [
-                                        {
-                                          title: String(generatedLesson.title || planTitle),
-                                          body: String(generatedLesson.body || ''),
-                                          quiz: [],
-                                        },
-                                      ],
-                                      rawLessonJson: [],
-                                    },
-                                  },
-                                  files: [],
-                                  progress: {},
-                                };
-                                await saveSubjectDataAsync(slug, data);
-                                setSelectedConceptIndex(null);
-                                router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}`);
-                              } catch {}
-                            };
-
-                            const openPlaceholderLesson = async () => {
-                              try {
-                                const slugBase = (activeHistoryMeta?.courseName || 'Exam Snipe Lessons')
-                                  .toLowerCase()
-                                  .replace(/[^a-z0-9]+/g, '-')
-                                  .replace(/^-+|-+$/g, '');
-                                const slug = `${slugBase}-${activeHistoryMeta?.slug || 'exams'}`.slice(0, 64);
-                                const topic = concept.name;
-                                const data: StoredSubjectData = {
-                                  subject: activeHistoryMeta?.courseName || 'Exam Snipe Lessons',
-                                  course_context: (examResults.patternAnalysis || '') + "
-" + (examResults.gradeInfo || ''),
-                                  combinedText: '',
-                                  topics: [],
-                                  nodes: {
-                                    [topic]: {
-                                      overview: `Lessons generated from Exam Snipe for: ${topic}`,
-                                      symbols: [],
-                                      lessonsMeta: [{ type: 'Lesson Outline', title: planTitle }],
-                                      lessons: [
-                                        {
-                                          title: planTitle,
-                                          body: `## Lesson Summary
-${planItem.summary || ''}
-
-### Objectives
-${(planItem.objectives || [])
-                                            .map((obj: string) => `- ${obj}`)
-                                            .join('
-')}`,
-                                          quiz: [],
-                                        },
-                                      ],
-                                      rawLessonJson: [],
-                                    },
-                                  },
-                                  files: [],
-                                  progress: {},
-                                };
-                                await saveSubjectDataAsync(slug, data);
-                                setSelectedConceptIndex(null);
-                                router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}`);
-                              } catch {}
-                            };
-
-                            const handleRowClick = () => {
-                              if (generatedLesson) {
-                                void openGeneratedLesson();
-                              } else {
-                                void openPlaceholderLesson();
-                              }
-                            };
-
-                            const triggerLessonGeneration = async () => {
-                              if (isGenerating) return;
-                              setLessonGenerating((prev) => ({ ...prev, [planId]: true }));
-                              try {
-                                const payload = {
-                                  historySlug: activeHistoryMeta?.slug || '',
-                                  courseName: activeHistoryMeta?.courseName || examResults.courseName || 'Exam Snipe Course',
-                                  conceptName: concept.name,
-                                  conceptStage: concept.learningStage,
-                                  planId,
-                                  planTitle: planItem.title,
-                                  planSummary: planItem.summary,
-                                  planObjectives: planItem.objectives,
-                                  planEstimatedTime: planItem.estimatedTime,
-                                  totalExams: examResults.totalExams,
-                                  gradeInfo: examResults.gradeInfo,
-                                  patternAnalysis: examResults.patternAnalysis,
-                                  description: concept.description,
-                                  focusAreas: plan.focusAreas,
-                                  keySkills: plan.keySkills,
-                                  practiceApproach: plan.practiceApproach,
-                                  examConnections: plan.examConnections,
-                                  detectedLanguage: examResults.detectedLanguage,
-                                  existingLessons: Object.values(generatedMap || {}),
-                                };
-                                const res = await fetch('/api/exam-snipe/generate-lesson', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  credentials: 'include',
-                                  body: JSON.stringify(payload),
-                                });
-                                const json = await res.json().catch(() => ({}));
-                                if (!res.ok || !json?.ok) throw new Error(json?.error || 'Failed to generate lesson');
-                                if (json.record) {
-                                  const updated = normalizeHistoryRecord(json.record);
-                                  setActiveHistoryMeta(updated);
-                                  setExamResults(updated.results);
-                                  setHistory((prev) => {
-                                    const filtered = prev.filter((r) => r.slug !== updated.slug);
-                                    return [updated, ...filtered].slice(0, MAX_HISTORY_ITEMS);
-                                  });
-                                }
-                              } catch (err: any) {
-                                alert(err?.message || 'Failed to generate lesson');
-                              } finally {
-                                setLessonGenerating((prev) => ({ ...prev, [planId]: false }));
-                              }
-                            };
-
-                            return (
-                              <li
-                                key={planId}
-                                className={`group relative flex items-center justify-between px-4 py-3 transition-colors overflow-hidden ${roundedClass} ${
-                                  generatedLesson ? 'cursor-pointer bg-transparent' : 'hover:bg-[var(--background)]/80 cursor-pointer'
-                                }`}
-                                role="button"
-                                tabIndex={0}
-                                onClick={handleRowClick}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Enter' || event.key === ' ') {
-                                    event.preventDefault();
-                                    handleRowClick();
-                                  }
-                                }}
-                              >
-                                {generatedLesson && (
-                                  <div
-                                    className={`pointer-events-none absolute inset-0 opacity-20 ${roundedClass}`}
-                                    style={{ backgroundImage: 'linear-gradient(90deg, #00E5FF, #FF2D96)' }}
-                                  />
-                                )}
-                                <span className={`text-sm truncate ${generatedLesson ? 'text-[var(--foreground)] hover:opacity-90 transition-opacity' : 'text-[var(--foreground)]/70'}`}>
-                                  {planTitle}
-                                </span>
-                                <div className="flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
-                                  {generatedLesson ? (
-                                    <span className="inline-flex items-center gap-1 rounded-full border border-green-300 bg-green-50 px-2 py-0.5 text-[11px] text-green-700 dark:border-green-500/40 dark:bg-green-500/10 dark:text-green-200">
-                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                        <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                      </svg>
-                                      Done
-                                    </span>
-                                  ) : isGenerating ? (
-                                    <span className="inline-flex items-center gap-2 rounded-full border border-[var(--foreground)]/20 bg-[var(--background)] px-2 py-0.5 text-[11px] text-[var(--foreground)]/70">
-                                      <GlowSpinner
-                                        size={28}
-                                        padding={0}
-                                        inline
-                                        className="shrink-0"
-                                        ariaLabel="Generating lesson"
-                                        idSuffix={`lesson-${planId}`}
-                                      />
-                                      Generating…
-                                    </span>
-                                  ) : (
-                                    <button
-                                      onClick={(event) => {
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        void triggerLessonGeneration();
-                                      }}
-                                      className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-[11px] text-white shadow cursor-pointer opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:shadow-lg hover:bg-gradient-to-r hover:from-[#00E5FF]/80 hover:to-[#FF2D96]/80 transition-all duration-300 focus-visible:opacity-100 focus-visible:scale-100"
-                                      aria-label="Generate AI"
-                                      title="Generate AI"
-                                    />
-                                  )}
-                                </div>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </div>
-                    )}
                   </div>
 
                   {/* Fixed Footer */}
@@ -1461,7 +1840,6 @@ ${(planItem.objectives || [])
                             gradeInfo: examResults.gradeInfo,
                             patternAnalysis: examResults.patternAnalysis,
                             conceptName: concept.name,
-                            conceptStage: concept.learningStage,
                             description: concept.description,
                             focusAreas: plan.focusAreas,
                             keySkills: plan.keySkills,
