@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import type { LessonMetadata } from "@/types/lesson";
 
 type GeneratedLesson = {
   planId: string;
@@ -8,6 +9,7 @@ type GeneratedLesson = {
   body: string;
   quiz: Array<{ question: string }>;
   createdAt: string;
+  metadata?: LessonMetadata | null;
 };
 
 export async function POST(req: NextRequest) {
@@ -178,6 +180,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Lesson generation failed" }, { status: 500 });
     }
 
+    // Validate KaTeX brackets server-side; reject invalid
+    try {
+      const { validateKatexBlocks } = await import("@/lib/validateMath");
+      const result = validateKatexBlocks(String(data.body));
+      if (!result.ok) {
+        return NextResponse.json({ ok: false, error: `Invalid KaTeX: ${result.errors[0] || 'unknown error'}` }, { status: 422 });
+      }
+    } catch {}
+
     // Sanitize helper: remove null bytes and control characters from strings
     const sanitizeString = (s: string) => s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
     const sanitizeDeep = (value: any): any => {
@@ -199,6 +210,7 @@ export async function POST(req: NextRequest) {
         ? data.quiz.map((q: any) => ({ question: sanitizeString(String(q?.question || q || "")) }))
         : [],
       createdAt: new Date().toISOString(),
+      metadata: data?.metadata || null,
     };
 
     // Merge lesson into results, then sanitize the whole structure before persisting

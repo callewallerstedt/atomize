@@ -31,12 +31,12 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
-      { url: "/Logo.jpg", type: "image/jpeg" },
-      { url: "/Logo.jpg", sizes: "192x192", type: "image/jpeg" },
-      { url: "/Logo.jpg", sizes: "512x512", type: "image/jpeg" },
+      { url: "/spinner.png", type: "image/png" },
+      { url: "/spinner.png", sizes: "192x192", type: "image/png" },
+      { url: "/spinner.png", sizes: "512x512", type: "image/png" },
     ],
     apple: [
-      { url: "/Logo.jpg" },
+      { url: "/spinner.png" },
     ],
   },
   appleWebApp: {

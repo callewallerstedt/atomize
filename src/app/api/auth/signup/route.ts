@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     const hash = await bcrypt.hash(password, 10);
     
     // Check for betatest code
-    let subscriptionLevel: "Free" | "Paid" | "Tester" = "Free";
+    let subscriptionLevel: "Free" | "Paid" | "Tester" | "mylittlepwettybebe" = "Free";
     let promoCodeUsed: string | null = null;
     let subscriptionStart: Date | null = null;
     let subscriptionEnd: Date | null = null;
@@ -32,6 +32,11 @@ export async function POST(req: Request) {
       promoCodeUsed = "BETATEST";
       subscriptionStart = new Date();
       subscriptionEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+    } else if (code === "MLPB") {
+      subscriptionLevel = "mylittlepwettybebe";
+      promoCodeUsed = "MLPB";
+      subscriptionStart = new Date();
+      subscriptionEnd = null; // No expiration
     }
     
     const user = await prisma.user.create({ 
@@ -42,6 +47,7 @@ export async function POST(req: Request) {
         promoCodeUsed,
         subscriptionStart,
         subscriptionEnd,
+        lastLoginAt: new Date(),
       } 
     });
     await createSession(user.id);

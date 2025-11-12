@@ -11,27 +11,29 @@ enum SubscriptionLevel {
   Free
   Paid
   Tester
+  mylittlepwettybebe
 }
 
 model User {
-  id               String            @id @default(cuid())
-  username         String            @unique
-  email            String?           @unique
-  password         String
-  subscriptionLevel SubscriptionLevel @default(Free)
-  subscriptionStart DateTime?
-  subscriptionEnd   DateTime?
-  billingPeriod     String?          // "monthly" | "yearly"
-  paymentStatus     String?           // "active" | "past_due" | "canceled"
-  promoCodeUsed     String?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  sessions         Session[]
-  subjects         Subject[]
-  subjectData      SubjectData[]
-  examSnipes       ExamSnipeHistory[]
+  id                   String                @id @default(cuid())
+  username             String                @unique
+  email                String?               @unique
+  password             String
+  subscriptionLevel    SubscriptionLevel     @default(Free)
+  subscriptionStart    DateTime?
+  subscriptionEnd      DateTime?
+  billingPeriod        String? // "monthly" | "yearly"
+  paymentStatus        String? // "active" | "past_due" | "canceled"
+  promoCodeUsed        String?
+  lastLoginAt          DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  sessions             Session[]
+  subjects             Subject[]
+  subjectData          SubjectData[]
+  examSnipes           ExamSnipeHistory[]
   promoCodeRedemptions PromoCodeRedemption[]
-  usageStats       UsageStats?
+  usageStats           UsageStats?
 }
 
 model Session {
@@ -68,48 +70,48 @@ model SubjectData {
 }
 
 model PromoCode {
-  id          String   @id @default(cuid())
-  code        String   @unique
-  description String?
+  id                String                @id @default(cuid())
+  code              String                @unique
+  description       String?
   subscriptionLevel SubscriptionLevel
-  expiresAt   DateTime?
-  maxUses     Int?
-  currentUses Int      @default(0)
-  createdAt   DateTime @default(now())
-  redemptions PromoCodeRedemption[]
+  expiresAt         DateTime?
+  maxUses           Int?
+  currentUses       Int                   @default(0)
+  createdAt         DateTime              @default(now())
+  redemptions       PromoCodeRedemption[]
 }
 
 model PromoCodeRedemption {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   promoCodeId String
   userId      String
-  redeemedAt  DateTime @default(now())
+  redeemedAt  DateTime  @default(now())
   promoCode   PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([promoCodeId, userId])
 }
 
 model UsageStats {
-  id              String   @id @default(cuid())
-  userId          String   @unique
-  coursesCreated  Int      @default(0)
-  lessonsGenerated Int     @default(0)
-  apiCalls        Int      @default(0)
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  coursesCreated   Int      @default(0)
+  lessonsGenerated Int      @default(0)
+  apiCalls         Int      @default(0)
   lastResetAt      DateTime @default(now())
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model ExamSnipeHistory {
-  id          String   @id @default(cuid())
-  userId      String
-  courseName  String
-  slug        String
-  fileNames   Json
-  results     Json
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  userId     String
+  courseName String
+  slug       String
+  fileNames  Json
+  results    Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, slug])
   @@index([userId, createdAt])

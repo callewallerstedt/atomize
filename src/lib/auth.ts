@@ -6,7 +6,7 @@ const COOKIE_NAME = "atom_auth";
 const SECRET = process.env.AUTH_SECRET || "dev-secret-change-me";
 const encoder = new TextEncoder();
 
-export type AuthUser = { id: string; username: string; subscriptionLevel: string };
+export type AuthUser = { id: string; username: string; subscriptionLevel: string; lastLoginAt: Date | null };
 
 export async function createSession(userId: string) {
   const token = crypto.randomUUID().replace(/-/g, "");
@@ -55,7 +55,8 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
     return { 
       id: session.user.id, 
       username: session.user.username,
-      subscriptionLevel: session.user.subscriptionLevel || "Free"
+      subscriptionLevel: session.user.subscriptionLevel || "Free",
+      lastLoginAt: session.user.lastLoginAt
     };
   } catch {
     return null;

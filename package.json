@@ -12,6 +12,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@iktakahiro/markdown-it-katex": "^4.0.1",
     "@prisma/client": "^6.19.0",
     "@types/markdown-it": "^14.1.2",
     "@types/puppeteer": "^5.4.7",
@@ -21,6 +22,7 @@
     "katex": "^0.16.25",
     "mammoth": "^1.11.0",
     "markdown-it": "^14.1.0",
+    "markdown-it-anchor": "^9.2.0",
     "markdown-it-katex": "^2.0.3",
     "next": "16.0.1",
     "openai": "^6.7.0",

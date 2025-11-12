@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const subscriptionLevel = String(body.subscriptionLevel || "");
 
-    if (!["Free", "Paid", "Tester"].includes(subscriptionLevel)) {
+    if (!["Free", "Paid", "Tester", "mylittlepwettybebe"].includes(subscriptionLevel)) {
       return NextResponse.json({ ok: false, error: "Invalid subscription level" }, { status: 400 });
     }
 

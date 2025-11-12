@@ -45,6 +45,32 @@ export async function POST(req: Request) {
       });
     }
 
+    // Handle special hardcoded "mlpb" code
+    if (code === "MLPB") {
+      // Check if user already has mylittlepwettybebe subscription
+      const currentUser = await prisma.user.findUnique({ where: { id: user.id } });
+      if (currentUser?.subscriptionLevel === "mylittlepwettybebe") {
+        return NextResponse.json({ ok: false, error: "You already have mylittlepwettybebe subscription" }, { status: 400 });
+      }
+
+      // Update user to mylittlepwettybebe
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          subscriptionLevel: "mylittlepwettybebe",
+          promoCodeUsed: "MLPB",
+          subscriptionStart: new Date(),
+          subscriptionEnd: null, // No expiration
+        },
+      });
+
+      return NextResponse.json({
+        ok: true,
+        subscriptionLevel: "mylittlepwettybebe",
+        message: "Successfully upgraded to mylittlepwettybebe tier!",
+      });
+    }
+
     // Find promo code in database
     const promoCode = await prisma.promoCode.findUnique({
       where: { code },

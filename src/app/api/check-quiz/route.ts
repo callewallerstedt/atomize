@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { stripLessonMetadata } from "@/lib/lessonFormat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const subject = String(body.subject || "");
     const topic = String(body.topic || "");
-    const lessonContent = String(body.lessonContent || "");
+    const lessonContent = stripLessonMetadata(String(body.lessonContent || ""));
     const courseContext = String(body.courseContext || "");
     const answers = Array.isArray(body.answers) ? body.answers : [];
     const languageName = String(body.languageName || "");

@@ -34,6 +34,14 @@ export const SUBSCRIPTION_LIMITS: Record<SubscriptionLevel, SubscriptionLimits> 
     canExportPDF: true,
     canUseQuickLearn: true,
   },
+  mylittlepwettybebe: {
+    maxCourses: Infinity,
+    maxLessonsPerCourse: Infinity,
+    maxApiCallsPerMonth: Infinity,
+    canUseAdvancedFeatures: true,
+    canExportPDF: true,
+    canUseQuickLearn: true,
+  },
 };
 
 export function getSubscriptionLimits(level: SubscriptionLevel): SubscriptionLimits {

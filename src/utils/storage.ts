@@ -1,3 +1,5 @@
+import type { LessonMetadata } from "@/types/lesson";
+
 export type TopicMeta = { name: string; summary: string; coverage: number };
 export type QuizResult = { correct: boolean; explanation: string; hint?: string; fullSolution?: string };
 export type LessonFlashcard = {
@@ -8,12 +10,13 @@ export type LessonFlashcard = {
 export type TopicGeneratedLesson = {
   title: string;
   body: string;
-  quiz: { question: string }[];
+  quiz: { question: string; answer?: string }[];
   // Optional persisted quiz state
   userAnswers?: string[];
   quizResults?: { [index: number]: QuizResult };
   quizCompletedAt?: number; // timestamp when answers were checked
   flashcards?: LessonFlashcard[];
+  metadata?: LessonMetadata | null;
 };
 export type TopicGeneratedContent = {
   overview: string;
@@ -271,5 +274,3 @@ export function getUpcomingReviews(slug: string, days: number = 7): ReviewSchedu
     schedule => schedule.nextReview > now && schedule.nextReview <= future
   ).sort((a, b) => a.nextReview - b.nextReview);
 }
-
-

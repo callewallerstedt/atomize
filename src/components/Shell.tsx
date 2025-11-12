@@ -1,15 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
+import { LessonBody } from "@/components/LessonBody";
+import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import SettingsModal from "@/components/SettingsModal";
 import Modal from "@/components/Modal";
 import GlowSpinner from "@/components/GlowSpinner";
+import { APP_VERSION } from "@/lib/version";
 
 // Generate stable dots that don't change on re-render
 function generateDots(count: number) {
@@ -805,9 +804,7 @@ function ChatDropdown() {
                   <div className="text-[10px] text-[var(--foreground)]/60 mb-1 ml-1">{m.role === 'user' ? 'You' : 'Nova'}</div>
                   <div className={m.role === 'user' ? 'rounded-xl bg-[var(--accent-cyan)]/20 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--accent-cyan)]/30' : 'rounded-xl bg-[var(--background)]/80 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--foreground)]/10'}>
                   {m.role === 'assistant' ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-                      {m.content}
-                    </ReactMarkdown>
+                    <LessonBody body={sanitizeLessonBody(String(m.content || ''))} />
                   ) : (
                     <span>{m.content}</span>
                   )}
@@ -867,6 +864,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false);
@@ -1013,8 +1011,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       try {
         const me = await fetch("/api/me").then(r => r.json().catch(() => ({})));
         setIsAuthenticated(!!me?.user);
+        if (me?.user?.subscriptionLevel) {
+          setSubscriptionLevel(me.user.subscriptionLevel);
+        } else {
+          setSubscriptionLevel("Free");
+        }
       } catch {
         setIsAuthenticated(false);
+        setSubscriptionLevel("Free");
       } finally {
         setAuthChecked(true);
       }
@@ -1119,6 +1123,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   <h1 className="text-lg font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider relative inline-block" style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}>
                     SYNAPSE
                     <sup className="text-xs text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] absolute -top-0.5 left-full ml-1" style={{ fontFamily: 'var(--font-ibm-plex-mono), monospace' }}>(ALPHA)</sup>
+                    <span className="text-[7px] text-[var(--foreground)]/40 absolute bottom-1 left-20 whitespace-nowrap" style={{ fontFamily: 'var(--font-ibm-plex-mono), monospace' }}>{APP_VERSION}</span>
                   </h1>
                 </div>
               </button>
@@ -1482,6 +1487,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           onClose={() => setSettingsOpen(false)}
           onLogout={handleLogout}
           isAuthenticated={isAuthenticated}
+          subscriptionLevel={subscriptionLevel}
+          onSubscriptionLevelChange={(level) => setSubscriptionLevel(level)}
         />
       </div>
       <Modal
@@ -1521,6 +1528,16 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                     setAccountOpen(false);
                     setAuthUsername("");
                     setAuthPassword("");
+                    // Fetch user data including subscription level
+                    try {
+                      const me = await fetch("/api/me").then(r => r.json().catch(() => ({})));
+                      setIsAuthenticated(!!me?.user);
+                      if (me?.user?.subscriptionLevel) {
+                        setSubscriptionLevel(me.user.subscriptionLevel);
+                      } else {
+                        setSubscriptionLevel("Free");
+                      }
+                    } catch {}
                     // Reload to pick up server-synced state
                     router.refresh();
                   } catch (e: any) {
@@ -1582,9 +1599,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         }
       >
         <div className="lesson-content text-sm">
-          <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-            {infoMarkdown}
-          </ReactMarkdown>
+          <LessonBody body={sanitizeLessonBody(infoMarkdown)} />
         </div>
       </Modal>
     </div>

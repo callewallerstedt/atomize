@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
+import { LessonBody } from "@/components/LessonBody";
+import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
 
 export default function LarsCoach({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [input, setInput] = useState("");
@@ -276,9 +274,7 @@ export default function LarsCoach({ open, onClose }: { open: boolean; onClose: (
                 <div className="text-[10px] text-[var(--foreground)]/60 mb-1 ml-1">{m.role === "user" ? "You" : "Lars"}</div>
                 <div className={m.role === "user" ? "rounded-xl bg-[var(--accent-cyan)]/20 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--accent-cyan)]/30" : "rounded-xl bg-[var(--background)]/80 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--foreground)]/10"}>
                   {m.role === "assistant" ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-                      {m.content}
-                    </ReactMarkdown>
+                    <LessonBody body={sanitizeLessonBody(String(m.content || ""))} />
                   ) : (
                     <span>{m.content}</span>
                   )}

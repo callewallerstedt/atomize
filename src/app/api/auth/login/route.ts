@@ -22,6 +22,11 @@ export async function POST(req: Request) {
     if (!ok) {
       return NextResponse.json({ ok: false, error: "Invalid credentials" }, { status: 401 });
     }
+    // Update last login time
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+    });
     await createSession(user.id);
     return NextResponse.json({ ok: true, user: { id: user.id, username: user.username } });
   } catch (e: any) {

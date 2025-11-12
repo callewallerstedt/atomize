@@ -37,6 +37,184 @@ export default function Page() {
   );
 }
 
+function WelcomeMessage() {
+  const [welcomeText, setWelcomeText] = useState("");
+  const [aiName, setAiName] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const hasStreamed = useRef(false);
+
+  useEffect(() => {
+    if (hasStreamed.current || typeof window === "undefined") return;
+    hasStreamed.current = true;
+
+    // Wait for page to be visible before starting
+    const startStreaming = () => {
+      setIsStreaming(true);
+      setWelcomeText("");
+
+      const generateWelcome = async () => {
+        try {
+          // Fetch user info including lastLoginAt
+          let lastLoginAt: string | null = null;
+          try {
+            const meRes = await fetch("/api/me", { credentials: "include" });
+            const meData = await meRes.json().catch(() => ({}));
+            if (meData?.user?.lastLoginAt) {
+              lastLoginAt = meData.user.lastLoginAt;
+            }
+          } catch {}
+
+          const now = new Date();
+          const hours = now.getHours();
+          let timeOfDay = "unknown";
+          if (hours >= 5 && hours < 12) timeOfDay = "morning";
+          else if (hours >= 12 && hours < 17) timeOfDay = "afternoon";
+          else if (hours >= 17 && hours < 22) timeOfDay = "evening";
+          else timeOfDay = "night";
+
+          const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+          const weekday = weekdays[now.getDay()];
+
+          const ua = navigator.userAgent || "";
+          let deviceType = "computer";
+          if (/iPad|iPhone|iPod/i.test(ua)) deviceType = "mobile";
+          else if (/Android/i.test(ua)) deviceType = "mobile";
+          else if (/Tablet/i.test(ua)) deviceType = "tablet";
+
+          const res = await fetch("/api/welcome/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              timeOfDay,
+              weekday,
+              deviceType,
+              userAgent: ua,
+              lastLoginAt,
+            }),
+          });
+
+          const reader = res.body?.getReader();
+          const decoder = new TextDecoder();
+          if (reader) {
+            let fullText = "";
+            let name = "";
+            let streamingPromise: Promise<void> | null = null;
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              
+              const chunk = decoder.decode(value);
+              chunk.split("\n").forEach((line) => {
+                if (!line.startsWith("data: ")) return;
+                const payload = line.slice(6);
+                if (!payload) return;
+                try {
+                  const obj = JSON.parse(payload);
+                  if (obj.type === "name" && obj.content) {
+                    name = obj.content;
+                    setAiName(obj.content);
+                  } else if (obj.type === "text" && obj.content) {
+                    fullText += obj.content;
+                  } else if (obj.type === "done") {
+                    // If streaming hasn't started yet, show immediately
+                    if (!streamingPromise) {
+                      setWelcomeText(fullText);
+                      setIsStreaming(false);
+                    }
+                  }
+                } catch {}
+              });
+            }
+
+            // If we collected all text before starting to stream, check if we should stream or show immediately
+            if (fullText.length > 0) {
+              // If text is very short or already complete, show immediately
+              if (fullText.length <= 20) {
+                setWelcomeText(fullText);
+                setIsStreaming(false);
+              } else {
+                // Stream character by character with faster delay
+                const streamDelay = 10; // Faster: 10ms instead of 30ms
+                for (let i = 0; i < fullText.length; i++) {
+                  await new Promise(resolve => setTimeout(resolve, streamDelay));
+                  setWelcomeText(fullText.slice(0, i + 1));
+                }
+                setIsStreaming(false);
+              }
+            } else {
+              setIsStreaming(false);
+            }
+          }
+        } catch (e: any) {
+          setWelcomeText("Welcome back!");
+          setIsStreaming(false);
+        }
+      };
+
+      generateWelcome();
+    };
+
+    // Use requestAnimationFrame to ensure page is rendered, then start streaming
+    requestAnimationFrame(() => {
+      // Small delay to ensure user sees the page before streaming starts
+      setTimeout(startStreaming, 100);
+    });
+  }, []);
+
+  if (!welcomeText && !isStreaming && !aiName) return null;
+
+  // Function to render text with styled "Synapse" instances
+  const renderTextWithSynapse = (text: string) => {
+    const parts: React.ReactNode[] = [];
+    const regex = /(\b[sS]ynapse\b)/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+      // Add text before the match
+      if (match.index > lastIndex) {
+        parts.push(text.slice(lastIndex, match.index));
+      }
+      // Add styled "Synapse"
+      parts.push(
+        <span
+          key={match.index}
+          className="text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider font-semibold"
+          style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}
+        >
+          {match[0]}
+        </span>
+      );
+      lastIndex = match.index + match[0].length;
+    }
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push(text.slice(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : text;
+  };
+
+  return (
+    <div className="mx-auto mb-6 w-full max-w-5xl">
+      {aiName && (
+        <div className="mb-1.5 text-xs text-[var(--foreground)]/60 font-medium">
+          {aiName}
+        </div>
+      )}
+      <div className="inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
+        <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
+          {renderTextWithSynapse(welcomeText)}
+          {isStreaming && (
+            <span className="inline-block w-1.5 h-3.5 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] animate-pulse ml-1 align-middle"></span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Home() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
@@ -247,7 +425,13 @@ function Home() {
             lessons: [{
           title: lessonTitle,
               body: json.data.body,
-              quiz: json.data.quiz || []
+              quiz: Array.isArray(json.data.quiz)
+                ? json.data.quiz.map((q: any) => ({
+                    question: String(q.question || ""),
+                    answer: q.answer ? String(q.answer) : undefined,
+                  }))
+                : [],
+              metadata: json.data.metadata || null
             }],
             rawLessonJson: [json.raw || JSON.stringify(json.data)]
       };
@@ -523,6 +707,7 @@ function Home() {
 
   return (
     <div className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] px-6 pt-10 pb-4">
+      <WelcomeMessage />
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
         <h1 className="text-xl font-semibold text-[var(--foreground)]">Your subjects</h1>
         <div className="flex items-center gap-3">
@@ -540,7 +725,7 @@ function Home() {
         {subjects.filter((s) => s.slug !== "quicklearn").map((s) => (
           <div
             key={s.slug}
-            className={`relative rounded-2xl bg-[var(--background)] p-6 text-[var(--foreground)] transition-all duration-200 min-h-[80px] shadow-[0_2px_8px_rgba(0,0,0,0.7)] ${
+            className={`relative rounded-2xl bg-[var(--background)] p-5 text-[var(--foreground)] transition-all duration-200 shadow-[0_2px_8px_rgba(0,0,0,0.7)] ${
               preparingSlug === s.slug
                 ? 'cursor-not-allowed opacity-75'
                 : 'cursor-pointer hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)]'
@@ -555,27 +740,49 @@ function Home() {
               }
             }}
           >
-            <div className="flex items-center gap-3 h-full">
-              <span className="text-lg font-semibold flex-1 break-words whitespace-normal leading-snug pr-8">{s.name}</span>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold leading-snug truncate">{s.name}</div>
+                {(() => {
+                  const data = loadSubjectData(s.slug);
+                  const topicCount = data?.topics?.length || 0;
+                  // Try to get createdAt from subject (if from server) or use current date as fallback
+                  const createdAt = (s as any).createdAt || null;
+                  return (
+                    <>
+                      {createdAt && (
+                        <div className="mt-1 text-xs text-[var(--foreground)]/20">
+                          {new Date(createdAt).toLocaleString(undefined, { dateStyle: "medium" })}
+                        </div>
+                      )}
+                      <div className="mt-3 text-xs text-[var(--foreground)]/20">
+                        {topicCount} topic{topicCount === 1 ? "" : "s"}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setMenuOpenFor((cur) => (cur === s.slug ? null : s.slug)); }}
+                  disabled={preparingSlug === s.slug}
+                  data-menu-button
+                  className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-[var(--foreground)]/60 hover:text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors !shadow-none ${
+                    preparingSlug === s.slug
+                    ? 'opacity-50 cursor-not-allowed'
+                    : 'cursor-pointer'
+                  }`}
+                  aria-label="More actions"
+                  title="More actions"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="5" cy="12" r="2" fill="currentColor" />
+                    <circle cx="12" cy="12" r="2" fill="currentColor" />
+                    <circle cx="19" cy="12" r="2" fill="currentColor" />
+                  </svg>
+                </button>
+              </div>
             </div>
-              <button
-                onClick={(e) => { e.stopPropagation(); setMenuOpenFor((cur) => (cur === s.slug ? null : s.slug)); }}
-                disabled={preparingSlug === s.slug}
-              data-menu-button
-              className={`absolute top-3 right-3 inline-flex items-center justify-center text-[var(--foreground)]/60 hover:text-[var(--foreground)]/80 transition-colors !shadow-none ${
-                  preparingSlug === s.slug
-                  ? 'opacity-50 cursor-not-allowed'
-                  : 'cursor-pointer'
-                }`}
-                aria-label="More actions"
-                title="More actions"
-              >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="5" cy="12" r="2" fill="currentColor"/>
-                  <circle cx="12" cy="12" r="2" fill="currentColor"/>
-                  <circle cx="19" cy="12" r="2" fill="currentColor"/>
-                </svg>
-              </button>
             
             {preparingSlug === s.slug && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--background)]/80 backdrop-blur-sm rounded-2xl z-10">
@@ -585,7 +792,7 @@ function Home() {
               </div>
             )}
             {menuOpenFor === s.slug && (
-              <div data-menu-dropdown className="absolute right-3 top-12 z-50 w-40 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-lg p-2 space-y-2">
+              <div data-menu-dropdown className="absolute right-4 top-14 z-50 w-40 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-lg p-2 space-y-2" onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={async (e) => {
                     e.stopPropagation();
@@ -793,22 +1000,48 @@ function Home() {
         </div>
       )}
 
-      {/* Note from developer */}
-      <div className="mx-auto mt-8 w-full max-w-5xl relative">
-        {/* Animated gradient glow shadow behind the box */}
-        <div className="absolute -inset-2 rounded-2xl bg-gradient-to-r from-[var(--accent-cyan)]/60 via-[var(--accent-pink)]/60 to-[var(--accent-cyan)]/60 bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] blur-xl -z-10 pointer-events-none" />
-        {/* Dark box on top */}
-        <div className="relative rounded-2xl bg-[var(--background)] p-6 shadow-[0_2px_8px_rgba(0,0,0,0.7)] z-0">
-          <div className="text-sm text-[var(--foreground)] leading-relaxed space-y-2">
-            <p className="font-semibold">Hallo, Det som funkar är:</p>
-            <ul className="list-disc list-inside space-y-1 ml-2">
-              <li>lägga till kurser här.</li>
-              <li>quick learn sidan.</li>
-              <li>efter att du genererat en lektion så kan du klicka på valfritt ord för att få en förklaring.</li>
-              <li>Chatta med Lars är liksom meningen att du ska behöva förklara för honom</li>
-            </ul>
-            <p className="mt-3">mycket skit som inte funkar men aja</p>
-            <p className="mt-2">tack, adios</p>
+      {/* Note from developer and Latest changes */}
+      <div className="mx-auto mt-8 w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Info box */}
+        <div className="relative">
+          {/* Animated gradient glow shadow behind the box */}
+          <div className="absolute -inset-2 rounded-2xl bg-gradient-to-r from-[var(--accent-cyan)]/60 via-[var(--accent-pink)]/60 to-[var(--accent-cyan)]/60 bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] blur-xl -z-10 pointer-events-none" />
+          {/* Dark box on top */}
+          <div className="relative rounded-2xl bg-[var(--background)] p-6 shadow-[0_2px_8px_rgba(0,0,0,0.7)] z-0">
+            <div className="text-sm text-[var(--foreground)] leading-relaxed space-y-2">
+              <p className="font-semibold">Hallo, Det som funkar är:</p>
+              <ul className="list-disc list-inside space-y-1 ml-2">
+                <li>lägga till kurser här.</li>
+                <li>exam snipe sidan om du har tur.</li>
+                <li>quick learn sidan.</li>
+                <li>efter att du genererat en lektion så kan du klicka på valfritt ord för att få en förklaring.</li>
+                <li>Chatta med Lars är liksom meningen att du ska behöva förklara för honom</li>
+              </ul>
+              <p className="mt-3">mycket skit som inte funkar men aja</p>
+              <p className="mt-2">tack, adios</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Latest changes box */}
+        <div className="relative">
+          {/* Animated gradient glow shadow behind the box */}
+          <div className="absolute -inset-2 rounded-2xl bg-gradient-to-r from-[var(--accent-cyan)]/60 via-[var(--accent-pink)]/60 to-[var(--accent-cyan)]/60 bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] blur-xl -z-10 pointer-events-none" />
+          {/* Dark box on top */}
+          <div className="relative rounded-2xl bg-[var(--background)] p-6 shadow-[0_2px_8px_rgba(0,0,0,0.7)] z-0">
+            <div className="text-sm text-[var(--foreground)] leading-relaxed space-y-2">
+              <p className="font-semibold">Senaste ändringar:</p>
+              <ul className="list-disc list-inside space-y-1 ml-2">
+                <li>Bättre rendering av lektioner.</li>
+                <li>Bättre exam snipe.</li>
+                <li>La till datum för vilken version som används.</li>
+                <li>La till prenumerations nivåer. Använd BETATEST (kolla inställningar).</li>
+                <li>Förbättrad kursbox design som matchar exam snipe.</li>
+                <li>La till skapelsedatum och antal ämnen i kursboxar.</li>
+                <li>Fixade så att prenumerationsnivå laddas direkt vid sidladdning.</li>
+                <li>La till knapp för att ta bort tester-prenumeration.</li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>

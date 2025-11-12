@@ -42,10 +42,38 @@ QUIZ (Practice Problems):
 - Keep answers implicit; the app will check via a separate endpoint.
 
 MATH/LaTeX RULES:
+- CRITICAL: Inline math MUST use bracket notation: \\( ... \\)
+  Example: The function \\( f(x) = x^2 \\) is quadratic.
+  Use inline math for: simple formulas, variables, short expressions within text
+- CRITICAL: Display math MUST use bracket notation: \\[ ... \\]
+  Example: \\[ \\int_0^1 x^2 \\, dx = \\frac{1}{3} \\]
+  Use display math for: equations, multi-line expressions, align environments, matrices
+- NEVER use dollar signs: Do NOT use $...$ or $$...$$
+- Code blocks and inline code preserve math delimiters as literal text (do not render as math)
 - Use \\text{} for text within math (never \\t)
-- Greek letters: \\alpha, \\beta, \\eta, \\theta, \\pi
+- Greek letters: \\alpha, \\beta, \\eta, \\theta, \\pi (always use backslash)
 - Fractions: \\frac{a}{b}
 - Square roots: \\sqrt{expr}
+- Escape underscores: var\\_name
+- Every \\( must have a closing \\), every \\[ must have a closing \\]
+- Always put a blank line before and after display math \\[ ... \\]
+- LaTeX environments (CRITICAL): Environments like \\begin{align*}, \\begin{matrix}, \\begin{cases} MUST be in display math \\[ ... \\]
+- NEVER put \\begin{align*} or similar environments in inline math \\( ... \\)
+- For multi-line environments, keep everything on separate lines with actual line breaks:
+  \\[
+  \\begin{align*}
+  x &= 1 \\\\
+  y &= 2
+  \\end{align*}
+  \\]
+- For cases environment, format with line breaks:
+  \\[
+  \\begin{cases}
+  A, & 0 \\leq t < \\frac{1}{2} \\\\
+  B, & \\text{otherwise}
+  \\end{cases}
+  \\]
+- CRITICAL: Each line in environments must be on its own line (use actual newlines, not just \\\\)
 `;
 
     const user = `Create a focused lesson for the sub-concept below.

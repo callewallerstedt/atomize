@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
+import { LessonBody } from "@/components/LessonBody";
+import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
 
 export default function WordPopover({
   open,
@@ -76,9 +74,7 @@ export default function WordPopover({
           <div className="text-sm text-[#FFC0DA]">{error}</div>
         ) : (
           <div className="lesson-content text-sm">
-            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-              {content}
-            </ReactMarkdown>
+            <LessonBody body={sanitizeLessonBody(String(content || ""))} />
           </div>
         )}
       </div>

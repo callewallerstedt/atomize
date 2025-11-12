@@ -3,11 +3,9 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useParams } from "next/navigation";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import katex from "katex";
+import { LessonBody } from "@/components/LessonBody";
+import { extractQuizSection } from "@/lib/lessonFormat";
+import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
 import { Highlight, themes } from "prism-react-renderer";
 import {
   loadSubjectData,
@@ -20,7 +18,6 @@ import {
   ReviewSchedule,
   LessonFlashcard,
 } from "@/utils/storage";
-import { AutoFixMarkdown } from "@/components/AutoFixMarkdown";
 import LarsCoach from "@/components/LarsCoach";
 import GlowSpinner from "@/components/GlowSpinner";
 
@@ -77,8 +74,38 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
   const [mcAnswers, setMcAnswers] = useState<{ [key: number]: number }>({});
   const [mcResults, setMcResults] = useState<{ [key: number]: { correct: boolean; explanation: string } } | null>(null);
   const [generatingMcQuiz, setGeneratingMcQuiz] = useState(false);
+  const [hoverWordRects, setHoverWordRects] = useState<Array<{ left: number; top: number; width: number; height: number }>>([]);
   const currentLesson = (content?.lessons?.[activeLessonIndex] ?? null) as TopicGeneratedLesson | null;
   const lessonFlashcards: LessonFlashcard[] = currentLesson?.flashcards ?? [];
+  const lessonMetadata = currentLesson?.metadata || null;
+  const formatMetadataEntry = (value?: string): string => {
+    if (!value) return "";
+    return value
+      .replace(/\\n/g, " ")
+      .replace(/\\t/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+  const lessonQuiz = useMemo(() => {
+    if (currentLesson?.quiz?.length) return currentLesson.quiz;
+    if (!currentLesson?.body) return [];
+    const derived = extractQuizSection(currentLesson.body).questions;
+    return derived;
+  }, [currentLesson]);
+
+  useEffect(() => {
+    if (!content || !currentLesson || !lessonQuiz.length) return;
+    if (currentLesson.quiz && currentLesson.quiz.length >= lessonQuiz.length) return;
+    const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) } as any);
+    next.lessons = Array.isArray(next.lessons) ? [...next.lessons] : [];
+    next.lessons[activeLessonIndex] = {
+      ...(next.lessons[activeLessonIndex] as TopicGeneratedLesson),
+      ...(currentLesson as TopicGeneratedLesson),
+      quiz: lessonQuiz,
+    };
+    setContent(next);
+    upsertNodeContent(slug, title, next);
+  }, [lessonQuiz, content, currentLesson, activeLessonIndex, slug, title]);
 
   function getRandomCardIndex(filtered: Array<{ id: string }>, currentIndex: number): number {
     if (filtered.length <= 1) return currentIndex;
@@ -106,7 +133,7 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
 
     try {
       setAudioLoading(true);
-      const lessonBody = content?.lessons?.[activeLessonIndex]?.body || "";
+      const lessonBody = sanitizeLessonBody(content?.lessons?.[activeLessonIndex]?.body || "");
       if (!lessonBody) return;
 
       // Extract plain text from lesson content
@@ -365,7 +392,7 @@ function toggleStar(flashcardId: string) {
           subject: subjectData?.subject || slug,
           topic: title,
           lessonTitle: currentLesson.title,
-          lessonBody: currentLesson.body,
+          lessonBody: sanitizeLessonBody(currentLesson.body),
           courseContext: subjectData?.course_context || "",
           languageName: subjectData?.course_language_name || "",
           count,
@@ -505,7 +532,7 @@ function toggleStar(flashcardId: string) {
           subject: subjectData?.subject || slug,
           topic: title,
           paragraph: paragraphText,
-          lessonContent: content?.lessons?.[activeLessonIndex]?.body || "",
+          lessonContent: sanitizeLessonBody(content?.lessons?.[activeLessonIndex]?.body || ""),
           courseContext: subjectData?.course_context || "",
           languageName: subjectData?.course_language_name || ""
         })
@@ -608,9 +635,7 @@ function toggleStar(flashcardId: string) {
         } else {
           // Add to current paragraph
           if (currentPara) currentPara += ' ';
-          // Clean markdown list markers
-          const cleaned = trimmed.replace(/^[-*+]\s+/, '').replace(/^\d+\.\s+/, '');
-          currentPara += cleaned;
+          currentPara += trimmed;
         }
       }
       if (currentPara) {
@@ -742,7 +767,13 @@ function toggleStar(flashcardId: string) {
                     updatedContent.lessons[activeLessonIndex] = {
                       title: String(lessonJson.lesson?.title || planItem.title),
                       body: String(lessonJson.lesson?.body || ""),
-                      quiz: Array.isArray(lessonJson.lesson?.quiz) ? lessonJson.lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : [],
+                    quiz: Array.isArray(lessonJson.lesson?.quiz)
+                      ? lessonJson.lesson.quiz.map((q: any) => ({
+                          question: String(q.question || ""),
+                          answer: q.answer ? String(q.answer) : undefined,
+                        }))
+                      : [],
+                      metadata: lessonJson.lesson?.metadata || null,
                       ...(existingFlashcards ? { flashcards: existingFlashcards } : {}),
                     };
                     if (!updatedContent.lessonsMeta) updatedContent.lessonsMeta = [];
@@ -793,7 +824,13 @@ function toggleStar(flashcardId: string) {
                   next.lessons[activeLessonIndex] = {
                     title: String(lesson.title || (content?.lessonsMeta?.[activeLessonIndex]?.title || `Lesson ${activeLessonIndex + 1}`)),
                     body: String(lesson.body || ""),
-                    quiz: Array.isArray(lesson.quiz) ? lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : []
+                    quiz: Array.isArray(lesson.quiz)
+                      ? lesson.quiz.map((q: any) => ({
+                          question: String(q.question || ""),
+                          answer: q.answer ? String(q.answer) : undefined,
+                        }))
+                      : [],
+                    metadata: lesson.metadata || null
                   };
                   next.rawLessonJson = Array.isArray(next.rawLessonJson) ? [...next.rawLessonJson] : [];
                   while (next.rawLessonJson.length <= activeLessonIndex) {
@@ -861,7 +898,7 @@ function toggleStar(flashcardId: string) {
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({
                             lessonTitle: currentLesson.title,
-                            lessonBody: currentLesson.body,
+                            lessonBody: sanitizeLessonBody(currentLesson.body),
                             subject: subjectData?.subject || slug,
                             topic: title,
                           })
@@ -985,7 +1022,13 @@ function toggleStar(flashcardId: string) {
                             ...(existingLesson as any),
                             title: String(lessonJson.lesson?.title || planItem.title),
                             body: String(lessonJson.lesson?.body || ""),
-                            quiz: Array.isArray(lessonJson.lesson?.quiz) ? lessonJson.lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : [],
+                            quiz: Array.isArray(lessonJson.lesson?.quiz)
+                              ? lessonJson.lesson.quiz.map((q: any) => ({
+                                  question: String(q.question || ""),
+                                  answer: q.answer ? String(q.answer) : undefined,
+                                }))
+                              : [],
+                            metadata: lessonJson.lesson?.metadata || null,
                             // Clear old quiz data
                             userAnswers: undefined,
                             quizResults: undefined,
@@ -1032,7 +1075,13 @@ function toggleStar(flashcardId: string) {
                           ...(existingLesson as any),
                           title: String(lesson.title || next.lessons[lessonIdx]?.title || content?.lessonsMeta?.[activeLessonIndex]?.title || `Lesson ${lessonIdx + 1}`),
                           body: String(lesson.body || ""),
-                          quiz: Array.isArray(lesson.quiz) ? lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : [],
+                          quiz: Array.isArray(lesson.quiz)
+                            ? lesson.quiz.map((q: any) => ({
+                                question: String(q.question || ""),
+                                answer: q.answer ? String(q.answer) : undefined,
+                              }))
+                            : [],
+                          metadata: lesson.metadata || null,
                           // Clear old quiz data
                           userAnswers: undefined,
                           quizResults: undefined,
@@ -1109,366 +1158,186 @@ function toggleStar(flashcardId: string) {
                         )}
                       </button>
                     </div>
-                    <AutoFixMarkdown
-                      components={{
-                        p: ({ children, ...props }: any) => {
-                          let paragraphText = String(children);
-                          // Simple HTML tag removal without regex
-                          while (paragraphText.includes('<') && paragraphText.includes('>')) {
-                            const start = paragraphText.indexOf('<');
-                            const end = paragraphText.indexOf('>', start);
-                            if (end > start) {
-                              paragraphText = paragraphText.slice(0, start) + paragraphText.slice(end + 1);
-                            } else {
-                              break;
-                            }
-                          }
-                          const isSimplifying = simplifyingParagraph === paragraphText;
-                          const groupKey = getParagraphGroupKey(paragraphText);
-                          const isGroupLeader = groupKey === paragraphText;
-                          // Only show simplify button on the first paragraph/item in each section
-                          const showSimplifyButton = false; // DISABLED FOR NOW
-
-                          return (
-                            <div
-                              className="relative group py-1 mb-2"
-                              onMouseEnter={() => setHoveredParagraph(paragraphText)}
-                              onMouseLeave={() => setHoveredParagraph(null)}
-                            >
-                              <div className="flex transition-all duration-500">
-                                <p
-                                  className={
-                                    isSimplifying
-                                      ? 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 leading-normal'
-                                      : 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 leading-normal'
-                                  }
-                                  style={isSimplifying ? {
-                                    background: 'linear-gradient(to right, rgba(0, 229, 255, 0.3) 0%, rgba(0, 229, 255, 0.3) 100%)'
-                                  } : {}}
-                                >
-                                  {wrapChildren(children)}
-                                </p>
-                              </div>
-                              {/* Vertical line - DISABLED */}
-                              {false && <div
-                                className={
-                                  hoveredParagraph === paragraphText
-                                    ? 'paragraph-line absolute -right-12 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-100 scale-y-100'
-                                    : 'paragraph-line absolute -right-12 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-0 scale-y-0'
-                                }
-                                style={{ transformOrigin: 'top' }}
-                              />}
-                              {!isSimplifying && showSimplifyButton && (
-                                <div className="absolute -right-20 top-1 flex items-start">
-                                  <button
-                                    tabIndex={-1}
-                                    onMouseEnter={(e) => { e.preventDefault(); setHoveredParagraph(paragraphText); }}
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onFocus={(e) => e.preventDefault()}
-                                onClick={async (e) => {
-                                  e.preventDefault();
-                                  const scrollY = window.scrollY;
-                                    setSimplifyingParagraph(paragraphText);
-                                    try {
-                                      const simplified = await simplifyParagraph(paragraphText);
-                                      if (simplified && simplified !== paragraphText) {
-                                        // Replace the paragraph in the lesson content
-                                        // Use a more robust replacement by finding similar text
-                                        const currentBody = content.lessons[activeLessonIndex]?.body || '';
-
-                                        // Simple whitespace normalization without regex
-                                        const normalizeWhitespace = (text: string) => {
-                                          let result = '';
-                                          let wasSpace = false;
-                                          for (let i = 0; i < text.length; i++) {
-                                            const char = text[i];
-                                            if (char === ' ' || char === '\t' || char === '\n') {
-                                              if (!wasSpace) {
-                                                result += ' ';
-                                                wasSpace = true;
-                                              }
-                                            } else {
-                                              result += char;
-                                              wasSpace = false;
-                                            }
-                                          }
-                                          return result.trim();
-                                        };
-
-                                        const normalizedOriginal = normalizeWhitespace(paragraphText);
-                                        const normalizedSimplified = normalizeWhitespace(simplified);
-
-                                        // Try to find and replace the paragraph in the markdown
-                                        let newBody = currentBody;
-                                        const paragraphs = currentBody.split('\n\n');
-
-                                        for (let i = 0; i < paragraphs.length; i++) {
-                                          const para = normalizeWhitespace(paragraphs[i]);
-                                          // Check if this paragraph contains our text
-                                          if (para.includes(normalizedOriginal.substring(0, 50))) {
-                                            paragraphs[i] = simplified;
-                                            newBody = paragraphs.join('\n\n');
-                                            break;
-                                          }
-                                        }
-
-                                        const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) });
-                                        next.lessons = next.lessons ? [...next.lessons] : [];
-                                        const currentLesson = next.lessons[activeLessonIndex];
-                                        next.lessons[activeLessonIndex] = {
-                                          title: currentLesson?.title || content?.lessonsMeta?.[activeLessonIndex]?.title || `Lesson ${activeLessonIndex + 1}`,
-                                          body: newBody,
-                                          quiz: currentLesson?.quiz || []
-                                        };
-                                        setContent(next);
-                                        upsertNodeContent(slug, title, next as any);
-                                      }
-                                    } catch (err: any) {
-                                      console.error('Failed to simplify paragraph:', err);
-                                      alert('Failed to simplify paragraph: ' + err.message);
-                                    } finally {
-                                      setSimplifyingParagraph(null);
-                                    }
-                                    // Restore scroll position
-                                    setTimeout(() => window.scrollTo(0, scrollY), 0);
-                                  }}
-                                      disabled={isSimplifying}
-                                      className="transition-all duration-300 inline-flex h-7 w-7 items-center justify-center rounded-full shadow-lg cursor-pointer opacity-0 group-hover:opacity-100 bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white hover:shadow-xl hover:scale-110"
-                                      title="Simplify paragraph"
-                                    >
-                                      S
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                          );
-                        },
-                        li: ({ children }: any) => {
-                          let itemText = String(children);
-                          // Simple HTML tag removal without regex
-                          while (itemText.includes('<') && itemText.includes('>')) {
-                            const start = itemText.indexOf('<');
-                            const end = itemText.indexOf('>', start);
-                            if (end > start) {
-                              itemText = itemText.slice(0, start) + itemText.slice(end + 1);
-                            } else {
-                              break;
-                            }
-                          }
-                          const isSimplifying = simplifyingParagraph === itemText;
-                          const groupKey = getParagraphGroupKey(itemText);
-                          const isGroupLeader = groupKey === itemText;
-                          // Only show simplify button on the first item in each section
-                          const showSimplifyButton = false; // DISABLED FOR NOW
-
-                          return (
-                            <li
-                              className="relative group mb-0.5"
-                              onMouseEnter={() => setHoveredParagraph(itemText)}
-                              onMouseLeave={() => setHoveredParagraph(null)}
-                            >
-                              <div className="flex transition-all duration-500">
-                                <span
-                                  className={
-                                    isSimplifying
-                                      ? 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 leading-normal'
-                                      : 'relative flex-1 transition-all duration-500 rounded-md px-2 py-0.5 leading-normal'
-                                  }
-                                  style={isSimplifying ? {
-                                    background: 'linear-gradient(to right, rgba(0, 229, 255, 0.3) 0%, rgba(0, 229, 255, 0.3) 100%)'
-                                  } : {}}
-                                >
-                                  {wrapChildren(children)}
-                                </span>
-                              </div>
-                              {/* Vertical line - DISABLED */}
-                              {false && <div
-                                className={
-                                  hoveredParagraph === itemText
-                                    ? 'paragraph-line absolute -right-12 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-100 scale-y-100'
-                                    : 'paragraph-line absolute -right-12 top-1 bottom-1 w-0.5 transition-all duration-300 opacity-0 scale-y-0'
-                                }
-                                style={{ transformOrigin: 'top' }}
-                              />}
-                              {!isSimplifying && showSimplifyButton && (
-                                <div className="absolute -right-20 top-1 flex items-start">
-                                  <button
-                                    tabIndex={-1}
-                                    onMouseEnter={(e) => { e.preventDefault(); setHoveredParagraph(itemText); }}
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onFocus={(e) => e.preventDefault()}
-                                    onClick={async (e) => {
-                                      e.preventDefault();
-                                      const scrollY = window.scrollY;
-                                      setSimplifyingParagraph(itemText);
-                                      try {
-                                        const simplified = await simplifyParagraph(itemText);
-                                        if (simplified && simplified !== itemText) {
-                                          const currentBody = content.lessons[activeLessonIndex]?.body || '';
-                                          const normalizeWhitespace = (text: string) => {
-                                            let result = '';
-                                            let wasSpace = false;
-                                            for (let i = 0; i < text.length; i++) {
-                                              const char = text[i];
-                                              if (char === ' ' || char === '\t' || char === '\n') {
-                                                if (!wasSpace) {
-                                                  result += ' ';
-                                                  wasSpace = true;
-                                                }
-                                              } else {
-                                                result += char;
-                                                wasSpace = false;
-                                              }
-                                            }
-                                            return result.trim();
-                                          };
-
-                                          const normalizedOriginal = normalizeWhitespace(itemText);
-                                          let newBody = currentBody;
-                                          const lines = currentBody.split('\n');
-
-                                          for (let i = 0; i < lines.length; i++) {
-                                            const line = normalizeWhitespace(lines[i]);
-                                            if (line.includes(normalizedOriginal.substring(0, 50))) {
-                                              lines[i] = lines[i].replace(itemText, simplified);
-                                              newBody = lines.join('\n');
-                                              break;
-                                            }
-                                          }
-
-                                          const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) });
-                                          next.lessons = next.lessons ? [...next.lessons] : [];
-                                          const currentLesson = next.lessons[activeLessonIndex];
-                                          next.lessons[activeLessonIndex] = {
-                                            title: currentLesson?.title || content?.lessonsMeta?.[activeLessonIndex]?.title || `Lesson ${activeLessonIndex + 1}`,
-                                            body: newBody,
-                                            quiz: currentLesson?.quiz || []
-                                          };
-                                          setContent(next);
-                                          upsertNodeContent(slug, title, next as any);
-                                        }
-                                      } catch (err: any) {
-                                        console.error('Failed to simplify list item:', err);
-                                        alert('Failed to simplify list item: ' + err.message);
-                                      } finally {
-                                        setSimplifyingParagraph(null);
-                                      }
-                                      setTimeout(() => window.scrollTo(0, scrollY), 0);
-                                    }}
-                                    disabled={isSimplifying}
-                                    className="transition-all duration-300 inline-flex h-7 w-7 items-center justify-center rounded-full shadow-lg cursor-pointer opacity-0 group-hover:opacity-100 bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white hover:shadow-xl hover:scale-110"
-                                    title="Simplify list item"
-                                  >
-                                    S
-                                  </button>
-                                </div>
-                              )}
-                            </li>
-                          );
-                        },
-                        h1: ({ children }: any) => <h1 className="mt-4 mb-2 text-2xl font-bold">{wrapChildren(children)}</h1>,
-                        h2: ({ children }: any) => <h2 className="mt-3 mb-1.5 text-xl font-semibold">{wrapChildren(children)}</h2>,
-                        h3: ({ children }: any) => <h3 className="mt-2.5 mb-1 text-lg font-medium">{wrapChildren(children)}</h3>,
-                        ul: ({ children }: any) => <ul className="space-y-0.5 my-2">{children}</ul>,
-                        ol: ({ children }: any) => <ol className="space-y-0.5 my-2">{children}</ol>,
-                        td: ({ children }: any) => <td>{wrapChildren(children)}</td>,
-                        th: ({ children }: any) => <th>{wrapChildren(children)}</th>,
-                        code: ({ children, ...props }: any) => {
-                          // Handle inline math expressions that might be in code blocks
-                          const content = String(children).trim();
-                          if (content.startsWith('$') && content.endsWith('$') && content.length > 2) {
-                            // This is likely an inline math expression that should be rendered as math
-                            return <span dangerouslySetInnerHTML={{
-                              __html: katex.renderToString(content.slice(1, -1), { displayMode: false, throwOnError: false })
-                            }} />;
-                          }
-                          return <code>{children}</code>;
-                        },
-                        pre: ({ children, ...props }: any) => {
-                          // Extract code content from React elements
-                          const extractTextContent = (element: any): string => {
-                            if (typeof element === 'string') return element;
-                            if (Array.isArray(element)) return element.map(extractTextContent).join('');
-                            if (element?.props?.children) return extractTextContent(element.props.children);
-                            return '';
-                          };
-
-                          const codeContent = extractTextContent(children);
-                          // Note: line numbers will be driven by Prism tokens to avoid off-by-one
-
-                          // Extract language from className (e.g., "language-javascript" -> "javascript")
-                          const className = (props as any).className || '';
-                          let language = '';
-                          if (className.startsWith('language-')) {
-                            language = className.substring(9); // Remove 'language-' prefix
-                          }
-
-
-                          return (
-                            <div className="relative bg-[#0F141D] border border-[#2B3140] rounded-lg overflow-hidden my-3">
-                              <div className="overflow-x-auto">
-                                <Highlight
-                                  code={codeContent}
-                                  language={language || 'javascript'}
-                                  theme={themes.vsDark}
-                                >
-                                  {({ tokens, getLineProps, getTokenProps }) => (
-                                    <div
-                                      className="font-mono"
-                                      style={{
-                                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                                        fontSize: '14px',
-                                        lineHeight: 1.5,
-                                        whiteSpace: 'pre',
-                                      }}
-                                    >
-                                      {tokens.map((line, i) => (
-                                        <div key={i} className="grid" style={{ gridTemplateColumns: 'auto 1fr', columnGap: '12px' }}>
-                                          <div
-                                            className="text-right select-none text-[#6B7280] pl-1 pr-1 pt-1"
-                                            style={{ fontVariantNumeric: 'tabular-nums' as any, marginTop: '1px' }}
-                                          >
-                                            {i + 1}
-                                          </div>
-                                          <div {...getLineProps({ line })}>
-                                            {line.map((token, key) => (
-                                              <span key={key} {...getTokenProps({ token })} />
-                                            ))}
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </Highlight>
-                              </div>
+                    {lessonMetadata && (
+                      <div className="mb-6 rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4 space-y-4">
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--foreground)]/70">
+                          <span className="inline-flex items-center rounded-full border border-[var(--foreground)]/20 px-3 py-1 text-[var(--foreground)]">
+                            {lessonMetadata.title || content.lessonsMeta?.[activeLessonIndex]?.title || "Lesson overview"}
+                          </span>
+                          {lessonMetadata.readingTimeMinutes && (
+                            <span className="inline-flex items-center rounded-full border border-[var(--foreground)]/20 px-2.5 py-0.5 text-[var(--foreground)]/80">
+                              ⏱️ {lessonMetadata.readingTimeMinutes} min read
+                            </span>
+                          )}
+                        </div>
+                        {lessonMetadata.summary && (
+                          <p className="text-sm leading-relaxed text-[var(--foreground)]/90">
+                            {formatMetadataEntry(lessonMetadata.summary)}
+                          </p>
+                        )}
+                        {lessonMetadata.bulletSummary?.length ? (
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--foreground)]/60 mb-1">
+                              Bullet Summary
                             </div>
-                          );
-                        },
+                            <ul className="list-disc space-y-1 pl-4 text-sm text-[var(--foreground)]/90">
+                              {lessonMetadata.bulletSummary.map((item, idx) => (
+                                <li key={`bullet-${idx}`}>{formatMetadataEntry(item)}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                        {lessonMetadata.objectives?.length ? (
+                          <div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--foreground)]/60 mb-1">
+                              Objectives
+                            </div>
+                            <ul className="list-decimal space-y-1 pl-6 text-sm text-[var(--foreground)]/90">
+                              {lessonMetadata.objectives.map((item, idx) => (
+                                <li key={`objective-${idx}`}>{formatMetadataEntry(item)}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                        {lessonMetadata.tags?.length ? (
+                          <div className="flex flex-wrap gap-2">
+                            {lessonMetadata.tags.map((tag) => (
+                              <span key={tag} className="inline-flex items-center rounded-full bg-[var(--accent-cyan)]/10 px-3 py-1 text-xs text-[var(--accent-cyan)]">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                    <div
+                      className="lesson-content"
+                      style={{ cursor: hoverWordRects.length > 0 ? 'pointer' : 'default' }}
+                      onClick={(e) => {
+                        try {
+                          const target = e.target as HTMLElement | null;
+                          if (!target) return;
+                          // Ignore clicks inside links, code, pre, and KaTeX
+                          if (target.closest("a, code, pre, .katex")) return;
+                          const x = (e as any).clientX as number;
+                          const y = (e as any).clientY as number;
+                          const doc: any = document as any;
+                          let range: Range | null = null;
+                          if (doc.caretRangeFromPoint) {
+                            range = doc.caretRangeFromPoint(x, y);
+                          } else if (doc.caretPositionFromPoint) {
+                            const pos = doc.caretPositionFromPoint(x, y);
+                            if (pos) {
+                              range = document.createRange();
+                              range.setStart(pos.offsetNode, pos.offset);
+                              range.collapse(true);
+                            }
+                          }
+                          if (!range) return;
+                          let node = range.startContainer;
+                          if (node.nodeType !== Node.TEXT_NODE) {
+                            // find nearest text node
+                            const asEl = node as unknown as HTMLElement;
+                            const walker = document.createTreeWalker(asEl, NodeFilter.SHOW_TEXT);
+                            node = walker.nextNode() || node;
+                          }
+                          if (node.nodeType !== Node.TEXT_NODE) return;
+                          const text = (node.textContent || "");
+                          let idx = Math.max(0, Math.min(range.startOffset, text.length));
+                          // expand to word boundaries
+                          const isWordChar = (ch: string) => /[\p{L}\p{N}\u2019'\-]/u.test(ch);
+                          let start = idx;
+                          while (start > 0 && isWordChar(text[start - 1])) start--;
+                          let end = idx;
+                          while (end < text.length && isWordChar(text[end])) end++;
+                          const word = text.slice(start, end).trim();
+                          if (!word) return;
+                          const container = (node.parentElement as HTMLElement | null)?.closest("p, li, td, th, blockquote, div") as HTMLElement | null;
+                          const parentText = (container?.innerText || node.parentElement?.textContent || text).trim();
+                          onWordClick(word, parentText, e as any);
+                        } catch {}
                       }}
+                      onMouseMove={(e) => {
+                        try {
+                          const target = e.target as HTMLElement | null;
+                          if (!target) return setHoverWordRects([]);
+                          if (target.closest("a, code, pre, .katex")) return setHoverWordRects([]);
+                          const x = (e as any).clientX as number;
+                          const y = (e as any).clientY as number;
+                          const doc: any = document as any;
+                          let range: Range | null = null;
+                          if (doc.caretRangeFromPoint) {
+                            range = doc.caretRangeFromPoint(x, y);
+                          } else if (doc.caretPositionFromPoint) {
+                            const pos = doc.caretPositionFromPoint(x, y);
+                            if (pos) {
+                              range = document.createRange();
+                              range.setStart(pos.offsetNode, pos.offset);
+                              range.collapse(true);
+                            }
+                          }
+                          if (!range) return setHoverWordRects([]);
+                          let node = range.startContainer;
+                          if (node.nodeType !== Node.TEXT_NODE) {
+                            const asEl = node as unknown as HTMLElement;
+                            const walker = document.createTreeWalker(asEl, NodeFilter.SHOW_TEXT);
+                            node = walker.nextNode() || node;
+                          }
+                          if (node.nodeType !== Node.TEXT_NODE) return setHoverWordRects([]);
+                          const text = (node.textContent || "");
+                          let idx = Math.max(0, Math.min(range.startOffset, text.length));
+                          // Word character: letters, numbers, apostrophes, hyphens (but not whitespace, line breaks, or punctuation)
+                          const isWordChar = (ch: string) => /[\p{L}\p{N}\u2019'\-]/u.test(ch);
+                          // Expand backwards to find word start
+                          let start = idx;
+                          while (start > 0 && isWordChar(text[start - 1])) start--;
+                          // Expand forwards to find word end
+                          let end = idx;
+                          while (end < text.length && isWordChar(text[end])) end++;
+                          // Trim any trailing whitespace that might have been included
+                          while (end > start && /\s/.test(text[end - 1])) end--;
+                          if (start === end) return setHoverWordRects([]);
+                          const wordRange = document.createRange();
+                          wordRange.setStart(node, start);
+                          wordRange.setEnd(node, end);
+                          // Use getClientRects() to get individual line boxes for multi-line words
+                          // This ensures we only highlight the word segments, not the full line width
+                          const rects = wordRange.getClientRects();
+                          if (!rects || rects.length === 0) return setHoverWordRects([]);
+                          const validRects: Array<{ left: number; top: number; width: number; height: number }> = [];
+                          for (let i = 0; i < rects.length; i++) {
+                            const rect = rects[i];
+                            if (rect && rect.width > 0 && rect.height > 0) {
+                              validRects.push({
+                                left: rect.left,
+                                top: rect.top,
+                                width: rect.width,
+                                height: rect.height,
+                              });
+                            }
+                          }
+                          setHoverWordRects(validRects);
+                        } catch {
+                          setHoverWordRects([]);
+                        }
+                      }}
+                      onMouseLeave={() => setHoverWordRects([])}
                     >
                       {(() => {
-                        // Convert LaTeX bracket notation to dollar signs and fix common errors
                         let processedBody = content.lessons[activeLessonIndex].body;
-                        
-                        // Remove metadata header if present
+                        // Remove metadata header if present (do not modify delimiters)
                         processedBody = processedBody
                           .replace(/^Lesson Title:.*\n/m, '')
                           .replace(/^Subject:.*\n/m, '')
                           .replace(/^Topic:.*\n/m, '');
-                        
-                        processedBody = processedBody
-                          .replace(/\\\[/g, '$$')
-                          .replace(/\\\]/g, '$$')
-                          .replace(/\\\(/g, '$')
-                          .replace(/\\\)/g, '$');
-                        
-                        return processedBody;
+                        processedBody = sanitizeLessonBody(processedBody);
+                        return <LessonBody body={processedBody} />;
                       })()}
-                    </AutoFixMarkdown>
+                    </div>
                     <style jsx global>{`
                       .lesson-content p{ margin: 0.45rem 0 !important; }
                       .lesson-content ul, .lesson-content ol{ margin: 0.4rem 0 !important; }
-                      .lesson-content h1, .lesson-content h2, .lesson-content h3{ margin-top: 0.6rem !important; margin-bottom: 0.35rem !important; }
+                      .lesson-content h1, .lesson-content h2{ margin-top: 0.6rem !important; margin-bottom: 0.35rem !important; }
                     `}</style>
                   </>
                 ) : (
@@ -1516,7 +1385,13 @@ function toggleStar(flashcardId: string) {
                             next.lessons[activeLessonIndex] = {
                               title: String(lesson.title || (content?.lessonsMeta?.[activeLessonIndex]?.title || `Lesson ${activeLessonIndex + 1}`)),
                               body: String(lesson.body || ""),
-                              quiz: Array.isArray(lesson.quiz) ? lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : []
+                              quiz: Array.isArray(lesson.quiz)
+                                ? lesson.quiz.map((q: any) => ({
+                                    question: String(q.question || ""),
+                                    answer: q.answer ? String(q.answer) : undefined,
+                                  }))
+                                : [],
+                              metadata: lesson.metadata || null
                             };
                             next.rawLessonJson = Array.isArray(next.rawLessonJson) ? [...next.rawLessonJson] : [];
                             while (next.rawLessonJson.length <= activeLessonIndex) {
@@ -1563,13 +1438,13 @@ function toggleStar(flashcardId: string) {
                     <path d="M19 9l-7 7-7-7"/>
                   </svg>
                 </button>
-                {practiceOpen && content.lessons[activeLessonIndex]?.quiz && content.lessons[activeLessonIndex].quiz.length > 0 && (
+                {practiceOpen && lessonQuiz.length > 0 && (
                   <div className="px-4 pt-4 pb-4">
                     <div className="space-y-6">
-                      {content.lessons[activeLessonIndex].quiz.map((q, qi) => (
+                      {lessonQuiz.map((q, qi) => (
                         <div key={qi} className="space-y-3 p-4 rounded-lg bg-[var(--background)]/60 border border-[var(--foreground)]/10">
                           <div className="text-sm font-medium text-[var(--foreground)]">
-                            {qi + 1}. <AutoFixMarkdown>{q.question}</AutoFixMarkdown>
+                            <span className="mr-1">{qi + 1}.</span> <LessonBody body={sanitizeLessonBody(String(q.question || ""))} />
                           </div>
                           <div className="space-y-2">
                             <textarea
@@ -1583,7 +1458,7 @@ function toggleStar(flashcardId: string) {
                                   next.lessons = Array.isArray(next.lessons) ? [...next.lessons] : [];
                                   const l = { ...(next.lessons[activeLessonIndex] as any) };
                                   const answersArr: string[] = Array.isArray(l.userAnswers) ? [...l.userAnswers] : [];
-                                  while (answersArr.length < (content.lessons[activeLessonIndex]?.quiz?.length || 0)) answersArr.push("");
+                                  while (answersArr.length < lessonQuiz.length) answersArr.push("");
                                   answersArr[qi] = nextVal;
                                   l.userAnswers = answersArr;
                                   next.lessons[activeLessonIndex] = l;
@@ -1617,7 +1492,7 @@ function toggleStar(flashcardId: string) {
                                     : 'text-xs p-3 rounded bg-red-50 text-red-800 border border-red-200 dark:bg-red-500/10 dark:text-red-200 dark:border-red-500/30'
                                 }>
                                   <div className="font-semibold mb-1">{quizResults[qi].correct ? '✓ Correct!' : '✗ Not quite'}</div>
-                                  <AutoFixMarkdown>{quizResults[qi].explanation}</AutoFixMarkdown>
+                                  <LessonBody body={sanitizeLessonBody(String(quizResults[qi].explanation || ""))} />
                                 </div>
                                 
                                 {!quizResults[qi].correct && quizResults[qi].hint && (
@@ -1630,7 +1505,7 @@ function toggleStar(flashcardId: string) {
                                     </button>
                                     {showHints[qi] && (
                                       <div className="text-xs p-3 rounded bg-blue-50 text-blue-900 border border-blue-200 dark:bg-[#1E3A5F]/30 dark:text-[#E0F2FE] dark:border-[#60A5FA]/20">
-                                        💡 <AutoFixMarkdown>{quizResults[qi].hint}</AutoFixMarkdown>
+                                        💡 <LessonBody body={sanitizeLessonBody(String(quizResults[qi].hint || ""))} />
                                       </div>
                                     )}
                                   </div>
@@ -1646,7 +1521,7 @@ function toggleStar(flashcardId: string) {
                                     </button>
                                     {showSolutions[qi] && (
                                       <div className="text-xs p-3 rounded bg-purple-50 text-purple-900 border border-purple-200 dark:bg-[#3B1F4F]/30 dark:text-[#F3E8FF] dark:border-[#C084FC]/20">
-                                        <AutoFixMarkdown>{quizResults[qi].fullSolution}</AutoFixMarkdown>
+                                        <LessonBody body={sanitizeLessonBody(String(quizResults[qi].fullSolution || ""))} />
                                       </div>
                                     )}
                                   </div>
@@ -1668,7 +1543,7 @@ function toggleStar(flashcardId: string) {
                               alert("No lesson content to check answers for");
                               return;
                             }
-                            const answers = currentLesson.quiz.map((q, qi) => ({
+                            const answers = lessonQuiz.map((q, qi) => ({
                               question: q.question,
                               userAnswer: userAnswers[qi] || ""
                             }));
@@ -1679,7 +1554,7 @@ function toggleStar(flashcardId: string) {
                               body: JSON.stringify({
                                 subject: subjectData?.subject || slug,
                                 topic: title,
-                                lessonContent: currentLesson.body,
+                                lessonContent: sanitizeLessonBody(currentLesson.body),
                                 courseContext: subjectData?.course_context || "",
                                 answers,
                                 languageName: subjectData?.course_language_name || ""
@@ -1696,7 +1571,7 @@ function toggleStar(flashcardId: string) {
                               next.lessons = Array.isArray(next.lessons) ? [...next.lessons] : [];
                               const l = { ...(next.lessons[activeLessonIndex] as any) };
                               const answersArr: string[] = [];
-                              const numQ = (currentLesson.quiz || []).length;
+                              const numQ = lessonQuiz.length;
                               for (let i = 0; i < numQ; i++) answersArr[i] = userAnswers[i] || "";
                               l.userAnswers = answersArr;
                               l.quizResults = results;
@@ -1835,7 +1710,7 @@ function toggleStar(flashcardId: string) {
                                 body: JSON.stringify({
                                   subject: subjectData?.subject || slug,
                                   topic: title,
-                                  lessonContent: currentLesson.body,
+                                  lessonContent: sanitizeLessonBody(currentLesson.body),
                                   courseContext: subjectData?.course_context || "",
                                   languageName: subjectData?.course_language_name || ""
                                 })
@@ -1872,7 +1747,7 @@ function toggleStar(flashcardId: string) {
                         {mcQuestions.map((q, qi) => (
                           <div key={qi} className="space-y-3 p-4 rounded-lg bg-[var(--background)]/60 border border-[var(--foreground)]/10">
                             <div className="text-sm font-medium text-[var(--foreground)]">
-                              {qi + 1}. <AutoFixMarkdown>{q.question}</AutoFixMarkdown>
+                              <span className="mr-1">{qi + 1}.</span> <LessonBody body={sanitizeLessonBody(String(q.question || ""))} />
                             </div>
                             <div className="space-y-2">
                               {q.options.map((option, oi) => (
@@ -1915,7 +1790,7 @@ function toggleStar(flashcardId: string) {
                                     disabled={!!mcResults}
                                     className="mt-0.5"
                                   />
-                                  <span className="text-sm flex-1"><AutoFixMarkdown>{option}</AutoFixMarkdown></span>
+                                  <span className="text-sm flex-1"><LessonBody body={sanitizeLessonBody(String(option || ""))} /></span>
                                 </label>
                               ))}
                             </div>
@@ -2119,7 +1994,13 @@ function toggleStar(flashcardId: string) {
                     updatedContent.lessons[activeLessonIndex] = {
                       title: String(lessonJson.lesson?.title || planTitle),
                       body: String(lessonJson.lesson?.body || ""),
-                      quiz: Array.isArray(lessonJson.lesson?.quiz) ? lessonJson.lesson.quiz.map((q: any) => ({ question: String(q.question || "") })) : [],
+                      quiz: Array.isArray(lessonJson.lesson?.quiz)
+                        ? lessonJson.lesson.quiz.map((q: any) => ({
+                            question: String(q.question || ""),
+                            answer: q.answer ? String(q.answer) : undefined,
+                          }))
+                        : [],
+                      metadata: lessonJson.lesson?.metadata || null,
                       ...(existingFlashcards ? { flashcards: existingFlashcards } : {}),
                     };
                     if (!updatedContent.lessonsMeta) updatedContent.lessonsMeta = [];
@@ -2191,7 +2072,13 @@ function toggleStar(flashcardId: string) {
                     lessons: [{
                       title: String(lessonData.title || title),
                       body: String(lessonData.body || ""),
-                      quiz: Array.isArray(lessonData.quiz) ? lessonData.quiz.map((q: any) => ({ question: String(q.question || "") })) : []
+                      quiz: Array.isArray(lessonData.quiz)
+                        ? lessonData.quiz.map((q: any) => ({
+                            question: String(q.question || ""),
+                            answer: q.answer ? String(q.answer) : undefined,
+                          }))
+                        : [],
+                      metadata: lessonData.metadata || null
                     }],
                     rawLessonJson: [typeof lessonJson.raw === 'string' ? lessonJson.raw : JSON.stringify(lessonData)],
                   };
@@ -2305,12 +2192,12 @@ function toggleStar(flashcardId: string) {
                 )}
                 <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-0' : 'opacity-100'}`}>
                   <div className="pointer-events-auto">
-                    <AutoFixMarkdown>{currentCard?.prompt || ""}</AutoFixMarkdown>
+                    <LessonBody body={sanitizeLessonBody(String(currentCard?.prompt || ""))} />
                   </div>
                 </div>
                 <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-100' : 'opacity-0'}`}>
                   <div className="pointer-events-auto">
-                    <AutoFixMarkdown>{currentCard?.answer || ""}</AutoFixMarkdown>
+                    <LessonBody body={sanitizeLessonBody(String(currentCard?.answer || ""))} />
                   </div>
                 </div>
                 <div className="absolute bottom-4 left-0 right-0 text-xs text-[var(--foreground)]/60 z-10 pointer-events-none">
@@ -2471,9 +2358,9 @@ function toggleStar(flashcardId: string) {
         <div
           className="fixed z-50 w-[504px] max-w-[calc(100vw-24px)] rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/95 backdrop-blur-sm p-4 text-[var(--foreground)] shadow-2xl pointer-events-auto"
           style={{
-            left: `${explanationPosition.x}px`,
-            top: `${explanationPosition.y}px`,
-            transform: 'translateX(-50%) translateY(-100%)'
+            left: '50%',
+            bottom: '16px',
+            transform: 'translateX(-50%)'
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -2490,13 +2377,52 @@ function toggleStar(flashcardId: string) {
                 "{explanationWord}"
               </div>
               <div className="lesson-content text-xl max-h-64 overflow-y-auto leading-relaxed">
-                <AutoFixMarkdown>{explanationContent}</AutoFixMarkdown>
+                <LessonBody body={sanitizeLessonBody(String(explanationContent || ""))} />
               </div>
             </div>
           )}
         </div>
       </div>
     , document.body)}
+    {hoverWordRects.length > 0 && createPortal(
+      <>
+        {hoverWordRects.map((rect, idx) => (
+          <div
+            key={idx}
+            className="pointer-events-none fixed z-40"
+            style={{
+              left: `${rect.left}px`,
+              top: `${rect.top}px`,
+              width: `${rect.width}px`,
+              height: `${rect.height}px`,
+            }}
+          >
+            <div
+              style={{
+                position: 'absolute',
+                left: '-4px',
+                right: '-4px',
+                bottom: '-2px',
+                height: '2px',
+                background: 'linear-gradient(90deg, rgba(0,229,255,0.8), rgba(255,45,150,0.8))',
+                borderRadius: '1px',
+                WebkitMaskImage: 'linear-gradient(to right, transparent 0, #000 4px, #000 calc(100% - 4px), transparent 100%)',
+                maskImage: 'linear-gradient(to right, transparent 0, #000 4px, #000 calc(100% - 4px), transparent 100%)',
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                background: 'linear-gradient(90deg, rgba(0,229,255,0.1), rgba(255,45,150,0.1))',
+                borderRadius: '4px',
+              }}
+            />
+          </div>
+        ))}
+      </>,
+      document.body
+    )}
     {/* Bottom utilities: subtle Export PDF */}
     {content && content.lessons && content.lessons[activeLessonIndex]?.body && (
       <div className="mx-auto w-full max-w-3xl px-6 pb-10">
@@ -2552,5 +2478,3 @@ function toggleStar(flashcardId: string) {
     </>
   );
 }
-
-

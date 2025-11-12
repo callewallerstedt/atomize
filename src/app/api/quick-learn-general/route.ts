@@ -45,6 +45,46 @@ QUIZ REQUIREMENTS:
 - Focus on key theoretical concepts, technical mechanisms, and critical analysis
 - Do NOT include any quiz content inside the body text
 
+CRITICAL MATH FORMATTING (MANDATORY):
+- Inline math MUST use bracket notation: \\( ... \\)
+  Example: The function \\( f(x) = x^2 \\) is quadratic.
+  Use inline math for: simple formulas, variables, short expressions within text
+- Display math MUST use bracket notation: \\[ ... \\]
+  Example: \\[ \\int_0^1 x^2 \\, dx = \\frac{1}{3} \\]
+  Use display math for: equations, multi-line expressions, align environments, matrices
+- NEVER use dollar signs: Do NOT use $...$ or $$...$$
+- Code blocks and inline code preserve math delimiters as literal text (do not render as math)
+
+LaTeX syntax rules:
+- Greek letters: \\alpha, \\beta, \\eta, \\theta, \\pi (always use backslash)
+- Fractions: \\frac{numerator}{denominator}
+- Square roots: \\sqrt{expression}
+- Text inside math: \\text{your text here}
+- Escape underscores in variable names: var\\_name
+- NEVER use \\t (tab character) or ext{text} (missing backslash)
+- No raw Unicode symbols (√, π, etc.) - use LaTeX commands
+- Every \\( must have a closing \\), every \\[ must have a closing \\]
+- Always put a blank line before and after display math \\[ ... \\]
+
+LaTeX environments (CRITICAL):
+- Environments like \\begin{align*}, \\begin{matrix}, \\begin{cases} MUST be in display math \\[ ... \\]
+- NEVER put \\begin{align*} or similar environments in inline math \\( ... \\)
+- For multi-line environments, keep everything on separate lines with actual line breaks:
+  \\[
+  \\begin{align*}
+  x &= 1 \\\\
+  y &= 2
+  \\end{align*}
+  \\]
+- For cases environment, format with line breaks:
+  \\[
+  \\begin{cases}
+  A, & 0 \\leq t < \\frac{1}{2} \\\\
+  B, & \\text{otherwise}
+  \\end{cases}
+  \\]
+- CRITICAL: Each line in environments must be on its own line (use actual newlines, not just \\\\)
+
 Focus on academic rigor, technical depth, and intellectual challenge. Use discipline-appropriate terminology and expect readers to engage with complex ideas.`;
 
     const userPrompt = `Create a comprehensive, university-level lesson about: "${query}"

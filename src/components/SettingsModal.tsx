@@ -50,22 +50,31 @@ export default function SettingsModal({
   open, 
   onClose, 
   onLogout,
-  isAuthenticated 
+  isAuthenticated,
+  subscriptionLevel: subscriptionLevelProp = "Free",
+  onSubscriptionLevelChange
 }: { 
   open: boolean; 
   onClose: () => void;
   onLogout?: () => void;
   isAuthenticated?: boolean;
+  subscriptionLevel?: string;
+  onSubscriptionLevelChange?: (level: string) => void;
 }) {
   const [theme, setTheme] = useState<Theme>(DARK_DEFAULTS);
   const [isLightMode, setIsLightMode] = useState(false);
   const [username, setUsername] = useState<string | null>(null);
-  const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
+  const [subscriptionLevel, setSubscriptionLevel] = useState<string>(subscriptionLevelProp);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [showCodeInput, setShowCodeInput] = useState(false);
   const [code, setCode] = useState("");
   const [processing, setProcessing] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+
+  // Update subscription level when prop changes
+  useEffect(() => {
+    setSubscriptionLevel(subscriptionLevelProp);
+  }, [subscriptionLevelProp]);
 
   useEffect(() => {
     if (!open) return;
@@ -80,7 +89,7 @@ export default function SettingsModal({
       setIsLightMode(false);
     }
     
-    // Fetch user info if authenticated
+    // Fetch user info if authenticated (only for username, subscription level comes from prop)
     if (isAuthenticated) {
       fetch("/api/me", { credentials: "include" })
         .then((r) => r.json().catch(() => ({})))
@@ -88,7 +97,8 @@ export default function SettingsModal({
           if (data?.user?.username) {
             setUsername(data.user.username);
           }
-          if (data?.user?.subscriptionLevel) {
+          // Update subscription level if prop wasn't provided (backwards compatibility)
+          if (data?.user?.subscriptionLevel && subscriptionLevelProp === "Free") {
             setSubscriptionLevel(data.user.subscriptionLevel);
           }
         })
@@ -97,7 +107,7 @@ export default function SettingsModal({
       setUsername(null);
       setSubscriptionLevel("Free");
     }
-  }, [open, isAuthenticated]);
+  }, [open, isAuthenticated, subscriptionLevelProp]);
 
   function toggleLightMode() {
     const newMode = !isLightMode;
@@ -139,6 +149,7 @@ export default function SettingsModal({
             <span className={`text-sm font-semibold capitalize ${
               subscriptionLevel === "Tester" ? "text-[var(--accent-cyan)]" :
               subscriptionLevel === "Paid" ? "text-[var(--accent-pink)]" :
+              subscriptionLevel === "mylittlepwettybebe" ? "text-[var(--accent-pink)]" :
               "text-[var(--foreground)]/70"
             }`}>
               {subscriptionLevel}
@@ -159,7 +170,56 @@ export default function SettingsModal({
               </p>
             </div>
           )}
-          {subscriptionLevel !== "Tester" && (
+          {subscriptionLevel === "Tester" && (
+            <div className="space-y-1 mb-2">
+              <p className="text-xs text-[var(--foreground)]/60">
+                You have full access to all features as a Tester
+              </p>
+            </div>
+          )}
+          {subscriptionLevel === "mylittlepwettybebe" && (
+            <div className="space-y-1 mb-2">
+              <p className="text-xs text-[var(--foreground)]/60">
+                You have full access to all features
+              </p>
+            </div>
+          )}
+          {(subscriptionLevel === "Tester" || subscriptionLevel === "mylittlepwettybebe") && (
+            <button
+              onClick={async (e) => {
+                e.stopPropagation();
+                const tierName = subscriptionLevel === "Tester" ? "Tester" : "mylittlepwettybebe";
+                if (!confirm(`Are you sure you want to remove your ${tierName} subscription? You will be downgraded to Free tier.`)) {
+                  return;
+                }
+                setProcessing(true);
+                try {
+                  const res = await fetch("/api/subscription/update", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ subscriptionLevel: "Free" }),
+                  });
+                  const json = await res.json();
+                  if (!res.ok || !json?.ok) {
+                    alert(json?.error || "Failed to update subscription");
+                    return;
+                  }
+                  setSubscriptionLevel("Free");
+                  onSubscriptionLevelChange?.("Free");
+                  alert("Successfully downgraded to Free tier");
+                } catch (err: any) {
+                  alert(err?.message || "Failed to update subscription");
+                } finally {
+                  setProcessing(false);
+                }
+              }}
+              disabled={processing}
+              className="inline-flex h-6 items-center justify-center rounded px-2 text-xs text-[var(--foreground)]/60 hover:text-red-500 hover:bg-red-500/10 border border-[var(--foreground)]/10 hover:border-red-500/30 disabled:opacity-60 transition-colors"
+            >
+              {processing ? "Processing..." : "Remove Subscription"}
+            </button>
+          )}
+          {subscriptionLevel !== "Tester" && subscriptionLevel !== "mylittlepwettybebe" && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -424,14 +484,18 @@ export default function SettingsModal({
                               return;
                             }
                             alert(json.message || "Code redeemed successfully!");
-                            setSubscriptionLevel(json.subscriptionLevel);
+                            const newLevel = json.subscriptionLevel;
+                            setSubscriptionLevel(newLevel);
+                            onSubscriptionLevelChange?.(newLevel);
                             setCode("");
                             setShowCodeInput(false);
                             // Refresh user data
                             const meRes = await fetch("/api/me", { credentials: "include" });
                             const meData = await meRes.json().catch(() => ({}));
                             if (meData?.user?.subscriptionLevel) {
-                              setSubscriptionLevel(meData.user.subscriptionLevel);
+                              const updatedLevel = meData.user.subscriptionLevel;
+                              setSubscriptionLevel(updatedLevel);
+                              onSubscriptionLevelChange?.(updatedLevel);
                             }
                           } catch (err: any) {
                             alert(err?.message || "Failed to redeem code");

@@ -1,16 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
+import { LessonBody } from "@/components/LessonBody";
+import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
 import { loadSubjectData, saveSubjectData, saveSubjectDataAsync, StoredSubjectData, TopicMeta, getLessonsDueForReview, getUpcomingReviews, LessonFlashcard } from "@/utils/storage";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import Modal from "@/components/Modal";
 import GlowSpinner from "@/components/GlowSpinner";
-import { AutoFixMarkdown } from "@/components/AutoFixMarkdown";
+ 
 // Tree view replaced by a simple topic list with actions
 
 type Subject = {
@@ -284,7 +282,8 @@ export default function SubjectPage() {
           lessons: [{
           title: lessonTitle,
             body: json.data.body,
-            quiz: json.data.quiz || []
+            quiz: json.data.quiz || [],
+            metadata: json.data.metadata || null
           }],
           rawLessonJson: [json.raw || JSON.stringify(json.data)]
         };
@@ -563,7 +562,12 @@ export default function SubjectPage() {
                                       lessons: [{
                                         title: String(lessonData.title || name),
                                         body: String(lessonData.body || ''),
-                                        quiz: Array.isArray(lessonData.quiz) ? lessonData.quiz.map((q: any) => ({ question: String(q.question || '') })) : []
+                                        quiz: Array.isArray(lessonData.quiz)
+                                          ? lessonData.quiz.map((q: any) => ({
+                                              question: String(q.question || ''),
+                                              answer: q.answer ? String(q.answer) : undefined,
+                                            }))
+                                          : []
                                       }],
                                       rawLessonJson: [typeof lessonJson.raw === 'string' ? lessonJson.raw : JSON.stringify(lessonData)],
                                     } as any;
@@ -1072,12 +1076,12 @@ export default function SubjectPage() {
                   )}
                   <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-0' : 'opacity-100'}`}>
                     <div className="pointer-events-auto">
-                      <AutoFixMarkdown>{currentCard?.prompt || ""}</AutoFixMarkdown>
+                      <LessonBody body={sanitizeLessonBody(String(currentCard?.prompt || ""))} />
                     </div>
                   </div>
                   <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-100' : 'opacity-0'}`}>
                     <div className="pointer-events-auto">
-                      <AutoFixMarkdown>{currentCard?.answer || ""}</AutoFixMarkdown>
+                      <LessonBody body={sanitizeLessonBody(String(currentCard?.answer || ""))} />
                     </div>
                   </div>
                   <div className="absolute bottom-4 left-0 right-0 text-xs text-[var(--foreground)]/60 z-10 pointer-events-none">

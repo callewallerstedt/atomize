@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { stripLessonMetadata } from "@/lib/lessonFormat";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -12,6 +13,7 @@ export async function POST(request: NextRequest) {
     if (!lessonBody || !lessonTitle) {
       return NextResponse.json({ error: "Missing lesson content" }, { status: 400 });
     }
+    const normalizedBody = stripLessonMetadata(String(lessonBody));
 
     const system = `You are an expert educator creating concise lesson summaries. Your task is to shorten a lesson while preserving all critical information and key concepts.
 
@@ -34,7 +36,7 @@ The shortened version should be 40-60% of the original length while maintaining 
 **Topic:** ${topic}
 
 **Original Lesson Content:**
-${lessonBody}
+${normalizedBody}
 
 Return the shortened lesson in the same markdown format, but much more concise. Keep all code blocks, important examples, key definitions, and quiz questions. Remove verbose explanations and redundant text.`;
 

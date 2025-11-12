@@ -73,7 +73,17 @@ export default function QuickLearnPage() {
         overview: `Quick lesson on: ${quickLearnQuery}`,
         symbols: [],
         lessonsMeta: [{ type: 'Quick Learn', title: lessonTitle }],
-        lessons: [{ title: lessonTitle, body: json.data.body, quiz: json.data.quiz || [] }],
+        lessons: [{
+          title: lessonTitle,
+          body: json.data.body,
+          quiz: Array.isArray(json.data.quiz)
+            ? json.data.quiz.map((q: any) => ({
+                question: String(q.question || ""),
+                answer: q.answer ? String(q.answer) : undefined,
+              }))
+            : [],
+          metadata: json.data.metadata || null
+        }],
         rawLessonJson: [json.raw || JSON.stringify(json.data)],
       } as any;
 
@@ -187,4 +197,3 @@ export default function QuickLearnPage() {
     </div>
   );
 }
-

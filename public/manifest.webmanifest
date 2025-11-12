@@ -7,8 +7,8 @@
   "theme_color": "#0F1216",
   "description": "Studying, Optimized.",
   "icons": [
-    { "src": "/Logo.jpg", "sizes": "192x192", "type": "image/jpeg" },
-    { "src": "/Logo.jpg", "sizes": "512x512", "type": "image/jpeg" }
+    { "src": "/spinner.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/spinner.png", "sizes": "512x512", "type": "image/png" }
   ]
 }
 

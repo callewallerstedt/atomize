@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { stripLessonMetadata } from "@/lib/lessonFormat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +26,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+    const normalizedLessonContent = stripLessonMetadata(String(lessonContent));
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -63,7 +65,7 @@ export async function POST(req: Request) {
       courseContext ? `Course Context: ${courseContext}` : "",
       "",
       "Lesson Content:",
-      lessonContent.slice(0, 15000),
+      normalizedLessonContent.slice(0, 15000),
       "",
       "Generate 4 multiple choice questions to test understanding of this lesson.",
     ].filter(Boolean).join("\n");
