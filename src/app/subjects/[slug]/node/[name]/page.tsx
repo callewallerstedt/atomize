@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { LessonBody } from "@/components/LessonBody";
 import { extractQuizSection } from "@/lib/lessonFormat";
 import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
@@ -26,6 +26,7 @@ import GlowSpinner from "@/components/GlowSpinner";
 export default function NodePage({ lessonIndexFromUrl }: { lessonIndexFromUrl?: number } = {}) {
 
   const params = useParams<{ slug: string; name: string }>();
+  const router = useRouter();
   const slug = params.slug;
   const title = decodeURIComponent(params.name || "");
   const [content, setContent] = useState<TopicGeneratedContent | null>(null);
@@ -328,6 +329,50 @@ function toggleStar(flashcardId: string) {
     setFlashcardOptionsOpen(false);
   };
 
+  // Listen for lesson flashcard modal open event
+  useEffect(() => {
+    const handleOpenLessonFlashcards = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const eventSlug = customEvent.detail?.slug;
+      const eventTopic = customEvent.detail?.topic;
+      const eventLessonIndex = customEvent.detail?.lessonIndex;
+      
+      if (eventSlug === slug && eventTopic === title) {
+        // If lesson index is specified, navigate to it first (if not already there)
+        if (eventLessonIndex !== undefined) {
+          const targetIndex = parseInt(String(eventLessonIndex), 10);
+          if (!isNaN(targetIndex) && targetIndex >= 0 && content?.lessons && targetIndex < content.lessons.length) {
+            // If we're not on the right lesson, navigate to it
+            if (activeLessonIndex !== targetIndex) {
+              router.push(`/subjects/${slug}/node/${encodeURIComponent(title)}/lesson/${targetIndex}`);
+              // Wait for navigation, then open flashcards
+              setTimeout(() => {
+                if (lessonFlashcards.length > 0) {
+                  openFlashcardsViewer(0);
+                }
+              }, 500);
+            } else {
+              // Already on the right lesson, just open flashcards
+              setTimeout(() => {
+                if (lessonFlashcards.length > 0) {
+                  openFlashcardsViewer(0);
+                }
+              }, 300);
+            }
+          }
+        } else if (lessonFlashcards.length > 0) {
+          // No specific lesson index, just open flashcards for current lesson
+          openFlashcardsViewer(0);
+        }
+      }
+    };
+    
+    document.addEventListener('synapse:open-lesson-flashcards', handleOpenLessonFlashcards as EventListener);
+    return () => {
+      document.removeEventListener('synapse:open-lesson-flashcards', handleOpenLessonFlashcards as EventListener);
+    };
+  }, [slug, title, activeLessonIndex, content, lessonFlashcards.length, router]);
+
   const handleCloseFlashcards = () => {
     setFlashcardModalOpen(false);
     setFlashcardFlipped(false);
@@ -548,6 +593,7 @@ function toggleStar(flashcardId: string) {
     }
   }
 
+
   useEffect(() => {
     if (!title) return;
     const saved = subjectData?.nodes?.[title] as any;
@@ -612,7 +658,6 @@ function toggleStar(flashcardId: string) {
     const sections = body.split(/(?=^#+ )/m); // Split on headings but keep them
     const groups: { [key: string]: string[] } = {};
     
-    console.log('📚 Building paragraph groups for lesson:', activeLessonIndex);
     
     for (const section of sections) {
       if (!section.trim()) continue;
@@ -645,7 +690,6 @@ function toggleStar(flashcardId: string) {
       if (paragraphs.length <= 1) continue; // No grouping needed
       
       const sectionLeader = paragraphs[0];
-      console.log(`  Section "${headingLine?.trim()}" has ${paragraphs.length} paragraphs, leader: "${sectionLeader.substring(0, 50)}..."`);
       
       // Map all paragraphs in this section to the group
       paragraphs.forEach(para => {
@@ -653,7 +697,6 @@ function toggleStar(flashcardId: string) {
       });
     }
     
-    console.log('✅ Built groups:', Object.keys(groups).length, 'total items');
     setParagraphGroups(groups);
   }, [content, activeLessonIndex]);
 
@@ -1264,6 +1307,10 @@ function toggleStar(flashcardId: string) {
                           if (target.closest("a, code, pre, .katex")) return setHoverWordRects([]);
                           const x = (e as any).clientX as number;
                           const y = (e as any).clientY as number;
+                          
+                          // DEBUG: Log mouse position
+                          console.log('🔍 Mouse position:', { clientX: x, clientY: y, scrollX: window.scrollX, scrollY: window.scrollY });
+                          
                           const doc: any = document as any;
                           let range: Range | null = null;
                           if (doc.caretRangeFromPoint) {
@@ -1297,27 +1344,92 @@ function toggleStar(flashcardId: string) {
                           // Trim any trailing whitespace that might have been included
                           while (end > start && /\s/.test(text[end - 1])) end--;
                           if (start === end) return setHoverWordRects([]);
+                          
+                          const detectedWord = text.slice(start, end);
+                          console.log('📝 Detected word:', detectedWord, { start, end, textLength: text.length });
+                          
                           const wordRange = document.createRange();
                           wordRange.setStart(node, start);
                           wordRange.setEnd(node, end);
-                          // Use getClientRects() to get individual line boxes for multi-line words
-                          // This ensures we only highlight the word segments, not the full line width
-                          const rects = wordRange.getClientRects();
-                          if (!rects || rects.length === 0) return setHoverWordRects([]);
-                          const validRects: Array<{ left: number; top: number; width: number; height: number }> = [];
-                          for (let i = 0; i < rects.length; i++) {
-                            const rect = rects[i];
-                            if (rect && rect.width > 0 && rect.height > 0) {
-                              validRects.push({
-                                left: rect.left,
-                                top: rect.top,
-                                width: rect.width,
-                                height: rect.height,
-                              });
+                          
+                          // Get parent element to check for transforms/offsets
+                          const parentEl = node.parentElement;
+                          const parentRect = parentEl?.getBoundingClientRect();
+                          console.log('📦 Parent element:', {
+                            tagName: parentEl?.tagName,
+                            className: parentEl?.className,
+                            parentRect: parentRect ? { left: parentRect.left, top: parentRect.top, width: parentRect.width, height: parentRect.height } : null,
+                            computedStyle: parentEl ? window.getComputedStyle(parentEl).transform : null,
+                          });
+                          
+                          // Try to get the bounding rect first - more accurate for single-line words
+                          const boundingRect = wordRange.getBoundingClientRect();
+                          const clientRects = wordRange.getClientRects();
+                          
+                          console.log('📐 Range coordinates:', {
+                            boundingRect: boundingRect ? {
+                              left: boundingRect.left,
+                              top: boundingRect.top,
+                              width: boundingRect.width,
+                              height: boundingRect.height,
+                              right: boundingRect.right,
+                              bottom: boundingRect.bottom,
+                            } : null,
+                            clientRects: Array.from(clientRects).map(r => ({
+                              left: r.left,
+                              top: r.top,
+                              width: r.width,
+                              height: r.height,
+                              right: r.right,
+                              bottom: r.bottom,
+                            })),
+                            mouseOffset: {
+                              offsetX: x - (boundingRect?.left || 0),
+                              offsetY: y - (boundingRect?.top || 0),
+                            },
+                          });
+                          
+                          // Get CSS zoom factor and compensate coordinates
+                          const htmlZoom = parseFloat(window.getComputedStyle(document.documentElement).zoom || '1');
+                          
+                          if (boundingRect && boundingRect.width > 0 && boundingRect.height > 0) {
+                            // Compensate for CSS zoom: divide coordinates by zoom factor
+                            // getBoundingClientRect() returns coordinates in zoomed space, but fixed positioning uses unzoomed space
+                            const rect = {
+                              left: boundingRect.left / htmlZoom,
+                              top: boundingRect.top / htmlZoom,
+                              width: boundingRect.width / htmlZoom,
+                              height: boundingRect.height / htmlZoom,
+                            };
+                            console.log('✅ Using boundingRect (compensated for zoom):', rect, {
+                              htmlZoom,
+                              originalRect: { left: boundingRect.left, top: boundingRect.top, width: boundingRect.width, height: boundingRect.height },
+                              mousePos: { x, y },
+                              wordCenter: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+                              offset: { x: x - (rect.left + rect.width / 2), y: y - (rect.top + rect.height / 2) },
+                            });
+                            setHoverWordRects([rect]);
+                          } else {
+                            // Fallback to getClientRects for multi-line words
+                            if (!clientRects || clientRects.length === 0) return setHoverWordRects([]);
+                            const validRects: Array<{ left: number; top: number; width: number; height: number }> = [];
+                            for (let i = 0; i < clientRects.length; i++) {
+                              const rect = clientRects[i];
+                              if (rect && rect.width > 0 && rect.height > 0) {
+                                // Compensate for CSS zoom
+                                validRects.push({
+                                  left: rect.left / htmlZoom,
+                                  top: rect.top / htmlZoom,
+                                  width: rect.width / htmlZoom,
+                                  height: rect.height / htmlZoom,
+                                });
+                              }
                             }
+                            console.log('✅ Using clientRects (compensated for zoom):', validRects);
+                            setHoverWordRects(validRects);
                           }
-                          setHoverWordRects(validRects);
-                        } catch {
+                        } catch (err) {
+                          console.error('❌ Error in hover detection:', err);
                           setHoverWordRects([]);
                         }
                       }}
@@ -2386,7 +2498,17 @@ function toggleStar(flashcardId: string) {
     , document.body)}
     {hoverWordRects.length > 0 && createPortal(
       <>
-        {hoverWordRects.map((rect, idx) => (
+        {hoverWordRects.map((rect, idx) => {
+          // DEBUG: Log what we're rendering
+          if (idx === 0) {
+            console.log('🎨 Rendering overlay with rect:', rect, {
+              windowInnerWidth: window.innerWidth,
+              windowInnerHeight: window.innerHeight,
+              scrollX: window.scrollX,
+              scrollY: window.scrollY,
+            });
+          }
+          return (
           <div
             key={idx}
             className="pointer-events-none fixed z-40"
@@ -2395,6 +2517,8 @@ function toggleStar(flashcardId: string) {
               top: `${rect.top}px`,
               width: `${rect.width}px`,
               height: `${rect.height}px`,
+              // No transforms, no scaling - use coordinates exactly as provided
+              transform: 'none',
             }}
           >
             <div
@@ -2419,7 +2543,8 @@ function toggleStar(flashcardId: string) {
               }}
             />
           </div>
-        ))}
+          );
+        })}
       </>,
       document.body
     )}

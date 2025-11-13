@@ -48,6 +48,7 @@ export type StoredSubjectData = {
   topics?: TopicMeta[]; // new main topics meta
   nodes: StoredSubjectNodeContent;
   progress?: { [topicName: string]: { totalLessons: number; completedLessons: number } };
+  practiceLogs?: any[]; // New detailed practice logging
   course_context?: string;
   course_language_code?: string; // e.g., 'en', 'sv'
   course_language_name?: string; // e.g., 'English', 'Svenska'
@@ -56,6 +57,7 @@ export type StoredSubjectData = {
   course_icon?: string; // emoji or short icon text
   course_quick_summary?: string; // fast AI read of course context
   reviewSchedules?: { [key: string]: ReviewSchedule }; // key: "topicName-lessonIndex"
+  examDates?: Array<{ date: string; name?: string }>; // ISO date strings, e.g., "2024-03-15"
 };
 
 const PREFIX = "atomicSubjectData:";

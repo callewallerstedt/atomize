@@ -7,8 +7,32 @@ import GlowSpinner from "@/components/GlowSpinner";
 import CourseCreateModal from "@/components/CourseCreateModal";
 import LoginPage from "@/components/LoginPage";
 import { saveSubjectData, StoredSubjectData, loadSubjectData } from "@/utils/storage";
+import { changelog } from "../../CHANGELOG";
 
 type Subject = { name: string; slug: string };
+
+function ChangelogBox() {
+  
+  return (
+    <div className="relative z-0">
+      {/* Dark box on top */}
+      <div className="relative rounded-2xl bg-[var(--background)] p-6 shadow-[0_2px_8px_rgba(0,0,0,0.7)] z-0">
+        {/* Animated gradient glow shadow behind the box - longer for changelog box */}
+        <div className="absolute top-0 left-0 right-0 bottom-0 -m-[0.1125rem] rounded-2xl bg-gradient-to-r from-[var(--accent-cyan)]/30 via-[var(--accent-pink)]/30 to-[var(--accent-cyan)]/30 bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] blur-[4.8px] -z-10 pointer-events-none" />
+        {/* Overlay to cover glow, same shape as box - above both glows */}
+        <div className="absolute top-0 left-0 right-0 bottom-0 rounded-2xl bg-[var(--background)] opacity-100 z-50 pointer-events-none" />
+        <div className="relative z-[60] text-sm text-[var(--foreground)] leading-relaxed space-y-2">
+          <p className="font-semibold">{changelog.title}</p>
+          <ul className="list-disc list-inside space-y-1 ml-2">
+            {changelog.items.map((item, index) => (
+              <li key={index}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type ExamHistoryCard = {
   id: string;
@@ -29,6 +53,26 @@ function readSubjects(): Subject[] {
   }
 }
 
+// Helper function to calculate days left until the next exam
+function getDaysUntilNextExam(examDates?: Array<{ date: string; name?: string }>): number | null {
+  if (!examDates || examDates.length === 0) return null;
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const upcoming = examDates
+    .map(ed => {
+      const examDate = new Date(ed.date);
+      examDate.setHours(0, 0, 0, 0);
+      return examDate;
+    })
+    .filter(d => d >= now)
+    .sort((a, b) => a.getTime() - b.getTime());
+  if (upcoming.length === 0) return null;
+  const nextExam = upcoming[0];
+  const diffTime = nextExam.getTime() - now.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return diffDays;
+}
+
 export default function Page() {
   return (
     <Suspense fallback={null}>
@@ -41,6 +85,8 @@ function WelcomeMessage() {
   const [welcomeText, setWelcomeText] = useState("");
   const [aiName, setAiName] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const [inputFocused, setInputFocused] = useState(false);
   const hasStreamed = useRef(false);
 
   useEffect(() => {
@@ -54,13 +100,18 @@ function WelcomeMessage() {
 
       const generateWelcome = async () => {
         try {
-          // Fetch user info including lastLoginAt
+          // Fetch user info including lastLoginAt and preferredTitle
           let lastLoginAt: string | null = null;
+          let preferredTitle: string | null = null;
           try {
             const meRes = await fetch("/api/me", { credentials: "include" });
             const meData = await meRes.json().catch(() => ({}));
             if (meData?.user?.lastLoginAt) {
               lastLoginAt = meData.user.lastLoginAt;
+            }
+            const prefs = meData?.user?.preferences;
+            if (prefs && typeof prefs === "object" && prefs.preferredTitle) {
+              preferredTitle = prefs.preferredTitle;
             }
           } catch {}
 
@@ -90,6 +141,7 @@ function WelcomeMessage() {
               deviceType,
               userAgent: ua,
               lastLoginAt,
+              preferredTitle,
             }),
           });
 
@@ -196,6 +248,24 @@ function WelcomeMessage() {
     return parts.length > 0 ? parts : text;
   };
 
+  const handleSendMessage = () => {
+    const text = inputValue.trim();
+    if (!text || !welcomeText) return;
+    
+    // Dispatch event to open chat with welcome message and user message
+    const event = new CustomEvent('synapse:open-chat-with-message', {
+      detail: {
+        welcomeMessage: welcomeText,
+        welcomeName: aiName || 'Chad',
+        userMessage: text,
+      }
+    });
+    document.dispatchEvent(event);
+    
+    setInputValue("");
+    setInputFocused(false);
+  };
+
   return (
     <div className="mx-auto mb-6 w-full max-w-5xl">
       {aiName && (
@@ -211,6 +281,29 @@ function WelcomeMessage() {
           )}
         </div>
       </div>
+      {welcomeText && !isStreaming && (
+        <div className="mt-3 w-full max-w-2xl">
+          <input
+            type="text"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSendMessage();
+              }
+            }}
+            placeholder="Type a message..."
+            className={`w-full px-3 py-2 rounded-lg border transition-all ${
+              inputFocused
+                ? 'border-[var(--accent-cyan)]/40 bg-[var(--background)]/90 text-[var(--foreground)]'
+                : 'border-[var(--foreground)]/10 bg-[var(--background)]/30 text-[var(--foreground)]/40'
+            } placeholder:text-[var(--foreground)]/20 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/30`}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -231,6 +324,7 @@ function Home() {
   const [examHistory, setExamHistory] = useState<ExamHistoryCard[]>([]);
   const [loadingExamHistory, setLoadingExamHistory] = useState(false);
   const [examMenuOpenFor, setExamMenuOpenFor] = useState<string | null>(null);
+  const [examDateUpdateTrigger, setExamDateUpdateTrigger] = useState(0); // Force re-render when exam dates change
   
   // Check authentication and sync subjects from server
   useEffect(() => {
@@ -289,6 +383,21 @@ function Home() {
     setSubjects(filteredSubjects);
   }, []);
 
+  // Listen for exam date updates to refresh UI
+  useEffect(() => {
+    const handleExamDateUpdate = () => {
+      // Force re-render by updating trigger state and subjects state
+      setExamDateUpdateTrigger(prev => prev + 1);
+      const allSubjects = readSubjects();
+      const filteredSubjects = allSubjects.filter((s) => s.slug !== "quicklearn");
+      setSubjects([...filteredSubjects]);
+    };
+    window.addEventListener('synapse:exam-date-updated', handleExamDateUpdate);
+    return () => {
+      window.removeEventListener('synapse:exam-date-updated', handleExamDateUpdate);
+    };
+  }, []);
+
   // Close dropdown when clicking outside
   useEffect(() => {
     if (!menuOpenFor) return;
@@ -309,6 +418,44 @@ function Home() {
       setQuickLearnOpen(true);
     }
   }, [searchParams]);
+
+  // Listen for course creation actions from Chad
+  useEffect(() => {
+    const handleCreateCourse = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { name, syllabus } = customEvent.detail || {};
+      if (name) {
+        setCreateOpen(true);
+        // Store the course details to pre-fill the modal
+        (window as any).__pendingCourseCreate = { name, syllabus };
+      }
+    };
+
+    const handleCreateCourseWithFiles = async (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { files, name, syllabus } = customEvent.detail || {};
+      if (files && Array.isArray(files) && files.length > 0) {
+        // Store files to be processed when createCourse is available
+        (window as any).__pendingCourseFiles = { files, name: name || 'New Course', syllabus: syllabus || '' };
+        // Trigger a custom event that will be handled after createCourse is defined
+        document.dispatchEvent(new CustomEvent('synapse:process-pending-course-files'));
+      }
+    };
+
+    const handleOpenCourseModal = () => {
+      setCreateOpen(true);
+    };
+
+    document.addEventListener('synapse:create-course', handleCreateCourse as EventListener);
+    document.addEventListener('synapse:create-course-with-files', handleCreateCourseWithFiles as EventListener);
+    document.addEventListener('synapse:open-course-modal', handleOpenCourseModal);
+    
+    return () => {
+      document.removeEventListener('synapse:create-course', handleCreateCourse as EventListener);
+      document.removeEventListener('synapse:create-course-with-files', handleCreateCourseWithFiles as EventListener);
+      document.removeEventListener('synapse:open-course-modal', handleOpenCourseModal);
+    };
+  }, []);
 
   useEffect(() => {
     if (checkingAuth) return;
@@ -369,6 +516,33 @@ function Home() {
       cancelled = true;
     };
   }, [checkingAuth, isAuthenticated]);
+
+  // Store createCourse function reference (must be before early returns)
+  const createCourseRef = useRef<((name: string, syllabus: string, files: File[], preferredLanguage?: string) => Promise<void>) | null>(null);
+  
+  // Handle pending course files from chat (must be before early returns)
+  useEffect(() => {
+    const handleProcessPendingFiles = async () => {
+      const pending = (window as any).__pendingCourseFiles;
+      if (pending && pending.files && Array.isArray(pending.files) && pending.files.length > 0) {
+        delete (window as any).__pendingCourseFiles;
+        // Use the ref to call createCourse
+        if (createCourseRef.current) {
+          try {
+            await createCourseRef.current(pending.name, pending.syllabus, pending.files);
+          } catch (err) {
+            console.error('Failed to create course with files:', err);
+            alert('Failed to create course. Please try again.');
+          }
+        }
+      }
+    };
+
+    document.addEventListener('synapse:process-pending-course-files', handleProcessPendingFiles);
+    return () => {
+      document.removeEventListener('synapse:process-pending-course-files', handleProcessPendingFiles);
+    };
+  }, []);
 
   // Show login page if not authenticated
   // Don't show spinner while checking auth - let Shell's LoadingScreen handle it
@@ -613,6 +787,10 @@ function Home() {
     }
   };
 
+  // Update the ref and window property with createCourse function (runs after createCourse is defined)
+  createCourseRef.current = createCourse;
+  (window as any).__createCourseFn = createCourse;
+
   const createCourseFromFiles = async (files: File[]) => {
     if (files.length === 0) return;
 
@@ -706,7 +884,26 @@ function Home() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] px-6 pt-10 pb-4">
+    <div 
+      className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] px-6 pt-10 pb-4 relative"
+      style={{
+        backgroundImage: 'url(/spinner.png)',
+        backgroundSize: '800px 800px',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundAttachment: 'fixed',
+      }}
+    >
+      {/* Background overlay to make content readable */}
+      <div 
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundColor: 'var(--background)',
+          opacity: 0.95,
+          zIndex: 0,
+        }}
+      />
+      <div className="relative z-10">
       <WelcomeMessage />
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
         <h1 className="text-xl font-semibold text-[var(--foreground)]">Your subjects</h1>
@@ -744,8 +941,11 @@ function Home() {
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold leading-snug truncate">{s.name}</div>
                 {(() => {
+                  // Use examDateUpdateTrigger to force re-render when exam dates change
+                  const _ = examDateUpdateTrigger;
                   const data = loadSubjectData(s.slug);
                   const topicCount = data?.topics?.length || 0;
+                  const daysLeft = getDaysUntilNextExam(data?.examDates);
                   // Try to get createdAt from subject (if from server) or use current date as fallback
                   const createdAt = (s as any).createdAt || null;
                   return (
@@ -755,8 +955,15 @@ function Home() {
                           {new Date(createdAt).toLocaleString(undefined, { dateStyle: "medium" })}
                         </div>
                       )}
-                      <div className="mt-3 text-xs text-[var(--foreground)]/20">
-                        {topicCount} topic{topicCount === 1 ? "" : "s"}
+                      <div className="mt-3 flex items-center gap-3 flex-wrap">
+                        <div className="text-xs text-[var(--foreground)]/20">
+                          {topicCount} topic{topicCount === 1 ? "" : "s"}
+                        </div>
+                        {daysLeft !== null && (
+                          <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-medium bg-[var(--foreground)]/5 border border-[var(--foreground)]/15 text-[var(--foreground)]/70">
+                            <span>{daysLeft} day{daysLeft === 1 ? '' : 's'} left</span>
+                          </div>
+                        )}
                       </div>
                     </>
                   );
@@ -1003,12 +1210,14 @@ function Home() {
       {/* Note from developer and Latest changes */}
       <div className="mx-auto mt-8 w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Info box */}
-        <div className="relative">
-          {/* Animated gradient glow shadow behind the box */}
-          <div className="absolute -inset-2 rounded-2xl bg-gradient-to-r from-[var(--accent-cyan)]/60 via-[var(--accent-pink)]/60 to-[var(--accent-cyan)]/60 bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] blur-xl -z-10 pointer-events-none" />
+        <div className="relative z-0">
           {/* Dark box on top */}
           <div className="relative rounded-2xl bg-[var(--background)] p-6 shadow-[0_2px_8px_rgba(0,0,0,0.7)] z-0">
-            <div className="text-sm text-[var(--foreground)] leading-relaxed space-y-2">
+            {/* Animated gradient glow shadow behind the box - shorter for info box */}
+            <div className="absolute top-0 left-0 right-0 bottom-0 -m-[0.075rem] rounded-2xl bg-gradient-to-r from-[var(--accent-cyan)]/30 via-[var(--accent-pink)]/30 to-[var(--accent-cyan)]/30 bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] blur-[4.8px] -z-10 pointer-events-none" />
+            {/* Overlay to cover glow, same shape as box - above both glows */}
+            <div className="absolute top-0 left-0 right-0 bottom-0 rounded-2xl bg-[var(--background)] opacity-100 z-50 pointer-events-none" />
+            <div className="relative z-[60] text-sm text-[var(--foreground)] leading-relaxed space-y-2">
               <p className="font-semibold">Hallo, Det som funkar är:</p>
               <ul className="list-disc list-inside space-y-1 ml-2">
                 <li>lägga till kurser här.</li>
@@ -1024,26 +1233,7 @@ function Home() {
         </div>
 
         {/* Latest changes box */}
-        <div className="relative">
-          {/* Animated gradient glow shadow behind the box */}
-          <div className="absolute -inset-2 rounded-2xl bg-gradient-to-r from-[var(--accent-cyan)]/60 via-[var(--accent-pink)]/60 to-[var(--accent-cyan)]/60 bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] blur-xl -z-10 pointer-events-none" />
-          {/* Dark box on top */}
-          <div className="relative rounded-2xl bg-[var(--background)] p-6 shadow-[0_2px_8px_rgba(0,0,0,0.7)] z-0">
-            <div className="text-sm text-[var(--foreground)] leading-relaxed space-y-2">
-              <p className="font-semibold">Senaste ändringar:</p>
-              <ul className="list-disc list-inside space-y-1 ml-2">
-                <li>Bättre rendering av lektioner.</li>
-                <li>Bättre exam snipe.</li>
-                <li>La till datum för vilken version som används.</li>
-                <li>La till prenumerations nivåer. Använd BETATEST (kolla inställningar).</li>
-                <li>Förbättrad kursbox design som matchar exam snipe.</li>
-                <li>La till skapelsedatum och antal ämnen i kursboxar.</li>
-                <li>Fixade så att prenumerationsnivå laddas direkt vid sidladdning.</li>
-                <li>La till knapp för att ta bort tester-prenumeration.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
+        <ChangelogBox />
       </div>
 
       <CourseCreateModal
@@ -1209,6 +1399,7 @@ function Home() {
           </div>
         );
       })()}
+      </div>
     </div>
   );
 }

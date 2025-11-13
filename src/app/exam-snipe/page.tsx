@@ -64,7 +64,7 @@ function LoadingScreen() {
       </div>
 
       {/* Spinning gradient ring - centered */}
-      <div className="logo-wrap" style={{ width: 240, aspectRatio: "1 / 1", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="logo-wrap" style={{ width: 240, aspectRatio: "1 / 1", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center", marginTop: "-15vh" }}>
         <div style={{ transform: "scale(1.3)", transformOrigin: "center" }}>
           <img
             src="/spinner.png"
@@ -463,9 +463,45 @@ function ExamSnipeInner() {
         }, {})
       : (selectedGeneratedRaw as Record<string, GeneratedLesson>) || {};
 
+  const [autoStartPending, setAutoStartPending] = useState(false);
+  const handleExamSnipeRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     setIsClient(true);
+    
+    // Check for pending exam files from chat
+    const pendingFiles = (window as any).__pendingExamFiles;
+    if (pendingFiles && Array.isArray(pendingFiles) && pendingFiles.length > 0) {
+      // Clear any existing files first
+      setExamFiles([]);
+      // Then set new files after a brief delay to ensure state is reset
+      setTimeout(() => {
+        setExamFiles(pendingFiles);
+        // Clear the pending files
+        delete (window as any).__pendingExamFiles;
+        // Set flag to auto-start exam snipe
+        setAutoStartPending(true);
+      }, 50);
+    }
   }, []);
+
+  // Store function reference after it's defined
+  useEffect(() => {
+    handleExamSnipeRef.current = handleExamSnipe;
+  });
+
+  // Auto-start exam snipe when files are loaded from chat
+  useEffect(() => {
+    if (autoStartPending && examFiles.length > 0 && !examAnalyzing && handleExamSnipeRef.current) {
+      setAutoStartPending(false);
+      // Auto-start exam snipe after a short delay to ensure state is set
+      setTimeout(() => {
+        if (handleExamSnipeRef.current) {
+          handleExamSnipeRef.current();
+        }
+      }, 100);
+    }
+  }, [autoStartPending, examFiles.length, examAnalyzing]);
 
   useEffect(() => {
     setLessonGenerating({});
@@ -619,7 +655,9 @@ function ExamSnipeInner() {
     
     let animationId: number | null = null;
     let shimmerAnimation: number | null = null;
-    const fileNames = examFiles.map((file) => file.name);
+    // Capture files and names before clearing
+    const filesToProcess = [...examFiles];
+    const fileNames = filesToProcess.map((file) => file.name);
 
     try {
       setExamAnalyzing(true);
@@ -627,13 +665,15 @@ function ExamSnipeInner() {
       setStreamingText("");
       setActiveHistoryMeta(null);
       setCurrentFileNames(fileNames);
+      // Clear files immediately when starting new analysis
+      setExamFiles([]);
 
       // Dynamic progress based on streaming data
       let streamStartTime: number | null = null;
       
       console.log('=== FRONTEND: EXTRACTING TEXT FROM FILES ===');
-      console.log(`Processing ${examFiles.length} files:`);
-      examFiles.forEach((file, i) => {
+      console.log(`Processing ${filesToProcess.length} files:`);
+      filesToProcess.forEach((file, i) => {
         console.log(`  File ${i + 1}: ${file.name} (${file.size} bytes, ${file.type})`);
       });
 
@@ -641,8 +681,8 @@ function ExamSnipeInner() {
       console.log('Starting client-side text extraction...');
       const examTexts: Array<{name: string, text: string}> = [];
 
-      for (let i = 0; i < examFiles.length; i++) {
-        const file = examFiles[i];
+      for (let i = 0; i < filesToProcess.length; i++) {
+        const file = filesToProcess[i];
         console.log(`Extracting text from ${file.name}...`);
 
         let extractedText = '';
@@ -1185,8 +1225,17 @@ function ExamSnipeInner() {
                 <GlowSpinner size={160} ariaLabel="Analyzing" idSuffix="exam" />
                 
                   <div className="text-center space-y-4">
-                    <div className="text-lg font-semibold text-[var(--foreground)] mb-1">Analyzing Exams...</div>
-                    <div className="text-sm text-[var(--foreground)]/70">This can take up to 1 minute</div>
+                    {progress >= 100 ? (
+                      <>
+                        <div className="text-lg font-semibold text-[var(--foreground)] mb-1">Finished!</div>
+                        <div className="text-sm text-[var(--foreground)]/70">Analysis complete</div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-lg font-semibold text-[var(--foreground)] mb-1">Analyzing Exams...</div>
+                        <div className="text-sm text-[var(--foreground)]/70">This can take up to 1 minute</div>
+                      </>
+                    )}
                   
                   {/* Streaming AI output */}
                   {streamingText && (

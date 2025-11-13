@@ -70,6 +70,8 @@ export default function SettingsModal({
   const [code, setCode] = useState("");
   const [processing, setProcessing] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [preferredTitle, setPreferredTitle] = useState<string>("");
+  const [customTitle, setCustomTitle] = useState<string>("");
 
   // Update subscription level when prop changes
   useEffect(() => {
@@ -101,11 +103,28 @@ export default function SettingsModal({
           if (data?.user?.subscriptionLevel && subscriptionLevelProp === "Free") {
             setSubscriptionLevel(data.user.subscriptionLevel);
           }
+          // Set preferred title from preferences
+          const prefs = data?.user?.preferences;
+          if (prefs && typeof prefs === "object" && prefs.preferredTitle) {
+            const title = prefs.preferredTitle;
+            // Check if it's a custom title (not in the standard list)
+            const standardTitles = ["Sir", "Ma'am", "Miss", "Madam", "Mr", "Mrs", "Ms"];
+            if (standardTitles.includes(title)) {
+              setPreferredTitle(title);
+            } else {
+              setPreferredTitle("Custom");
+              setCustomTitle(title);
+            }
+          } else {
+            setPreferredTitle("");
+          }
         })
         .catch(() => {});
     } else {
       setUsername(null);
       setSubscriptionLevel("Free");
+      setPreferredTitle("");
+      setCustomTitle("");
     }
   }, [open, isAuthenticated, subscriptionLevelProp]);
 
@@ -230,6 +249,100 @@ export default function SettingsModal({
               {subscriptionLevel === "Paid" ? "Manage Subscription" : "Upgrade"}
             </button>
           )}
+        </div>
+      )}
+
+      {/* Preferred Title */}
+      {isAuthenticated && (
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-[var(--foreground)] mb-2">
+            Preferred Title
+          </label>
+          <div className="space-y-2">
+            <select
+              value={preferredTitle}
+              onChange={async (e) => {
+                const newTitle = e.target.value;
+                setPreferredTitle(newTitle);
+                if (newTitle !== "Custom") {
+                  setCustomTitle("");
+                  // Auto-save when selecting a standard title
+                  try {
+                    await fetch("/api/preferred-title", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      credentials: "include",
+                      body: JSON.stringify({
+                        preferredTitle: newTitle,
+                      }),
+                    });
+                  } catch (err: any) {
+                    console.error("Failed to save preferred title:", err);
+                  }
+                }
+              }}
+              className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+            >
+              <option value="">None</option>
+              <option value="Sir">Sir</option>
+              <option value="Ma'am">Ma'am</option>
+              <option value="Miss">Miss</option>
+              <option value="Madam">Madam</option>
+              <option value="Mr">Mr</option>
+              <option value="Mrs">Mrs</option>
+              <option value="Ms">Ms</option>
+              <option value="Custom">Custom</option>
+            </select>
+            {preferredTitle === "Custom" && (
+              <input
+                type="text"
+                value={customTitle}
+                onChange={(e) => setCustomTitle(e.target.value)}
+                onBlur={async () => {
+                  // Auto-save when user finishes typing custom title
+                  if (customTitle.trim()) {
+                    try {
+                      await fetch("/api/preferred-title", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        credentials: "include",
+                        body: JSON.stringify({
+                          preferredTitle: "Custom",
+                          customTitle: customTitle.trim(),
+                        }),
+                      });
+                    } catch (err: any) {
+                      console.error("Failed to save preferred title:", err);
+                    }
+                  }
+                }}
+                onKeyDown={async (e) => {
+                  // Also save on Enter key
+                  if (e.key === "Enter" && customTitle.trim()) {
+                    e.currentTarget.blur();
+                    try {
+                      await fetch("/api/preferred-title", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        credentials: "include",
+                        body: JSON.stringify({
+                          preferredTitle: "Custom",
+                          customTitle: customTitle.trim(),
+                        }),
+                      });
+                    } catch (err: any) {
+                      console.error("Failed to save preferred title:", err);
+                    }
+                  }
+                }}
+                placeholder="Enter custom title"
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
+              />
+            )}
+          </div>
+          <p className="mt-1 text-xs text-[var(--foreground)]/60">
+            How you'd like to be addressed by Chad
+          </p>
         </div>
       )}
 

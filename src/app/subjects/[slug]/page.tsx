@@ -68,6 +68,7 @@ export default function SubjectPage() {
   const [starredFlashcards, setStarredFlashcards] = useState<Set<string>>(new Set());
   const [showOnlyStarred, setShowOnlyStarred] = useState(false);
   const [isShuffleActive, setIsShuffleActive] = useState(false);
+  const [examDateUpdateTrigger, setExamDateUpdateTrigger] = useState(0); // Force re-render when exam dates change
 
   function getRandomCardIndex(filteredFlashcards: typeof allFlashcards, currentIndex: number): number {
     if (filteredFlashcards.length <= 1) return currentIndex;
@@ -77,6 +78,25 @@ export default function SubjectPage() {
     } while (newIndex === currentIndex && filteredFlashcards.length > 1);
     return newIndex;
   }
+
+  // Listen for exam date updates to refresh UI
+  useEffect(() => {
+    const handleExamDateUpdate = (e: CustomEvent) => {
+      if (e.detail?.slug === slug) {
+        // Force re-render by updating trigger state
+        setExamDateUpdateTrigger(prev => prev + 1);
+        // Also reload subject name in case it changed
+        const saved = loadSubjectData(slug);
+        if (saved) {
+          setSubjectName(saved.subject || slug);
+        }
+      }
+    };
+    window.addEventListener('synapse:exam-date-updated', handleExamDateUpdate as EventListener);
+    return () => {
+      window.removeEventListener('synapse:exam-date-updated', handleExamDateUpdate as EventListener);
+    };
+  }, [slug]);
 
   useEffect(() => {
     const found = readSubjects().find((s) => s.slug === slug);
@@ -89,6 +109,58 @@ export default function SubjectPage() {
         setStarredFlashcards(new Set(JSON.parse(saved)));
       }
     } catch {}
+    
+    // Check for pending flashcard open from navigation
+    const pendingFlashcardOpen = typeof window !== 'undefined' ? sessionStorage.getItem('__pendingFlashcardOpen') : null;
+    if (pendingFlashcardOpen === slug) {
+      // Clear the pending flag immediately
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('__pendingFlashcardOpen');
+      }
+      // Wait for data to load, then open flashcards
+      // Use a more aggressive retry mechanism
+      const checkAndOpen = () => {
+        const saved = loadSubjectData(slug);
+        if (saved && saved.nodes && Object.keys(saved.nodes).length > 0) {
+          // Data is loaded, open flashcards immediately
+          collectAllFlashcards();
+        } else {
+          // Retry more frequently if data isn't loaded yet (max 10 retries = 2 seconds)
+          let retryCount = 0;
+          const maxRetries = 10;
+          const retryInterval = setInterval(() => {
+            retryCount++;
+            const saved = loadSubjectData(slug);
+            if (saved && saved.nodes && Object.keys(saved.nodes).length > 0) {
+              clearInterval(retryInterval);
+              collectAllFlashcards();
+            } else if (retryCount >= maxRetries) {
+              clearInterval(retryInterval);
+              // If still not loaded after max retries, try opening anyway
+              collectAllFlashcards();
+            }
+          }, 200);
+        }
+      };
+      // Start checking immediately, then also check after a short delay
+      checkAndOpen();
+      setTimeout(checkAndOpen, 100);
+    }
+    
+    // Listen for flashcard modal open event
+    const handleOpenFlashcards = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const eventSlug = customEvent.detail?.slug;
+      if (eventSlug === slug) {
+        collectAllFlashcards();
+      }
+    };
+    
+    document.addEventListener('synapse:open-flashcards', handleOpenFlashcards as EventListener);
+    return () => {
+      document.removeEventListener('synapse:open-flashcards', handleOpenFlashcards as EventListener);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   // Adjust index when filter changes
@@ -114,7 +186,16 @@ export default function SubjectPage() {
       setCourseNotes(saved.course_notes || "");
       setProgress(saved.progress || {});
       setNodes(saved.nodes || {} as any);
-      setTree(saved.tree || { subject: saved.subject || slug, topics: [] });
+      // Build tree from topics if tree doesn't exist or has no topics
+      if (saved.tree && saved.tree.topics && saved.tree.topics.length > 0) {
+        setTree(saved.tree);
+      } else {
+        // Create tree from topics array
+        setTree({ 
+          subject: saved.subject || slug, 
+          topics: saved.topics.map((t: any) => ({ name: t.name || t, subtopics: [] })) 
+        });
+      }
     } else if (saved?.tree) {
       // legacy fallback: flatten top-level names as topics with equal coverage
       const legacyTopics = (saved.tree?.topics || []).map((t: any) => ({ name: t.name, summary: "", coverage: Math.round(100 / Math.max(1, saved.tree?.topics?.length || 1)) }));
@@ -129,6 +210,19 @@ export default function SubjectPage() {
     // Load reviews
     setReviewsDue(getLessonsDueForReview(slug));
     setUpcomingReviews(getUpcomingReviews(slug, 7));
+    
+    // Check if we need to open flashcards after data is loaded
+    const pendingFlashcardOpen = typeof window !== 'undefined' ? sessionStorage.getItem('__pendingFlashcardOpen') : null;
+    if (pendingFlashcardOpen === slug && saved && saved.nodes && Object.keys(saved.nodes).length > 0) {
+      // Clear the pending flag
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('__pendingFlashcardOpen');
+      }
+      // Open flashcards immediately since data is now loaded
+      setTimeout(() => {
+        collectAllFlashcards();
+      }, 50);
+    }
   }, [slug]);
 
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -403,14 +497,55 @@ export default function SubjectPage() {
           </div>
         )}
 
+        {/* Course Header with Exam Date */}
+        {(() => {
+          // Use examDateUpdateTrigger to force re-render when exam dates change
+          const _ = examDateUpdateTrigger;
+          const saved = loadSubjectData(slug);
+          const daysLeft = (() => {
+            if (!saved?.examDates || saved.examDates.length === 0) return null;
+            const now = new Date();
+            now.setHours(0, 0, 0, 0);
+            const upcoming = saved.examDates
+              .map(ed => {
+                const examDate = new Date(ed.date);
+                examDate.setHours(0, 0, 0, 0);
+                return examDate;
+              })
+              .filter(d => d >= now)
+              .sort((a, b) => a.getTime() - b.getTime());
+            if (upcoming.length === 0) return null;
+            const nextExam = upcoming[0];
+            const diffTime = nextExam.getTime() - now.getTime();
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            return diffDays;
+          })();
+          return (
+            <div className="mb-6 flex items-center justify-between gap-4">
+              <h1 className="text-2xl font-bold text-[var(--foreground)]">{subjectName || slug}</h1>
+              {daysLeft !== null && (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--foreground)]/5 border border-[var(--foreground)]/15 text-[var(--foreground)]/70">
+                  <span>{daysLeft} day{daysLeft === 1 ? '' : 's'} left</span>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {activeTab === 'tree' && (
           <div className="mt-4">
-            <div className="mb-4">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row">
               <button
                 onClick={collectAllFlashcards}
                 className="w-full rounded-xl bg-gradient-to-r from-[var(--accent-cyan)]/10 to-[var(--accent-pink)]/10 hover:from-[var(--accent-cyan)]/20 hover:to-[var(--accent-pink)]/20 transition-all py-3 px-6 flex items-center justify-center text-base font-semibold text-[var(--foreground)]"
               >
                 Flashcards
+              </button>
+              <button
+                onClick={() => router.push(`/subjects/${slug}/practice`)}
+                className="w-full rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 hover:bg-[var(--background)]/70 transition-all py-3 px-6 flex items-center justify-center text-base font-semibold text-[var(--foreground)]"
+              >
+                Practice
               </button>
             </div>
               <div className="mb-3 flex items-center justify-between">

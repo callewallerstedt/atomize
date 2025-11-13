@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import Modal from "@/components/Modal";
 
 export default function CourseCreateModal({ open, onClose, onCreate }: { open: boolean; onClose: () => void; onCreate: (name: string, syllabus: string, files: File[], preferredLanguage?: string) => void }) {
@@ -10,6 +10,24 @@ export default function CourseCreateModal({ open, onClose, onCreate }: { open: b
   const [isDragging, setIsDragging] = useState(false);
   const [preferredLanguage, setPreferredLanguage] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Pre-fill form when opened via action
+  useEffect(() => {
+    if (open && typeof window !== 'undefined') {
+      const pending = (window as any).__pendingCourseCreate;
+      if (pending) {
+        setName(pending.name || "");
+        setSyllabus(pending.syllabus || "");
+        delete (window as any).__pendingCourseCreate;
+      }
+    } else if (!open) {
+      // Reset form when closed
+      setName("");
+      setSyllabus("");
+      setFiles([]);
+      setPreferredLanguage("");
+    }
+  }, [open]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();

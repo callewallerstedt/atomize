@@ -105,7 +105,7 @@ function LoadingScreen({ onComplete }: { onComplete: () => void }) {
 
 
       {/* Spinning gradient ring - same as login page */}
-      <div className="logo-wrap mb-2" style={{ width: 240, aspectRatio: "1 / 1", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="logo-wrap mb-2" style={{ width: 240, aspectRatio: "1 / 1", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center", marginTop: "-15vh" }}>
         <div style={{ transform: "scale(1.3)", transformOrigin: "center" }}>
           <img
             src="/spinner.png"
@@ -420,20 +420,149 @@ function PomodoroTimer() {
   );
 }
 
+type ChatMessage = {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  uiElements?: Array<{
+    type: 'button' | 'file_upload';
+    id: string;
+    label?: string;
+    action?: string;
+    params?: Record<string, string>;
+    message?: string;
+  }>;
+  isLoading?: boolean; // For showing loading spinner
+  hidden?: boolean; // For messages that should be in context but not displayed
+};
+
 type ChatHistory = {
   id: string;
   title: string;
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  messages: ChatMessage[];
   timestamp: number;
 };
+
+// File upload component
+function FileUploadArea({ 
+  uploadId, 
+  message, 
+  files, 
+  onFilesChange, 
+  onGenerate,
+  buttonLabel,
+  action,
+  status
+}: { 
+  uploadId: string; 
+  message?: string; 
+  files: File[]; 
+  onFilesChange: (files: File[]) => void;
+  onGenerate: () => void;
+  buttonLabel?: string;
+  action?: string;
+  status?: 'idle' | 'ready' | 'processing' | 'success';
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+  
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+  
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    if (droppedFiles.length > 0) {
+      onFilesChange(droppedFiles);
+    }
+  };
+  
+  return (
+    <div className="space-y-2">
+      <div
+        onClick={() => fileInputRef.current?.click()}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`rounded-lg border-2 border-dashed p-4 cursor-pointer transition-colors ${
+          isDragging
+            ? 'border-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10'
+            : 'border-[var(--accent-cyan)]/40 bg-[var(--background)]/60 hover:border-[var(--accent-cyan)]/60 hover:bg-[var(--background)]/80'
+        }`}
+      >
+        <div className="text-xs text-[var(--foreground)]/70 text-center">
+          {isDragging ? 'Drop files here' : (message || 'Upload files or drag and drop')}
+        </div>
+        {files.length > 0 && (
+          <div className="mt-2 text-xs text-[var(--foreground)]/60">
+            {files.length} file{files.length !== 1 ? 's' : ''} selected
+          </div>
+        )}
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        accept=".pdf,.txt,.md,.docx,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        onChange={(e) => {
+          const selectedFiles = Array.from(e.target.files || []);
+          if (selectedFiles.length > 0) {
+            onFilesChange(selectedFiles);
+          }
+        }}
+      />
+      {files.length > 0 && (
+        <button
+          onClick={onGenerate}
+          className="w-full inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
+          style={{ color: 'white' }}
+        >
+          {buttonLabel || 'Create'}
+        </button>
+      )}
+      {status === 'processing' && (
+        <div className="flex items-center justify-center gap-2 text-xs text-[var(--foreground)]/60">
+          <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+          </svg>
+          Starting...
+        </div>
+      )}
+      {status === 'success' && (
+        <div className="flex items-center justify-center gap-2 text-xs text-[var(--accent-cyan)]/90">
+          <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-7.25 7.25a1 1 0 01-1.414 0l-3.25-3.25a1 1 0 011.414-1.414L8.5 11.086l6.543-6.543a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+          Started Exam Analysis
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ChatDropdown() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<Record<string, File[]>>({});
+  const [uploadStatus, setUploadStatus] = useState<Record<string, 'idle' | 'ready' | 'processing' | 'success'>>({});
+  const [fetchingContext, setFetchingContext] = useState(false);
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 480, h: 460 });
   const [resizing, setResizing] = useState(false);
   const [start, setStart] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -442,10 +571,12 @@ function ChatDropdown() {
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const chatDropdownRef = useRef<HTMLDivElement>(null);
   const chatButtonRef = useRef<HTMLButtonElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
   const lastSavedRef = useRef<string>('');
   const isLoadingFromHistoryRef = useRef<boolean>(false);
+  const pendingWelcomeMessageRef = useRef<{ welcomeMessage: string; userMessage: string } | null>(null);
 
   // Load chat history from localStorage
   useEffect(() => {
@@ -462,13 +593,81 @@ function ChatDropdown() {
     const handleOpenChat = () => {
       setOpen(true);
       requestAnimationFrame(() => {
-        chatButtonRef.current?.focus();
+        chatInputRef.current?.focus();
+      });
+    };
+
+    const handleOpenChatWithMessage = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { welcomeMessage, welcomeName, userMessage } = customEvent.detail || {};
+      
+      if (welcomeMessage && userMessage) {
+        // Set messages with welcome message and user message
+        setMessages([
+          { role: 'assistant', content: welcomeMessage },
+          { role: 'user', content: userMessage }
+        ]);
+        setOpen(true);
+        // Store for processing in next effect
+        pendingWelcomeMessageRef.current = { welcomeMessage, userMessage };
+      } else {
+        setOpen(true);
+      }
+      requestAnimationFrame(() => {
+        chatInputRef.current?.focus();
       });
     };
 
     document.addEventListener('synapse:open-chat', handleOpenChat as EventListener);
-    return () => document.removeEventListener('synapse:open-chat', handleOpenChat as EventListener);
+    document.addEventListener('synapse:open-chat-with-message', handleOpenChatWithMessage as EventListener);
+    return () => {
+      document.removeEventListener('synapse:open-chat', handleOpenChat as EventListener);
+      document.removeEventListener('synapse:open-chat-with-message', handleOpenChatWithMessage as EventListener);
+    };
   }, []);
+
+  // Global keyboard listener to open chat when typing starts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if chat is already open
+      if (open) return;
+
+      // Check if user is already in a text input
+      const activeElement = document.activeElement;
+      const isTextInput = activeElement && (
+        activeElement.tagName === 'INPUT' ||
+        activeElement.tagName === 'TEXTAREA' ||
+        activeElement.getAttribute('contenteditable') === 'true'
+      );
+
+      // If already in a text input, don't do anything
+      if (isTextInput) return;
+
+      // Ignore modifier keys and special keys
+      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (e.key === 'Tab' || e.key === 'Escape' || e.key === 'Enter' || e.key.length > 1) return;
+
+      // If it's a printable character, open chat and insert it
+      if (e.key.length === 1 && !e.key.match(/[\x00-\x1F]/)) {
+        e.preventDefault();
+        setOpen(true);
+        setInput(e.key);
+        requestAnimationFrame(() => {
+          chatInputRef.current?.focus();
+          // Set cursor to end
+          if (chatInputRef.current) {
+            const length = chatInputRef.current.value.length;
+            chatInputRef.current.setSelectionRange(length, length);
+          }
+        });
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
 
   // Save chat to history when a conversation is complete (not during streaming)
   useEffect(() => {
@@ -552,6 +751,1041 @@ function ChatDropdown() {
     return () => clearInterval(interval);
   }, [open, sending, messages.length]);
 
+  // Function to compress course/subject data for context (including exam snipe)
+  async function getCompressedCourseContext(): Promise<string> {
+    if (typeof window === 'undefined') return '';
+    try {
+      const subjectsRaw = localStorage.getItem('atomicSubjects');
+      if (!subjectsRaw) return '';
+      
+      const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+      const contextParts: string[] = [];
+      
+      // Fetch exam snipe history
+      let examSnipeData: any[] = [];
+      try {
+        const examRes = await fetch('/api/exam-snipe/history', { credentials: 'include' });
+        const examJson = await examRes.json().catch(() => ({}));
+        if (examJson?.ok && Array.isArray(examJson.history)) {
+          examSnipeData = examJson.history;
+        }
+      } catch {}
+      
+      for (const subject of subjects) {
+        if (subject.slug === 'quicklearn') continue;
+        
+        const subjectDataRaw = localStorage.getItem(`atomicSubjectData:${subject.slug}`);
+        const courseInfo: string[] = [];
+        
+        // Course name, slug, and description - IMPORTANT: slug is needed for navigation
+        courseInfo.push(`Course: ${subject.name} (slug: ${subject.slug})`);
+        
+        if (subjectDataRaw) {
+          try {
+            const subjectData = JSON.parse(subjectDataRaw);
+            if (subjectData.course_context) {
+              courseInfo.push(`Description: ${subjectData.course_context.slice(0, 200)}`);
+            }
+            if (subjectData.course_quick_summary) {
+              courseInfo.push(`Summary: ${subjectData.course_quick_summary.slice(0, 200)}`);
+            }
+            
+            // Topics list - use same logic as course page
+            let topicNames: string[] = [];
+            // Prefer new topics format
+            if (subjectData.topics && Array.isArray(subjectData.topics) && subjectData.topics.length > 0) {
+              topicNames = subjectData.topics.map((t: any) => {
+                if (typeof t === 'string') return t;
+                return t.name || String(t);
+              });
+            } else if (subjectData.tree?.topics && Array.isArray(subjectData.tree.topics)) {
+              // Legacy fallback: extract from tree.topics
+              topicNames = subjectData.tree.topics.map((t: any) => {
+                if (typeof t === 'string') return t;
+                return t.name || String(t);
+              });
+            }
+            
+            if (topicNames.length > 0) {
+              // Remove duplicates and limit to what's actually displayed
+              const uniqueTopics = Array.from(new Set(topicNames)).slice(0, 50);
+              courseInfo.push(`Topics (${uniqueTopics.length}): ${uniqueTopics.join(', ')}`);
+            }
+          } catch {}
+        }
+        
+        // Check for matching exam snipe data
+        const matchingExamSnipe = examSnipeData.find((exam: any) => exam.slug === subject.slug);
+        if (matchingExamSnipe && matchingExamSnipe.results) {
+          const results = matchingExamSnipe.results;
+          const examInfo: string[] = [];
+          
+          examInfo.push(`EXAM SNIPE RESULTS:`);
+          if (results.totalExams) {
+            examInfo.push(`Total exams analyzed: ${results.totalExams}`);
+          }
+          if (results.gradeInfo) {
+            examInfo.push(`Grade info: ${results.gradeInfo.slice(0, 150)}`);
+          }
+          if (results.patternAnalysis) {
+            examInfo.push(`Pattern: ${results.patternAnalysis.slice(0, 200)}`);
+          }
+          
+          // Study order (concepts in priority order)
+          if (results.concepts && Array.isArray(results.concepts) && results.concepts.length > 0) {
+            const studyOrder = results.concepts.map((c: any, idx: number) => {
+              const name = c.name || `Concept ${idx + 1}`;
+              const desc = c.description ? ` (${c.description.slice(0, 80)})` : '';
+              return `${idx + 1}. ${name}${desc}`;
+            }).slice(0, 15).join('\n');
+            examInfo.push(`STUDY ORDER (priority):\n${studyOrder}`);
+          }
+          
+          // Common questions (top 5)
+          if (results.commonQuestions && Array.isArray(results.commonQuestions) && results.commonQuestions.length > 0) {
+            const topQuestions = results.commonQuestions.slice(0, 5).map((q: any) => {
+              const question = q.question || '';
+              const count = q.examCount || 0;
+              const points = q.averagePoints || 0;
+              return `- "${question.slice(0, 100)}" (appears in ${count} exams, avg ${points} pts)`;
+            }).join('\n');
+            examInfo.push(`Common questions:\n${topQuestions}`);
+          }
+          
+          if (examInfo.length > 0) {
+            courseInfo.push(examInfo.join('\n'));
+          }
+        }
+        
+        if (courseInfo.length > 0) {
+          contextParts.push(courseInfo.join('\n'));
+        }
+      }
+      
+      return contextParts.join('\n\n');
+    } catch {
+      return '';
+    }
+  }
+
+  // Parse UI elements and actions from Chad's messages
+  function parseUIElementsAndActions(content: string): { cleanedContent: string; uiElements: ChatMessage['uiElements']; actions: Array<{ name: string; params: Record<string, string> }> } {
+    const actionRegex = /ACTION:(\w+)(?:\|([^|]+(?:\|[^|]+)*))?/g;
+    const buttonRegex = /BUTTON:(\w+)(?:\|([^|]+(?:\|[^|]+)*))?/g;
+    const fileUploadRegex = /FILE_UPLOAD:(\w+)(?:\|([^|]+(?:\|[^|]+)*))?/g;
+    
+    const uiElements: ChatMessage['uiElements'] = [];
+    const actions: Array<{ name: string; params: Record<string, string> }> = [];
+    
+    // Parse buttons
+    let match;
+    while ((match = buttonRegex.exec(content)) !== null) {
+      const id = match[1];
+      const params: Record<string, string> = {};
+      if (match[2]) {
+        match[2].split('|').forEach(param => {
+          const colonIndex = param.indexOf(':');
+          if (colonIndex > 0) {
+            const key = param.slice(0, colonIndex).trim();
+            let value = param.slice(colonIndex + 1).trim();
+            // Clean value: remove any trailing text after whitespace/newline
+            const spaceIndex = value.search(/[\s\n\r]/);
+            if (spaceIndex > 0) {
+              value = value.slice(0, spaceIndex);
+            }
+            if (key && value) {
+              params[key] = value;
+            }
+          }
+        });
+      }
+      uiElements.push({
+        type: 'button',
+        id,
+        label: params.label || 'Button',
+        action: params.action,
+        params: Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'label' && k !== 'action'))
+      });
+    }
+    
+    // Parse file uploads
+    while ((match = fileUploadRegex.exec(content)) !== null) {
+      const id = match[1];
+      const params: Record<string, string> = {};
+      if (match[2]) {
+        match[2].split('|').forEach(param => {
+          const colonIndex = param.indexOf(':');
+          if (colonIndex > 0) {
+            const key = param.slice(0, colonIndex).trim();
+            let value = param.slice(colonIndex + 1).trim();
+            // For parameters that can contain spaces (topic, name, syllabus, message, label, buttonLabel), keep the full value
+            // For other parameters, stop at whitespace to prevent issues when action is in the middle of text
+            const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel'];
+            if (!spaceAllowedParams.includes(key)) {
+              // Clean value: remove any trailing text after whitespace/newline
+              // This prevents issues when action is in the middle of a sentence
+              const spaceIndex = value.search(/[\s\n\r]/);
+              if (spaceIndex > 0) {
+                value = value.slice(0, spaceIndex);
+              }
+            }
+            if (key && value) {
+              params[key] = value;
+            }
+          }
+        });
+      }
+      const buttonLabel = params.buttonLabel || 'Generate';
+      const action = params.action || 'generate_course';
+      uiElements.push({
+        type: 'file_upload',
+        id,
+        message: params.message || 'Upload files',
+        action, // Store action for the generate button
+        params: {
+          ...Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'message' && k !== 'action' && k !== 'buttonLabel')),
+          buttonLabel // Include buttonLabel in params so FileUploadArea can access it
+        }
+      });
+    }
+    
+    // Parse actions
+    while ((match = actionRegex.exec(content)) !== null) {
+      const actionName = match[1];
+      const params: Record<string, string> = {};
+      if (match[2]) {
+        match[2].split('|').forEach(param => {
+          const colonIndex = param.indexOf(':');
+          if (colonIndex > 0) {
+            const key = param.slice(0, colonIndex).trim();
+            let value = param.slice(colonIndex + 1).trim();
+            // For parameters that can contain spaces (topic, name, syllabus, message, etc.), keep the full value
+            // For other parameters, stop at whitespace to prevent issues when action is in the middle of text
+            const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel'];
+            if (!spaceAllowedParams.includes(key)) {
+              // Clean value: remove any trailing text after whitespace/newline
+              // This prevents issues when action is in the middle of a sentence
+              const spaceIndex = value.search(/[\s\n\r]/);
+              if (spaceIndex > 0) {
+                value = value.slice(0, spaceIndex);
+              }
+            }
+            // For slug parameters, ensure they're clean (only alphanumeric, hyphens, underscores)
+            if (key === 'slug' && value) {
+              value = value.replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+            }
+            if (key && value) {
+              params[key] = value;
+            }
+          }
+        });
+      }
+      actions.push({ name: actionName, params });
+    }
+    
+    // Remove all commands from content for display
+    const cleanedContent = content
+      .replace(actionRegex, '')
+      .replace(buttonRegex, '')
+      .replace(fileUploadRegex, '')
+      .trim();
+    
+    return { cleanedContent, uiElements, actions };
+  }
+  
+  // Execute actions
+  function executeActions(actions: Array<{ name: string; params: Record<string, string> }>) {
+    actions.forEach(action => {
+      if (action.name === 'create_course') {
+        const name = action.params.name || 'New Course';
+        const syllabus = action.params.syllabus || '';
+        document.dispatchEvent(new CustomEvent('synapse:create-course', { detail: { name, syllabus } }));
+      } else if (action.name === 'open_course_modal') {
+        document.dispatchEvent(new CustomEvent('synapse:open-course-modal'));
+      } else if (action.name === 'navigate') {
+        const path = action.params.path;
+        if (path && typeof window !== 'undefined') {
+          router.push(path);
+        }
+      } else if (action.name === 'navigate_course') {
+        let slug = action.params.slug;
+        if (slug && typeof window !== 'undefined') {
+          // If slug looks like a course name, try to resolve it to an actual slug
+          if (!slug.match(/^[a-z0-9\-_]+$/)) {
+            // This might be a course name, try to find matching slug
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                // Try exact name match first (case-insensitive)
+                const exactMatch = subjects.find(s => s.name.toLowerCase() === slug.toLowerCase());
+                if (exactMatch) {
+                  slug = exactMatch.slug;
+                } else {
+                  // Try partial match
+                  const partialMatch = subjects.find(s => s.name.toLowerCase().includes(slug.toLowerCase()) || slug.toLowerCase().includes(s.name.toLowerCase()));
+                  if (partialMatch) {
+                    slug = partialMatch.slug;
+                  }
+                }
+              }
+            } catch {}
+          }
+          // Clean slug to ensure it's valid
+          slug = slug.trim().replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+          if (slug) {
+            // Use router.push for client-side navigation (no full page reload)
+            router.push(`/subjects/${slug}`);
+          }
+        }
+      } else if (action.name === 'navigate_topic') {
+        let slug = action.params.slug?.trim();
+        const topic = action.params.topic?.trim();
+        if (slug && topic && typeof window !== 'undefined') {
+          // If slug looks like a course name, try to resolve it to an actual slug
+          if (!slug.match(/^[a-z0-9\-_]+$/)) {
+            // This might be a course name, try to find matching slug
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                // Try exact name match first (case-insensitive)
+                const exactMatch = subjects.find(s => s.name.toLowerCase() === slug.toLowerCase());
+                if (exactMatch) {
+                  slug = exactMatch.slug;
+                } else {
+                  // Try partial match
+                  const partialMatch = subjects.find(s => s.name.toLowerCase().includes(slug.toLowerCase()) || slug.toLowerCase().includes(s.name.toLowerCase()));
+                  if (partialMatch) {
+                    slug = partialMatch.slug;
+                  }
+                }
+              }
+            } catch {}
+          }
+          // Clean slug to ensure it's valid
+          slug = slug.replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+          if (slug && topic) {
+            // Use router.push for client-side navigation (no full page reload)
+            router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}`);
+          }
+        }
+      } else if (action.name === 'navigate_lesson') {
+        let slug = action.params.slug?.trim();
+        const topic = action.params.topic?.trim();
+        const lessonIndex = action.params.lessonIndex;
+        if (slug && topic && lessonIndex !== undefined && typeof window !== 'undefined') {
+          // If slug looks like a course name, try to resolve it to an actual slug
+          if (!slug.match(/^[a-z0-9\-_]+$/)) {
+            // This might be a course name, try to find matching slug
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                // Try exact name match first (case-insensitive)
+                const exactMatch = subjects.find(s => s.name.toLowerCase() === slug.toLowerCase());
+                if (exactMatch) {
+                  slug = exactMatch.slug;
+                } else {
+                  // Try partial match
+                  const partialMatch = subjects.find(s => s.name.toLowerCase().includes(slug.toLowerCase()) || slug.toLowerCase().includes(s.name.toLowerCase()));
+                  if (partialMatch) {
+                    slug = partialMatch.slug;
+                  }
+                }
+              }
+            } catch {}
+          }
+          // Clean slug to ensure it's valid
+          slug = slug.replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+          if (slug && topic) {
+            router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}/lesson/${lessonIndex}`);
+          }
+        }
+      } else if (action.name === 'open_flashcards') {
+        let slug = action.params.slug?.trim();
+        if (slug && typeof window !== 'undefined') {
+          // If slug looks like a course name, try to resolve it to an actual slug
+          if (!slug.match(/^[a-z0-9\-_]+$/)) {
+            // This might be a course name, try to find matching slug
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                // Try exact name match first (case-insensitive)
+                const exactMatch = subjects.find(s => s.name.toLowerCase() === slug.toLowerCase());
+                if (exactMatch) {
+                  slug = exactMatch.slug;
+                } else {
+                  // Try partial match
+                  const partialMatch = subjects.find(s => s.name.toLowerCase().includes(slug.toLowerCase()) || slug.toLowerCase().includes(s.name.toLowerCase()));
+                  if (partialMatch) {
+                    slug = partialMatch.slug;
+                  }
+                }
+              }
+            } catch {}
+          }
+          // Clean slug to ensure it's valid
+          slug = slug.replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+          if (slug) {
+            // Store flashcard open intent in sessionStorage
+            sessionStorage.setItem('__pendingFlashcardOpen', slug);
+            // Use router.push for client-side navigation (no full page reload)
+            router.push(`/subjects/${slug}`);
+          }
+        }
+      } else if (action.name === 'open_lesson_flashcards') {
+        let slug = action.params.slug?.trim();
+        const topic = action.params.topic?.trim();
+        const lessonIndex = action.params.lessonIndex;
+        if (slug && topic && lessonIndex !== undefined && typeof window !== 'undefined') {
+          // If slug looks like a course name, try to resolve it to an actual slug
+          if (!slug.match(/^[a-z0-9\-_]+$/)) {
+            // This might be a course name, try to find matching slug
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                // Try exact name match first (case-insensitive)
+                const exactMatch = subjects.find(s => s.name.toLowerCase() === slug.toLowerCase());
+                if (exactMatch) {
+                  slug = exactMatch.slug;
+                } else {
+                  // Try partial match
+                  const partialMatch = subjects.find(s => s.name.toLowerCase().includes(slug.toLowerCase()) || slug.toLowerCase().includes(s.name.toLowerCase()));
+                  if (partialMatch) {
+                    slug = partialMatch.slug;
+                  }
+                }
+              }
+            } catch {}
+          }
+          // Clean slug to ensure it's valid
+          slug = slug.replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+          if (slug && topic) {
+            // Navigate to lesson page first, then trigger flashcard modal
+            router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}/lesson/${lessonIndex}`);
+            // Dispatch event to open lesson flashcards modal
+            setTimeout(() => {
+              document.dispatchEvent(new CustomEvent('synapse:open-lesson-flashcards', { detail: { slug, topic, lessonIndex } }));
+            }, 500);
+          }
+        }
+      } else if (action.name === 'request_files') {
+        const message = action.params.message || 'Please upload the files I need.';
+        alert(message);
+      } else if (action.name === 'start_exam_snipe') {
+        // Navigate to exam snipe page
+        router.push('/exam-snipe');
+      } else if (action.name === 'generate_course') {
+        // Open course creation modal
+        document.dispatchEvent(new CustomEvent('synapse:open-course-modal'));
+      } else if (action.name === 'set_exam_date') {
+        let slug = action.params.slug?.trim();
+        const dateStr = action.params.date?.trim();
+        const examName = action.params.name?.trim();
+        if (slug && dateStr && typeof window !== 'undefined') {
+          // If slug looks like a course name, try to resolve it to an actual slug
+          if (!slug.match(/^[a-z0-9\-_]+$/)) {
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                const exactMatch = subjects.find(s => s.name.toLowerCase() === slug.toLowerCase());
+                if (exactMatch) {
+                  slug = exactMatch.slug;
+                } else {
+                  const partialMatch = subjects.find(s => s.name.toLowerCase().includes(slug.toLowerCase()) || slug.toLowerCase().includes(s.name.toLowerCase()));
+                  if (partialMatch) {
+                    slug = partialMatch.slug;
+                  }
+                }
+              }
+            } catch {}
+          }
+          // Clean slug
+          slug = slug.replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+          if (slug && dateStr) {
+            // Validate date format (YYYY-MM-DD)
+            const dateMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (dateMatch) {
+              try {
+                // Import loadSubjectData and saveSubjectData from storage utils
+                const { loadSubjectData, saveSubjectData } = require('@/utils/storage');
+                const data = loadSubjectData(slug);
+                if (data) {
+                  // Replace all existing exam dates with the new one (overwrite behavior)
+                  data.examDates = [{ date: dateStr, name: examName }];
+                  saveSubjectData(slug, data);
+                  // Trigger a custom event to refresh the UI
+                  window.dispatchEvent(new CustomEvent('synapse:exam-date-updated', { detail: { slug } }));
+                }
+              } catch (err) {
+                console.error('Failed to set exam date:', err);
+              }
+            }
+          }
+        }
+      } else if (action.name === 'fetch_practice_logs') {
+        let slug = action.params.slug?.trim();
+        const originalInput = slug;
+        if (slug && typeof window !== 'undefined') {
+          // Try to resolve course name to slug
+          if (!slug.match(/^[a-z0-9\-_]+$/)) {
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                const exactMatch = subjects.find(s => s.name.toLowerCase() === slug.toLowerCase());
+                if (exactMatch) {
+                  slug = exactMatch.slug;
+                } else {
+                  const partialMatch = subjects.find(s => s.name.toLowerCase().includes(slug.toLowerCase()) || slug.toLowerCase().includes(s.name.toLowerCase()));
+                  if (partialMatch) {
+                    slug = partialMatch.slug;
+                  }
+                }
+              }
+            } catch {}
+          }
+          // Clean slug
+          slug = slug.replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+          if (slug) {
+            // Show loading spinner
+            setFetchingContext(true);
+            setMessages((m) => [...m, { role: 'assistant', content: '', isLoading: true }]);
+            
+            // Fetch practice logs
+            (async () => {
+              try {
+                const PRACTICE_LOG_PREFIX = "atomicPracticeLog:";
+                const practiceLogKey = `${PRACTICE_LOG_PREFIX}${slug}`;
+                const stored = localStorage.getItem(practiceLogKey);
+                
+                if (stored) {
+                  try {
+                    const practiceLog = JSON.parse(stored);
+                    if (Array.isArray(practiceLog) && practiceLog.length > 0) {
+                      // Format practice log summary
+                      const topicStats: Record<string, { total: number; avgGrade: number; entries: any[] }> = {};
+                      
+                      practiceLog.forEach((entry: any) => {
+                        const topic = entry.topic || "General";
+                        if (!topicStats[topic]) {
+                          topicStats[topic] = { total: 0, avgGrade: 0, entries: [] };
+                        }
+                        topicStats[topic].total += 1;
+                        topicStats[topic].entries.push(entry);
+                      });
+                      
+                      // Calculate averages
+                      Object.keys(topicStats).forEach(topic => {
+                        const stats = topicStats[topic];
+                        const totalGrade = stats.entries.reduce((sum, e) => sum + (e.grade || e.rating || 0), 0);
+                        stats.avgGrade = stats.total > 0 ? totalGrade / stats.total : 0;
+                      });
+                      
+                      const contextData: string[] = [];
+                      contextData.push(`PRACTICE LOG DATA FOR ${originalInput.toUpperCase()}:`);
+                      contextData.push(`Total practice entries: ${practiceLog.length}`);
+                      contextData.push('');
+                      
+                      // Group by topic
+                      Object.entries(topicStats)
+                        .sort(([, a], [, b]) => b.total - a.total)
+                        .forEach(([topic, stats]) => {
+                          contextData.push(`${topic}:`);
+                          contextData.push(`  - Questions practiced: ${stats.total}`);
+                          contextData.push(`  - Average grade: ${stats.avgGrade.toFixed(1)}/10`);
+                          contextData.push('');
+                        });
+                      
+                      // Recent entries (last 10)
+                      const recentEntries = practiceLog
+                        .sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0))
+                        .slice(0, 10);
+                      
+                      if (recentEntries.length > 0) {
+                        contextData.push('RECENT PRACTICE SESSIONS:');
+                        recentEntries.forEach((entry: any, idx: number) => {
+                          const date = entry.timestamp ? new Date(entry.timestamp).toLocaleDateString() : 'Unknown date';
+                          const topic = entry.topic || 'General';
+                          const grade = entry.grade || entry.rating || 0;
+                          contextData.push(`${idx + 1}. [${date}] ${topic} - Grade: ${grade}/10`);
+                          if (entry.question) {
+                            const qPreview = entry.question.replace(/◊/g, '').replace(/<[^>]*>/g, '').slice(0, 80);
+                            contextData.push(`   Q: ${qPreview}${qPreview.length >= 80 ? '...' : ''}`);
+                          }
+                        });
+                      }
+                      
+                      const contextText = contextData.join('\n');
+                      
+                      // Remove loading message and add context as system message
+                      setMessages((m) => {
+                        const copy = [...m];
+                        const lastIdx = copy.length - 1;
+                        if (lastIdx >= 0 && copy[lastIdx].isLoading) {
+                          copy.pop();
+                        }
+                        const systemEntry: ChatMessage = { role: 'system', content: contextText };
+                        const updated: ChatMessage[] = [...copy, systemEntry];
+                        
+                        // Trigger Chad's response without adding a visible user message
+                        // Use a hidden trigger message that won't be displayed
+                        const triggerEntry: ChatMessage = { role: 'user', content: 'What did you find?', hidden: true };
+                        const messagesWithTrigger: ChatMessage[] = [...updated, triggerEntry];
+                        setTimeout(() => {
+                          sendMessageWithExistingMessages(messagesWithTrigger);
+                        }, 100);
+                        
+                        return updated;
+                      });
+                    } else {
+                      // No practice logs
+                      setMessages((m) => {
+                        const copy = [...m];
+                        const lastIdx = copy.length - 1;
+                        if (lastIdx >= 0 && copy[lastIdx].isLoading) {
+                          copy.pop();
+                        }
+                        copy.push({ role: 'assistant', content: `No practice logs found for "${originalInput}". Start practicing this course to generate logs.` });
+                        return copy;
+                      });
+                    }
+                  } catch (err) {
+                    console.error('Failed to parse practice logs:', err);
+                    setMessages((m) => {
+                      const copy = [...m];
+                      const lastIdx = copy.length - 1;
+                      if (lastIdx >= 0 && copy[lastIdx].isLoading) {
+                        copy.pop();
+                      }
+                      copy.push({ role: 'assistant', content: 'Failed to parse practice logs.' });
+                      return copy;
+                    });
+                  }
+                } else {
+                  // No practice logs found
+                  setMessages((m) => {
+                    const copy = [...m];
+                    const lastIdx = copy.length - 1;
+                    if (lastIdx >= 0 && copy[lastIdx].isLoading) {
+                      copy.pop();
+                    }
+                    copy.push({ role: 'assistant', content: `No practice logs found for "${originalInput}". Start practicing this course to generate logs.` });
+                    return copy;
+                  });
+                }
+              } catch (err) {
+                console.error('Failed to fetch practice logs:', err);
+                setMessages((m) => {
+                  const copy = [...m];
+                  const lastIdx = copy.length - 1;
+                  if (lastIdx >= 0 && copy[lastIdx].isLoading) {
+                    copy.pop();
+                  }
+                  copy.push({ role: 'assistant', content: 'Error fetching practice logs.' });
+                  return copy;
+                });
+              } finally {
+                setFetchingContext(false);
+              }
+            })();
+          }
+        }
+      } else if (action.name === 'fetch_exam_snipe_data') {
+        let slug = action.params.slug?.trim();
+        const originalInput = slug; // Store original input for name matching
+        if (slug && typeof window !== 'undefined') {
+          // For exam snipe data, we match by course name, not slug
+          // Don't try to resolve course names to slugs - exam snipe data is stored separately
+          // Only clean if it looks like a slug (alphanumeric with hyphens/underscores)
+          let cleanedSlug = null;
+          if (slug.match(/^[a-z0-9\-_]+$/)) {
+            // It's already a slug, use it for slug-based matching as fallback
+            cleanedSlug = slug.toLowerCase();
+          }
+          if (slug) {
+            // Show loading spinner
+            setFetchingContext(true);
+            setMessages((m) => [...m, { role: 'assistant', content: '', isLoading: true }]);
+            
+            // Fetch exam snipe data
+            (async () => {
+              try {
+                const examRes = await fetch('/api/exam-snipe/history', { credentials: 'include' });
+                const examJson = await examRes.json().catch(() => ({}));
+                
+                if (examJson?.ok && Array.isArray(examJson.history)) {
+                  // First, try to match by course name (case-insensitive, partial match)
+                  // This is more reliable since exam snipe data might have different slugs
+                  let matchingExamSnipe = examJson.history.find((exam: any) => {
+                    const examCourseName = (exam.courseName || '').toLowerCase().trim();
+                    const inputName = originalInput.toLowerCase().trim();
+                    return examCourseName === inputName || 
+                           examCourseName.includes(inputName) || 
+                           inputName.includes(examCourseName);
+                  });
+                  
+                  // If not found by name, try by slug
+                  if (!matchingExamSnipe && cleanedSlug) {
+                    matchingExamSnipe = examJson.history.find((exam: any) => {
+                      const examSlug = (exam.slug || '').toLowerCase().trim();
+                      return examSlug === cleanedSlug;
+                    });
+                  }
+                  
+                  if (matchingExamSnipe && matchingExamSnipe.results) {
+                    const results = matchingExamSnipe.results;
+                    const contextData: string[] = [];
+                    
+                    contextData.push(`DETAILED EXAM SNIPE DATA FOR ${matchingExamSnipe.courseName || slug.toUpperCase()}:`);
+                    contextData.push(`Total exams analyzed: ${results.totalExams || 0}`);
+                    
+                    if (results.gradeInfo) {
+                      contextData.push(`Grade info: ${results.gradeInfo}`);
+                    }
+                    if (results.patternAnalysis) {
+                      contextData.push(`Pattern analysis: ${results.patternAnalysis}`);
+                    }
+                    
+                    // Full study order (all concepts)
+                    if (results.concepts && Array.isArray(results.concepts) && results.concepts.length > 0) {
+                      const studyOrder = results.concepts.map((c: any, idx: number) => {
+                        const name = c.name || `Concept ${idx + 1}`;
+                        const desc = c.description ? ` - ${c.description}` : '';
+                        return `${idx + 1}. ${name}${desc}`;
+                      }).join('\n');
+                      contextData.push(`STUDY ORDER (priority, all concepts):\n${studyOrder}`);
+                    }
+                    
+                    // All common questions
+                    if (results.commonQuestions && Array.isArray(results.commonQuestions) && results.commonQuestions.length > 0) {
+                      const allQuestions = results.commonQuestions.map((q: any, idx: number) => {
+                        const question = q.question || '';
+                        const count = q.examCount || 0;
+                        const points = q.averagePoints || 0;
+                        return `${idx + 1}. "${question}" (appears in ${count} exams, avg ${points} pts)`;
+                      }).join('\n');
+                      contextData.push(`ALL COMMON QUESTIONS:\n${allQuestions}`);
+                    }
+                    
+                    const contextText = contextData.join('\n\n');
+                    
+                    // Remove loading message and add context as system message
+                    setMessages((m) => {
+                      const copy = [...m];
+                      // Remove the loading message
+                      const lastIdx = copy.length - 1;
+                      if (lastIdx >= 0 && copy[lastIdx].isLoading) {
+                        copy.pop();
+                      }
+                      // Add context as system message (hidden from user, but included in API context)
+                      const systemEntry: ChatMessage = { role: 'system', content: contextText };
+                      const updated: ChatMessage[] = [...copy, systemEntry];
+                      
+                      // Trigger Chad's response without adding a visible user message
+                      // Use a hidden trigger message that won't be displayed
+                      const triggerEntry: ChatMessage = { role: 'user', content: 'What did you find?', hidden: true };
+                      const messagesWithTrigger: ChatMessage[] = [...updated, triggerEntry];
+                      setTimeout(() => {
+                        sendMessageWithExistingMessages(messagesWithTrigger);
+                      }, 100);
+                      
+                      return updated;
+                    });
+                  } else {
+                    // No exam snipe data found
+                    setMessages((m) => {
+                      const copy = [...m];
+                      const lastIdx = copy.length - 1;
+                      if (lastIdx >= 0 && copy[lastIdx].isLoading) {
+                        copy.pop();
+                      }
+                      copy.push({ role: 'assistant', content: `No exam snipe data found for "${originalInput}". You may need to run Exam Snipe first for this course.` });
+                      return copy;
+                    });
+                  }
+                } else {
+                  // Error fetching data
+                  setMessages((m) => {
+                    const copy = [...m];
+                    const lastIdx = copy.length - 1;
+                    if (lastIdx >= 0 && copy[lastIdx].isLoading) {
+                      copy.pop();
+                    }
+                    copy.push({ role: 'assistant', content: 'Failed to fetch exam snipe data.' });
+                    return copy;
+                  });
+                }
+              } catch (err) {
+                console.error('Failed to fetch exam snipe data:', err);
+                setMessages((m) => {
+                  const copy = [...m];
+                  const lastIdx = copy.length - 1;
+                  if (lastIdx >= 0 && copy[lastIdx].isLoading) {
+                    copy.pop();
+                  }
+                  copy.push({ role: 'assistant', content: 'Error fetching exam snipe data.' });
+                  return copy;
+                });
+              } finally {
+                setFetchingContext(false);
+              }
+            })();
+          }
+        }
+      }
+    });
+  }
+  
+  // Handle button click
+  function handleButtonClick(action: string | undefined, params: Record<string, string> | undefined, uploadId?: string) {
+    if (uploadId && uploadedFiles[uploadId] && uploadedFiles[uploadId].length > 0) {
+      // If button is associated with file upload, process the files
+      const files = uploadedFiles[uploadId];
+      if (uploadId) {
+        setUploadStatus(prev => ({ ...prev, [uploadId]: 'processing' }));
+      }
+      if (action === 'start_exam_snipe') {
+        // Navigate to exam snipe with files
+        router.push('/exam-snipe');
+        // Store files temporarily for exam snipe page to pick up
+        (window as any).__pendingExamFiles = files;
+        if (uploadId) {
+          setUploadStatus(prev => ({ ...prev, [uploadId]: 'success' }));
+        }
+      } else if (action === 'generate_course' || action === 'create_course') {
+        // Create course with files - auto-create, don't open modal
+        const name = params?.name || 'New Course';
+        const syllabus = params?.syllabus || '';
+        document.dispatchEvent(new CustomEvent('synapse:create-course-with-files', { detail: { files, name, syllabus } }));
+        if (uploadId) {
+          setUploadStatus(prev => ({ ...prev, [uploadId]: 'success' }));
+        }
+      }
+      // Always clear files after processing so the upload area resets
+      setUploadedFiles(prev => {
+        if (!prev[uploadId] || prev[uploadId].length === 0) return prev;
+        return { ...prev, [uploadId]: [] };
+      });
+    } else if (action) {
+      // For course creation actions without files, don't open modal - just do nothing or show error
+      if (action === 'generate_course' || action === 'create_course') {
+        // Don't open modal - user needs to upload files first
+        return;
+      }
+      // Execute other actions normally
+      executeActions([{ name: action, params: params || {} }]);
+    }
+  }
+  
+  // Handle file upload
+  function handleFileUpload(uploadId: string, files: File[]) {
+    setUploadedFiles(prev => ({ ...prev, [uploadId]: files }));
+    setUploadStatus(prev => ({ ...prev, [uploadId]: files.length > 0 ? 'ready' : 'idle' }));
+  }
+
+  function resetFileUploadState(uiElements?: ChatMessage['uiElements']) {
+    if (!uiElements || uiElements.length === 0) return;
+    const fileUploadIds = uiElements
+      .filter((ui) => ui.type === 'file_upload')
+      .map((ui) => ui.id)
+      .filter(Boolean);
+    if (fileUploadIds.length === 0) return;
+
+    setUploadedFiles((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      fileUploadIds.forEach((id) => {
+        if (!id) return;
+        if (!next[id] || next[id].length > 0) {
+          next[id] = [];
+          changed = true;
+        }
+      });
+
+      // Remove any previously stored uploads that are no longer rendered
+      Object.keys(next).forEach((id) => {
+        if (!fileUploadIds.includes(id) && next[id] && next[id].length === 0 && prev[id] === next[id]) {
+          // No change needed; keep empty entries for other active uploaders
+        }
+      });
+
+      return changed ? next : prev;
+    });
+    setUploadStatus((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      fileUploadIds.forEach((id) => {
+        if (!id) return;
+        if (next[id] !== 'idle') {
+          next[id] = 'idle';
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }
+
+  async function sendMessageWithExistingMessages(existingMessages: ChatMessage[]) {
+    if (sending) return;
+    try {
+      setSending(true);
+      document.dispatchEvent(new CustomEvent('synapse:chat-sending', { detail: { sending: true } }));
+      const courseContext = await getCompressedCourseContext();
+      
+      // Gather page context (lesson content or visible text)
+      let pageContext = '';
+      try {
+        const el = document.querySelector('.lesson-content');
+        pageContext = el ? (el as HTMLElement).innerText : document.body.innerText;
+        pageContext = pageContext.slice(0, 8000);
+      } catch {}
+      
+      // Extract system messages (context data) from existing messages
+      const systemMessages = existingMessages.filter(m => m.role === 'system').map(m => m.content);
+      const systemContext = systemMessages.join('\n\n---\n\n');
+      
+      // Combine contexts (system context first, then course context, then page context)
+      const fullContext = [systemContext, courseContext, pageContext].filter(Boolean).join('\n\n---\n\n').slice(0, 12000);
+      
+      // Filter out system messages and loading messages from messages sent to API (they're in context now)
+      // Hidden messages are still sent to API (they trigger responses) but won't be displayed
+      const messagesForAPI = existingMessages.filter(m => m.role !== 'system' && !m.isLoading);
+      
+      // Prepare placeholder for streaming
+      setMessages((m) => [...m, { role: 'assistant', content: '' }]);
+      const idx = messagesForAPI.length; // assistant index (excluding system messages)
+      let accumulatedContent = '';
+      const res = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          context: fullContext,
+          messages: messagesForAPI,
+          path: typeof window !== 'undefined' ? window.location.pathname : ''
+        })
+      });
+      
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+      
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      const executedActions = new Set<string>(); // Track executed actions to avoid duplicates
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            // After streaming completes, parse UI elements and actions for final cleanup
+            if (accumulatedContent) {
+              const { cleanedContent, uiElements, actions } = parseUIElementsAndActions(accumulatedContent);
+              resetFileUploadState(uiElements);
+              // Only show message if there's actual content (not just actions)
+              const finalContent = cleanedContent.trim();
+              if (finalContent) {
+                // Update message with cleaned content and UI elements
+                setMessages((m) => {
+                  const copy = [...m];
+                  copy[idx] = { role: 'assistant', content: finalContent, uiElements: uiElements && uiElements.length > 0 ? uiElements : undefined } as ChatMessage;
+                  return copy;
+                });
+                // Execute actions AFTER message is displayed (with a small delay to ensure message renders)
+                if (actions.length > 0) {
+                  setTimeout(() => {
+                    actions.forEach(action => {
+                      executeActions([action]);
+                    });
+                  }, 100);
+                }
+              } else {
+                // No content - remove the empty message
+                setMessages((m) => {
+                  const copy = [...m];
+                  copy.pop();
+                  return copy;
+                });
+                // Still execute actions even if no message
+                if (actions.length > 0) {
+                  setTimeout(() => {
+                    actions.forEach(action => {
+                      executeActions([action]);
+                    });
+                  }, 100);
+                }
+              }
+            } else {
+              // If no content was accumulated, remove the empty message
+              setMessages((m) => {
+                const copy = [...m];
+                copy.pop(); // Remove the last empty assistant message
+                return copy;
+              });
+            }
+            break;
+          }
+          const chunk = decoder.decode(value, { stream: true });
+          chunk.split('\n').forEach((line) => {
+            if (!line.startsWith('data: ')) return;
+            const payload = line.slice(6);
+            if (!payload) return;
+            try {
+              const obj = JSON.parse(payload);
+              if (obj.type === 'text') {
+                accumulatedContent += obj.content;
+                // Parse actions but DON'T execute them during streaming - wait until stream completes
+                // This prevents page navigation from interrupting the message stream
+                const { cleanedContent: streamCleanedContent } = parseUIElementsAndActions(accumulatedContent);
+                // Show cleaned content during streaming (actions removed)
+                setMessages((m) => {
+                  const copy = [...m];
+                  copy[idx] = { role: 'assistant', content: streamCleanedContent } as any;
+                  return copy;
+                });
+              } else if (obj.type === 'error') {
+                throw new Error(obj.error || 'Streaming error');
+              }
+            } catch (parseError) {
+              // Ignore JSON parse errors for incomplete chunks
+              if (parseError instanceof SyntaxError) {
+                // This is expected for incomplete JSON chunks, continue
+              } else {
+                throw parseError;
+              }
+            }
+          });
+        }
+      }
+    } catch (e: any) {
+      console.error('Chat error:', e);
+      setMessages((m) => [...m, { role: 'assistant', content: 'Error: ' + (e?.message || 'Failed to send. Please try again.') }]);
+    } finally {
+      setSending(false);
+      document.dispatchEvent(new CustomEvent('synapse:chat-sending', { detail: { sending: false } }));
+    }
+  }
+
+  // Handle pending welcome message
+  useEffect(() => {
+    if (pendingWelcomeMessageRef.current && open && !sending) {
+      const { welcomeMessage, userMessage } = pendingWelcomeMessageRef.current;
+      pendingWelcomeMessageRef.current = null;
+      
+      // Send the message with existing messages
+      setTimeout(() => {
+        sendMessageWithExistingMessages([
+          { role: 'assistant', content: welcomeMessage },
+          { role: 'user', content: userMessage }
+        ]);
+      }, 100);
+    }
+  }, [open, sending]);
+
   // Auto-scroll to bottom when messages change (especially during streaming)
   useEffect(() => {
     if (!open || !messagesEndRef.current) return;
@@ -571,32 +1805,100 @@ function ChatDropdown() {
     setMessages((m) => [...m, { role: 'user', content: text }]);
     try {
       setSending(true);
+      document.dispatchEvent(new CustomEvent('synapse:chat-sending', { detail: { sending: true } }));
+      const courseContext = await getCompressedCourseContext();
+      
       // Gather page context (lesson content or visible text)
-      let context = '';
+      let pageContext = '';
       try {
         const el = document.querySelector('.lesson-content');
-        context = el ? (el as HTMLElement).innerText : document.body.innerText;
-        context = context.slice(0, 12000);
+        pageContext = el ? (el as HTMLElement).innerText : document.body.innerText;
+        pageContext = pageContext.slice(0, 8000);
       } catch {}
+      
+      // Extract system messages (context data) from messages
+      const systemMessages = messages.filter(m => m.role === 'system').map(m => m.content);
+      const systemContext = systemMessages.join('\n\n---\n\n');
+      
+      // Combine contexts (system context first, then course context, then page context)
+      const fullContext = [systemContext, courseContext, pageContext].filter(Boolean).join('\n\n---\n\n').slice(0, 12000);
+      
+      // Filter out system messages from messages sent to API (they're in context now)
+      const messagesForAPI = messages.filter(m => m.role !== 'system' && !m.isLoading);
+      
       // Prepare placeholder for streaming
       setMessages((m) => [...m, { role: 'assistant', content: '' }]);
-      const idx = messages.length + 1; // assistant index
+      const idx = messagesForAPI.length + 1; // assistant index (excluding system messages)
+      let accumulatedContent = '';
       const res = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          context,
-          messages: [...messages, { role: 'user', content: text }],
+          context: fullContext,
+          messages: [...messagesForAPI, { role: 'user', content: text }],
           path: typeof window !== 'undefined' ? window.location.pathname : ''
         })
       });
+      
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+      
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
+      const executedActions = new Set<string>(); // Track executed actions to avoid duplicates
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value);
+          if (done) {
+            // After streaming completes, parse UI elements and actions for final cleanup
+            if (accumulatedContent) {
+              const { cleanedContent, uiElements, actions } = parseUIElementsAndActions(accumulatedContent);
+              resetFileUploadState(uiElements);
+              // Only show message if there's actual content (not just actions)
+              const finalContent = cleanedContent.trim();
+              if (finalContent) {
+                // Update message with cleaned content and UI elements
+                setMessages((m) => {
+                  const copy = [...m];
+                  copy[idx] = { role: 'assistant', content: finalContent, uiElements: uiElements && uiElements.length > 0 ? uiElements : undefined } as ChatMessage;
+                  return copy;
+                });
+                // Execute actions AFTER message is displayed (with a small delay to ensure message renders)
+                if (actions.length > 0) {
+                  setTimeout(() => {
+                    actions.forEach(action => {
+                      executeActions([action]);
+                    });
+                  }, 100);
+                }
+              } else {
+                // No content - remove the empty message
+                setMessages((m) => {
+                  const copy = [...m];
+                  copy.pop();
+                  return copy;
+                });
+                // Still execute actions even if no message
+                if (actions.length > 0) {
+                  setTimeout(() => {
+                    actions.forEach(action => {
+                      executeActions([action]);
+                    });
+                  }, 100);
+                }
+              }
+            } else {
+              // If no content was accumulated, remove the empty message
+              setMessages((m) => {
+                const copy = [...m];
+                copy.pop(); // Remove the last empty assistant message
+                return copy;
+              });
+            }
+            break;
+          }
+          const chunk = decoder.decode(value, { stream: true });
           chunk.split('\n').forEach((line) => {
             if (!line.startsWith('data: ')) return;
             const payload = line.slice(6);
@@ -604,20 +1906,36 @@ function ChatDropdown() {
             try {
               const obj = JSON.parse(payload);
               if (obj.type === 'text') {
+                accumulatedContent += obj.content;
+                // Parse actions but DON'T execute them during streaming - wait until stream completes
+                // This prevents page navigation from interrupting the message stream
+                const { cleanedContent: streamCleanedContent } = parseUIElementsAndActions(accumulatedContent);
+                // Show cleaned content during streaming (actions removed)
                 setMessages((m) => {
                   const copy = [...m];
-                  copy[idx] = { role: 'assistant', content: (copy[idx]?.content || '') + obj.content } as any;
+                  copy[idx] = { role: 'assistant', content: streamCleanedContent } as any;
                   return copy;
                 });
+              } else if (obj.type === 'error') {
+                throw new Error(obj.error || 'Streaming error');
               }
-            } catch {}
+            } catch (parseError) {
+              // Ignore JSON parse errors for incomplete chunks
+              if (parseError instanceof SyntaxError) {
+                // This is expected for incomplete JSON chunks, continue
+              } else {
+                throw parseError;
+              }
+            }
           });
         }
       }
     } catch (e: any) {
-      setMessages((m) => [...m, { role: 'assistant', content: 'Error: ' + (e?.message || 'Failed to send') }]);
+      console.error('Chat error:', e);
+      setMessages((m) => [...m, { role: 'assistant', content: 'Error: ' + (e?.message || 'Failed to send. Please try again.') }]);
     } finally {
       setSending(false);
+      document.dispatchEvent(new CustomEvent('synapse:chat-sending', { detail: { sending: false } }));
     }
   }
 
@@ -724,6 +2042,7 @@ function ChatDropdown() {
           </span>
         </button>
       </div>
+
       {open && (
         <>
           <div 
@@ -798,25 +2117,86 @@ function ChatDropdown() {
             {messages.length === 0 && (
               <div className="text-xs text-[var(--foreground)]/60">Ask a question about this page. I'll use the current page content as context.</div>
             )}
-            {messages.map((m, i) => (
+            {messages.map((m, i) => {
+              // Skip system messages and hidden messages in display (they're context only)
+              if (m.role === 'system' || m.hidden) return null;
+              
+              // Show loading spinner for loading messages
+              if (m.isLoading) {
+                return (
+                  <div key={i} className="flex justify-start">
+                    <div className="max-w-[80%]">
+                      <div className="text-[10px] text-[var(--foreground)]/60 mb-1 ml-1">Chad</div>
+                      <div className="rounded-xl bg-[var(--background)]/80 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--foreground)]/10 flex items-center gap-2">
+                        <GlowSpinner size={16} ariaLabel="Loading" idSuffix={`chat-loading-${i}`} />
+                        <span className="text-xs text-[var(--foreground)]/60">Getting info...</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              
+              return (
               <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
                 <div className="max-w-[80%]">
-                  <div className="text-[10px] text-[var(--foreground)]/60 mb-1 ml-1">{m.role === 'user' ? 'You' : 'Nova'}</div>
+                  <div className="text-[10px] text-[var(--foreground)]/60 mb-1 ml-1">{m.role === 'user' ? 'You' : 'Chad'}</div>
                   <div className={m.role === 'user' ? 'rounded-xl bg-[var(--accent-cyan)]/20 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--accent-cyan)]/30' : 'rounded-xl bg-[var(--background)]/80 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--foreground)]/10'}>
                   {m.role === 'assistant' ? (
-                    <LessonBody body={sanitizeLessonBody(String(m.content || ''))} />
+                    <>
+                      <LessonBody body={sanitizeLessonBody(String(m.content || ''))} />
+                      {/* Render UI elements */}
+                      {m.uiElements && m.uiElements.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {m.uiElements.map((ui, uiIdx) => {
+                            if (ui.type === 'button') {
+                              return (
+                                <button
+                                  key={uiIdx}
+                                  onClick={() => handleButtonClick(ui.action, ui.params)}
+                                  className="inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
+                                  style={{ color: 'white' }}
+                                >
+                                  {ui.label || 'Button'}
+                                </button>
+                              );
+                            } else if (ui.type === 'file_upload') {
+                              const files = uploadedFiles[ui.id] || [];
+                              const status = uploadStatus[ui.id] || 'idle';
+                              // Extract button label from params if provided
+                              const buttonLabel = ui.params?.buttonLabel || 'Generate';
+                              return (
+                                <FileUploadArea
+                                  key={uiIdx}
+                                  uploadId={ui.id}
+                                  message={ui.message}
+                                  files={files}
+                                  buttonLabel={buttonLabel}
+                                  action={ui.action}
+                                  status={status}
+                                  onFilesChange={(newFiles) => handleFileUpload(ui.id, newFiles)}
+                                  onGenerate={() => handleButtonClick(ui.action, ui.params, ui.id)}
+                                />
+                              );
+                            }
+                            return null;
+                          })}
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <span>{m.content}</span>
                   )}
                   </div>
                 </div>
               </div>
-            ))}
+            );
+            })}
             {/* Scroll target for auto-scroll */}
             <div ref={messagesEndRef} />
           </div>
           <div className="mt-2 flex items-center gap-2 flex-shrink-0">
             <input
+              ref={chatInputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(); }}
@@ -938,6 +2318,19 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       console.error('Error loading theme:', e);
     }
   }, [pathname]);
+
+  // Listen for chat sending state changes
+  useEffect(() => {
+    const handleChatSending = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      setChatSending(customEvent.detail?.sending || false);
+    };
+
+    document.addEventListener('synapse:chat-sending', handleChatSending as EventListener);
+    return () => {
+      document.removeEventListener('synapse:chat-sending', handleChatSending as EventListener);
+    };
+  }, []);
 
   // Avoid CSS zoom on iOS PWA (breaks input focus and text selection)
   useEffect(() => {
@@ -1602,6 +2995,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <LessonBody body={sanitizeLessonBody(infoMarkdown)} />
         </div>
       </Modal>
+
     </div>
     </>
   );

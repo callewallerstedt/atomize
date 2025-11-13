@@ -125,23 +125,7 @@ const md = new MarkdownIt({
 	.use(bracketMathBlock);
 
 export function LessonBody({ body }: { body: string }) {
-	// Raw JSON payload for debugging:
-	console.log("Lesson body:", JSON.stringify(body));
-
 	const prepared = restoreForRender(body ?? "");
-	console.log("Body before render (first 200 chars):", prepared.slice(0, 200));
-		console.log({
-			hasInlineOpen: prepared.includes("\\("),
-			hasInlineClose: prepared.includes("\\)"),
-			inlineSample: (() => {
-				const idx = prepared.indexOf("\\(");
-				return idx === -1 ? "" : prepared.slice(Math.max(0, idx - 20), idx + 40);
-			})(),
-		});
-
-		const tokens = md.parse(prepared, {});
-		console.log(tokens.map((t: any) => ({ t: t.type, tag: t.tag, m: t.markup, c: t.content })).slice(0, 50));
-
 	const html = md.render(prepared);
 	return <div className="lesson-content prose max-w-none" dangerouslySetInnerHTML={{ __html: html }} />;
 }

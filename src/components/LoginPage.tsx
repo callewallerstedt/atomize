@@ -188,7 +188,7 @@ export default function LoginPage() {
           ))}
         </div>
 
-        <div className="logo-wrap" style={{ width: 400, aspectRatio: "1 / 1", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div className="logo-wrap" style={{ width: 400, aspectRatio: "1 / 1", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center", marginTop: "-15vh" }}>
           <img
             src="/spinner.png"
             alt="Spinning logo"

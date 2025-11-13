@@ -72,10 +72,109 @@ export default function ReadAssistPage() {
   };
 
   const handleWordClick = (word: string, e: React.MouseEvent) => {
-    if (!e.target) return;
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Use mouse coordinates to find the exact text position
+    const x = e.clientX;
+    const y = e.clientY;
+    const doc: any = document as any;
+    
+    let range: Range | null = null;
+    // Try to get the text range at the mouse position
+    if (doc.caretRangeFromPoint) {
+      range = doc.caretRangeFromPoint(x, y);
+    } else if (doc.caretPositionFromPoint) {
+      const pos = doc.caretPositionFromPoint(x, y);
+      if (pos) {
+        range = document.createRange();
+        range.setStart(pos.offsetNode, pos.offset);
+        range.collapse(true);
+      }
+    }
+    
+    if (!range) {
+      // Fallback: use mouse position directly
+      setPopoverWord(word);
+      setPopoverPos({
+        x: Math.max(12, Math.min(x - 180, window.innerWidth - 372)),
+        y: y + 12,
+      });
+      return;
+    }
+    
+    // Find the text node and word boundaries
+    let node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) {
+      const asEl = node as unknown as HTMLElement;
+      const walker = document.createTreeWalker(asEl, NodeFilter.SHOW_TEXT);
+      node = walker.nextNode() || node;
+    }
+    
+    if (node.nodeType !== Node.TEXT_NODE) {
+      // Fallback: use mouse position directly
+      setPopoverWord(word);
+      setPopoverPos({
+        x: Math.max(12, Math.min(x - 180, window.innerWidth - 372)),
+        y: y + 12,
+      });
+      return;
+    }
+    
+    const text = node.textContent || "";
+    let idx = Math.max(0, Math.min(range.startOffset, text.length));
+    
+    // Word character: letters, numbers, apostrophes, hyphens
+    const isWordChar = (ch: string) => /[\p{L}\p{N}\u2019'\-]/u.test(ch);
+    
+    // Expand backwards to find word start
+    let start = idx;
+    while (start > 0 && isWordChar(text[start - 1])) start--;
+    
+    // Expand forwards to find word end
+    let end = idx;
+    while (end < text.length && isWordChar(text[end])) end++;
+    
+    // Trim any trailing whitespace
+    while (end > start && /\s/.test(text[end - 1])) end--;
+    
+    if (start === end) {
+      // Fallback: use mouse position directly
+      setPopoverWord(word);
+      setPopoverPos({
+        x: Math.max(12, Math.min(x - 180, window.innerWidth - 372)),
+        y: y + 12,
+      });
+      return;
+    }
+    
+    // Create a range for the word and get its bounding rect
+    const wordRange = document.createRange();
+    wordRange.setStart(node, start);
+    wordRange.setEnd(node, end);
+    
+    const rects = wordRange.getClientRects();
+    if (!rects || rects.length === 0) {
+      // Fallback: use mouse position directly
+      setPopoverWord(word);
+      setPopoverPos({
+        x: Math.max(12, Math.min(x - 180, window.innerWidth - 372)),
+        y: y + 12,
+      });
+      return;
+    }
+    
+    // Use the first rect (or combine them for multi-line words)
+    const rect = rects[0];
+    const popoverWidth = 360;
+    const centerX = rect.left + rect.width / 2;
+    const popoverX = Math.max(12, Math.min(centerX - popoverWidth / 2, window.innerWidth - popoverWidth - 12));
+    
     setPopoverWord(word);
-    setPopoverPos({ x: rect.left, y: rect.bottom + window.scrollY });
+    setPopoverPos({
+      x: popoverX,
+      y: rect.bottom + 8, // Position below the word
+    });
   };
 
   const handleSimplify = async () => {

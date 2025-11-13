@@ -26,6 +26,7 @@ model User {
   paymentStatus        String? // "active" | "past_due" | "canceled"
   promoCodeUsed        String?
   lastLoginAt          DateTime?
+  preferences          Json?                 // User preferences (preferredTitle, etc.)
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   sessions             Session[]

@@ -44,7 +44,7 @@ html, body {
 
 @media (max-width: 1440px) and (min-width: 900px) {
   html {
-    zoom: 0.8;
+    zoom: 0.75;
   }
 }
 

@@ -123,10 +123,36 @@ export async function POST(req: NextRequest) {
         console.log('=== END COMBINED TEXT ===');
 
         // Detect language from exam materials
+        // Sample from multiple parts of the documents to avoid headers/first pages
         let detectedLanguage = { code: 'en', name: 'English' };
         try {
+          // Sample from beginning (skip first 2000 chars to avoid headers), middle, and end
+          const textLength = combinedText.length;
+          let languageSample = '';
+          
+          if (textLength > 2000) {
+            // Skip first 2000 chars (likely headers/first pages), take next 2000
+            const startSample = combinedText.slice(2000, 4000);
+            // Take middle section
+            const midStart = Math.floor(textLength / 2);
+            const midSample = combinedText.slice(midStart, midStart + 2000);
+            // Take end section
+            const endSample = combinedText.slice(Math.max(0, textLength - 2000));
+            
+            languageSample = [startSample, midSample, endSample].filter(s => s.trim().length > 0).join('\n\n---\n\n');
+          } else {
+            // If text is short, just use it all
+            languageSample = combinedText;
+          }
+          
+          // Limit to 6000 chars total for language detection
+          languageSample = languageSample.slice(0, 6000);
+          
           const langPrompt = [
-            "Detect the primary human language of the provided text.",
+            "Detect the PRIMARY language used in the MAIN CONTENT of these exam documents.",
+            "IGNORE headers, first pages, metadata, and administrative text which may be in a different language.",
+            "Focus on the language used in the actual exam questions and problem statements.",
+            "If the documents contain multiple languages, identify the language that appears MOST FREQUENTLY in the main content.",
             "Return STRICT JSON: { code: string; name: string } where code is ISO 639-1 if possible (e.g., 'en', 'sv', 'de').",
             "If uncertain, default to { code: 'en', name: 'English' }.",
           ].join("\n");
@@ -135,7 +161,7 @@ export async function POST(req: NextRequest) {
             response_format: { type: 'json_object' },
             messages: [
               { role: 'system', content: langPrompt },
-              { role: 'user', content: combinedText.slice(0, 4000) || '' },
+              { role: 'user', content: languageSample || combinedText.slice(0, 4000) },
             ],
             temperature: 0,
             max_tokens: 50,
