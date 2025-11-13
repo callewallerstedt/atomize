@@ -8,6 +8,8 @@ import CourseCreateModal from "@/components/CourseCreateModal";
 import LoginPage from "@/components/LoginPage";
 import { saveSubjectData, StoredSubjectData, loadSubjectData } from "@/utils/storage";
 import { changelog } from "../../CHANGELOG";
+import { LessonBody } from "@/components/LessonBody";
+import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
 
 type Subject = { name: string; slug: string };
 
@@ -87,6 +89,8 @@ function WelcomeMessage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [inputFocused, setInputFocused] = useState(false);
+  const [homepageMessages, setHomepageMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [homepageSending, setHomepageSending] = useState(false);
   const hasStreamed = useRef(false);
 
   useEffect(() => {
@@ -248,60 +252,209 @@ function WelcomeMessage() {
     return parts.length > 0 ? parts : text;
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     const text = inputValue.trim();
-    if (!text || !welcomeText) return;
+    if (!text || !welcomeText || homepageSending) return;
     
-    // Dispatch event to open chat with welcome message and user message
-    const event = new CustomEvent('synapse:open-chat-with-message', {
-      detail: {
-        welcomeMessage: welcomeText,
-        welcomeName: aiName || 'Chad',
-        userMessage: text,
-      }
-    });
-    document.dispatchEvent(event);
+    // If this is the first message, add the welcome message as the first assistant message
+    const isFirstMessage = homepageMessages.length === 0;
+    if (isFirstMessage) {
+      setHomepageMessages([{ role: 'assistant', content: welcomeText }]);
+    }
     
+    // Add user message
+    const userMessage = { role: 'user' as const, content: text };
+    setHomepageMessages(prev => [...prev, userMessage]);
     setInputValue("");
     setInputFocused(false);
+    setHomepageSending(true);
+
+    try {
+      // Get course context
+      let courseContext = '';
+      try {
+        const subjectsRaw = localStorage.getItem('atomicSubjects');
+        if (subjectsRaw) {
+          const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+          const contextParts: string[] = [];
+          for (const subject of subjects) {
+            if (subject.slug === 'quicklearn') continue;
+            const subjectDataRaw = localStorage.getItem(`atomicSubjectData:${subject.slug}`);
+            if (subjectDataRaw) {
+              try {
+                const subjectData = JSON.parse(subjectDataRaw);
+                contextParts.push(`Course: ${subject.name} (slug: ${subject.slug})`);
+                if (subjectData.course_context) {
+                  contextParts.push(`Description: ${subjectData.course_context.slice(0, 200)}`);
+                }
+              } catch {}
+            }
+          }
+          courseContext = contextParts.join('\n\n');
+        }
+      } catch {}
+
+      // Send message to API
+      const res = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          context: courseContext,
+          messages: [
+            { role: 'assistant', content: welcomeText },
+            userMessage
+          ],
+          path: '/'
+        })
+      });
+
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedContent = '';
+      
+      if (reader) {
+        // Add assistant message placeholder
+        setHomepageMessages(prev => {
+          const newMessages = [...prev, { role: 'assistant' as const, content: '' }];
+          return newMessages;
+        });
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value, { stream: true });
+          chunk.split('\n').forEach((line) => {
+            if (!line.startsWith('data: ')) return;
+            const payload = line.slice(6);
+            if (!payload) return;
+            try {
+              const obj = JSON.parse(payload);
+              if (obj.type === 'text') {
+                accumulatedContent += obj.content;
+                setHomepageMessages(prev => {
+                  const copy = [...prev];
+                  // Update the last message (which is the assistant message)
+                  if (copy.length > 0) {
+                    copy[copy.length - 1] = { role: 'assistant', content: accumulatedContent };
+                  }
+                  return copy;
+                });
+              }
+            } catch {}
+          });
+        }
+      }
+    } catch (e: any) {
+      setHomepageMessages(prev => [...prev, { role: 'assistant', content: 'Error: ' + (e?.message || 'Failed to send. Please try again.') }]);
+    } finally {
+      setHomepageSending(false);
+    }
   };
 
   return (
-    <div className="mx-auto mb-6 w-full max-w-5xl">
+    <div className="mx-auto mb-6 w-full max-w-3xl">
       {aiName && (
         <div className="mb-1.5 text-xs text-[var(--foreground)]/60 font-medium">
           {aiName}
         </div>
       )}
-      <div className="inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
-        <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
-          {renderTextWithSynapse(welcomeText)}
-          {isStreaming && (
-            <span className="inline-block w-1.5 h-3.5 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] animate-pulse ml-1 align-middle"></span>
+      {homepageMessages.length === 0 ? (
+        <>
+          <div className="inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
+            <div className="text-base text-[var(--foreground)]/90 leading-relaxed">
+              {renderTextWithSynapse(welcomeText)}
+              {isStreaming && (
+                <span className="inline-block w-1.5 h-3.5 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] animate-pulse ml-1 align-middle"></span>
+              )}
+            </div>
+          </div>
+          {welcomeText && !isStreaming && (
+            <div className="mt-3 w-full max-w-2xl mx-auto">
+              <input
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onFocus={() => setInputFocused(true)}
+                onBlur={() => setInputFocused(false)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }
+                }}
+                placeholder="Type a message..."
+                className={`w-full px-3 py-2 rounded-lg border transition-all ${
+                  inputFocused
+                    ? 'border-[var(--accent-cyan)]/40 bg-[var(--background)]/90 text-[var(--foreground)]'
+                    : 'border-[var(--foreground)]/10 bg-[var(--background)]/30 text-[var(--foreground)]/40'
+                } placeholder:text-[var(--foreground)]/20 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/30`}
+              />
+            </div>
           )}
-        </div>
-      </div>
-      {welcomeText && !isStreaming && (
-        <div className="mt-3 w-full max-w-2xl">
-          <input
-            type="text"
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onFocus={() => setInputFocused(true)}
-            onBlur={() => setInputFocused(false)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSendMessage();
-              }
-            }}
-            placeholder="Type a message..."
-            className={`w-full px-3 py-2 rounded-lg border transition-all ${
-              inputFocused
-                ? 'border-[var(--accent-cyan)]/40 bg-[var(--background)]/90 text-[var(--foreground)]'
-                : 'border-[var(--foreground)]/10 bg-[var(--background)]/30 text-[var(--foreground)]/40'
-            } placeholder:text-[var(--foreground)]/20 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/30`}
-          />
+        </>
+      ) : (
+        <div className="space-y-3">
+          {homepageMessages.map((m, i) => {
+            // Check if this is the welcome message (first assistant message)
+            const isWelcomeMessage = i === 0 && m.role === 'assistant' && m.content === welcomeText;
+            
+            return (
+              <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+                {m.role === 'user' ? (
+                  <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-lg bg-[var(--accent-cyan)]/20 border border-[var(--accent-cyan)]/40">
+                    <div className="text-base text-[var(--foreground)]/90 leading-relaxed">
+                      {m.content}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
+                    <div className="text-base text-[var(--foreground)]/90 leading-relaxed">
+                      {isWelcomeMessage ? (
+                        renderTextWithSynapse(m.content)
+                      ) : (
+                        <LessonBody body={sanitizeLessonBody(String(m.content || ''))} />
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {homepageSending && (
+            <div className="flex justify-start">
+              <div className="inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
+                <div className="text-base text-[var(--foreground)]/90 leading-relaxed flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 bg-[var(--accent-cyan)] rounded-full animate-pulse"></span>
+                  Thinking...
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="mt-3 w-full max-w-2xl mx-auto">
+            <input
+              type="text"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendMessage();
+                }
+              }}
+              placeholder="Type a message..."
+              disabled={homepageSending}
+              className={`w-full px-3 py-2 rounded-lg border transition-all ${
+                inputFocused
+                  ? 'border-[var(--accent-cyan)]/40 bg-[var(--background)]/90 text-[var(--foreground)]'
+                  : 'border-[var(--foreground)]/10 bg-[var(--background)]/30 text-[var(--foreground)]/40'
+              } placeholder:text-[var(--foreground)]/20 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/30 disabled:opacity-50`}
+            />
+          </div>
         </div>
       )}
     </div>

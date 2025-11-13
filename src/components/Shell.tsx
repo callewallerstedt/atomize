@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { LessonBody } from "@/components/LessonBody";
 import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
 import Link from "next/link";
@@ -553,9 +554,10 @@ function FileUploadArea({
   );
 }
 
-function ChatDropdown() {
+function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(fullscreen);
+  const [minimized, setMinimized] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -626,13 +628,29 @@ function ChatDropdown() {
     };
   }, []);
 
+  // ESC key handler - always active when chat is open
+  useEffect(() => {
+    if (!open) return;
+    
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(false);
+      }
+    };
+
+    // Use capture phase to catch ESC before other handlers
+    document.addEventListener('keydown', handleEscape, true);
+    return () => {
+      document.removeEventListener('keydown', handleEscape, true);
+    };
+  }, [open]);
+
   // Global keyboard listener to open chat when typing starts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if chat is already open
-      if (open) return;
-
-      // Check if user is already in a text input
+      // Check if user is already in a text input (but allow if it's our chat input)
       const activeElement = document.activeElement;
       const isTextInput = activeElement && (
         activeElement.tagName === 'INPUT' ||
@@ -640,18 +658,33 @@ function ChatDropdown() {
         activeElement.getAttribute('contenteditable') === 'true'
       );
 
-      // If already in a text input, don't do anything
-      if (isTextInput) return;
+      // If already in a text input that's NOT our chat input, don't do anything
+      if (isTextInput && activeElement !== chatInputRef.current) return;
+
+      // If chat is fully open and not minimized, and user is typing in our input, don't intercept
+      if (open && !minimized && activeElement === chatInputRef.current) return;
 
       // Ignore modifier keys and special keys
       if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
-      if (e.key === 'Tab' || e.key === 'Escape' || e.key === 'Enter' || e.key.length > 1) return;
+      if (e.key === 'Tab' || e.key === 'Enter' || e.key === 'Escape' || e.key.length > 1) return;
 
-      // If it's a printable character, open chat and insert it
+      // If it's a printable character, show minimized input and insert it
       if (e.key.length === 1 && !e.key.match(/[\x00-\x1F]/)) {
         e.preventDefault();
-        setOpen(true);
-        setInput(e.key);
+        
+        // If chat is minimized and user is typing, stay minimized and append to input
+        if (open && minimized) {
+          setInput(prev => prev + e.key);
+        } else if (!open) {
+          // If chat is closed, open minimized and set input
+          setOpen(true);
+          setMinimized(true);
+          setInput(e.key);
+        } else {
+          // If chat is open but not minimized, just append
+          setInput(prev => prev + e.key);
+        }
+        
         requestAnimationFrame(() => {
           chatInputRef.current?.focus();
           // Set cursor to end
@@ -667,7 +700,7 @@ function ChatDropdown() {
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open]);
+  }, [open, minimized]);
 
   // Save chat to history when a conversation is complete (not during streaming)
   useEffect(() => {
@@ -1943,13 +1976,53 @@ function ChatDropdown() {
   useEffect(() => {
     if (!open || !messagesEndRef.current) return;
     
-    // Always scroll when messages length changes or when sending state changes
+    // Always scroll when messages length changes, content changes, or when sending state changes
     requestAnimationFrame(() => {
       if (messagesEndRef.current) {
         messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
       }
     });
-  }, [messages.length, sending, open]);
+  }, [messages.length, sending, open, scrollTrigger]);
+
+  // Also poll during streaming to catch content updates
+  useEffect(() => {
+    if (!open || !sending) return;
+    
+    const interval = setInterval(() => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    }, 100); // Check every 100ms during streaming
+    
+    return () => clearInterval(interval);
+  }, [open, sending]);
+
+  // Prevent body scroll when chat is open
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    if (open) {
+      // Save current scroll position
+      const scrollY = window.scrollY;
+      // Disable body scroll
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${scrollY}px`;
+      document.body.style.width = '100%';
+      document.body.style.overflow = 'hidden';
+      
+      return () => {
+        // Restore body scroll
+        const scrollY = document.body.style.top;
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.width = '';
+        document.body.style.overflow = '';
+        if (scrollY) {
+          window.scrollTo(0, parseInt(scrollY || '0') * -1);
+        }
+      };
+    }
+  }, [open]);
 
   // Click outside to close chat
   useEffect(() => {
@@ -1996,86 +2069,246 @@ function ChatDropdown() {
     };
   }, [resizing, start]);
 
-  return (
-    <div className="relative">
-      {/* Gradient border wrapper */}
-      <div
-        className="inline-block rounded-xl transition-all duration-300"
-        style={{
-          padding: '1.5px',
-          background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-          e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-          e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-        }}
-      >
-        <button
-          ref={chatButtonRef}
-          onClick={() => setOpen(!open)}
-          onMouseDown={(e) => {
+  // Render chat content (shared between fullscreen and dropdown)
+  const renderChatContent = () => (
+    <>
+      <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0 p-4">
+        {messages.length === 0 && (
+          <div className="text-xs text-[var(--foreground)]/60">Ask a question about this page. I'll use the current page content as context.</div>
+        )}
+        {messages.map((m, i) => {
+          // Skip system messages and hidden messages in display (they're context only)
+          if (m.role === 'system' || m.hidden) return null;
+          
+          // Show loading spinner for loading messages
+          if (m.isLoading) {
+            return (
+              <div key={i} className="flex justify-start">
+                <div className="max-w-[80%]">
+                  <div className="text-[10px] text-[var(--foreground)]/60 mb-1 ml-1">Chad</div>
+                  <div className="rounded-xl bg-[var(--background)]/80 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--foreground)]/10 flex items-center gap-2">
+                    <GlowSpinner size={16} ariaLabel="Loading" idSuffix={`chat-loading-${i}`} />
+                    <span className="text-xs text-[var(--foreground)]/60">Getting info...</span>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+          
+          return (
+          <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+            <div className="max-w-[80%]">
+              <div className="text-[10px] text-[var(--foreground)]/60 mb-1 ml-1">{m.role === 'user' ? 'You' : 'Chad'}</div>
+              <div className={m.role === 'user' ? 'rounded-xl bg-[var(--accent-cyan)]/20 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--accent-cyan)]/30' : 'rounded-xl bg-[var(--background)]/80 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--foreground)]/10'}>
+              {m.role === 'assistant' ? (
+                <>
+                  <LessonBody body={sanitizeLessonBody(String(m.content || ''))} />
+                  {/* Render UI elements */}
+                  {m.uiElements && m.uiElements.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      {m.uiElements.map((ui, uiIdx) => {
+                        if (ui.type === 'button') {
+                          return (
+                            <button
+                              key={uiIdx}
+                              onClick={() => handleButtonClick(ui.action, ui.params)}
+                              className="inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
+                              style={{ color: 'white' }}
+                            >
+                              {ui.label || 'Button'}
+                            </button>
+                          );
+                        } else if (ui.type === 'file_upload') {
+                          const files = uploadedFiles[ui.id] || [];
+                          const status = uploadStatus[ui.id] || 'idle';
+                          // Extract button label from params if provided
+                          const buttonLabel = ui.params?.buttonLabel || 'Generate';
+                          return (
+                            <FileUploadArea
+                              key={uiIdx}
+                              uploadId={ui.id}
+                              message={ui.message}
+                              files={files}
+                              buttonLabel={buttonLabel}
+                              action={ui.action}
+                              status={status}
+                              onFilesChange={(newFiles) => handleFileUpload(ui.id, newFiles)}
+                              onGenerate={() => handleButtonClick(ui.action, ui.params, ui.id)}
+                            />
+                          );
+                        }
+                        return null;
+                      })}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <span>{m.content}</span>
+              )}
+              </div>
+            </div>
+          </div>
+        );
+        })}
+        {/* Scroll target for auto-scroll */}
+        <div ref={messagesEndRef} />
+      </div>
+      {/* Input area */}
+      <div className="border-t border-[var(--foreground)]/10 p-4 flex-shrink-0">
+        <form
+          onSubmit={(e) => {
             e.preventDefault();
-            e.currentTarget.blur();
+            if (input.trim() && !sending) {
+              sendMessage();
+            }
           }}
-          className="relative inline-flex items-center gap-2 px-1.5 py-1.5 text-sm
-                     text-[var(--foreground)] bg-[var(--background)]/90 backdrop-blur-md
+          className="flex gap-2"
+        >
+          <input
+            ref={chatInputRef}
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Type a message..."
+            className="flex-1 px-4 py-2 rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-[var(--foreground)] placeholder:text-[var(--foreground)]/40 focus:outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/30"
+            disabled={sending}
+          />
+          <button
+            type="submit"
+            disabled={!input.trim() || sending}
+            className="px-6 py-2 rounded-xl bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white font-medium hover:opacity-95 disabled:opacity-50 transition-opacity"
+          >
+            Send
+          </button>
+        </form>
+      </div>
+    </>
+  );
+
+  // In fullscreen mode, always show the chat content without the button
+  if (fullscreen) {
+    return (
+      <div className="h-full flex flex-col">
+        {renderChatContent()}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* Half-moon chat button */}
+      <div className="relative">
+         <button
+           ref={chatButtonRef}
+           onClick={() => {
+             if (!open) {
+               setOpen(true);
+               setMinimized(false);
+             } else {
+               setOpen(false);
+             }
+           }}
+           onMouseDown={(e) => {
+             e.preventDefault();
+             e.currentTarget.blur();
+           }}
+          className="relative inline-flex items-center justify-center
+                     text-white
                      focus:outline-none focus:ring-0 focus-visible:outline-none
-                     transition-all duration-300 ease-out overflow-hidden"
+                     transition-all duration-300 ease-out"
           style={{ 
             outline: 'none', 
-            WebkitTapHighlightColor: 'transparent', 
-            transform: 'none !important', 
-            borderRadius: 'calc(0.75rem - 1.5px)',
-            backgroundImage: 'linear-gradient(135deg, rgba(0, 229, 255, 0.25) 0%, rgba(255, 45, 150, 0.25) 100%)',
+            WebkitTapHighlightColor: 'transparent',
+            width: '22.4px',
+            height: '11.2px',
+            borderRadius: '0 0 11.2px 11.2px',
+            background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+            border: 'none',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+            e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
           }}
           aria-label="Chat"
           title="Chat"
         >
-          <span className="relative z-10 flex items-center">
-            Chat
-            <svg className={`h-4 w-4 ml-1 transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
-          </span>
         </button>
       </div>
 
-      {open && (
+      {typeof document !== 'undefined' ? createPortal(
         <>
-          <div 
-            ref={chatDropdownRef}
-            className="absolute right-0 mt-2 z-50 rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 bg-gradient-to-br from-[#00E5FF]/20 to-[#FF2D96]/20 backdrop-blur-md shadow-2xl p-3
-                        max-md:fixed max-md:inset-4 max-md:right-4 max-md:left-4 max-md:top-4 max-md:bottom-4 max-md:mt-0 max-md:w-auto max-md:h-auto
-                        md:absolute md:right-0 md:mt-2 flex flex-col" 
-            style={{ 
-              width: typeof window !== 'undefined' && window.innerWidth < 768 ? 'auto' : size.w, 
-              height: typeof window !== 'undefined' && window.innerWidth < 768 ? 'auto' : size.h 
+          <div
+            style={{
+              position: 'fixed',
+              top: '4.6rem',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              overflow: 'hidden',
+              pointerEvents: open ? 'auto' : 'none',
+              zIndex: 9998,
             }}
-             onClick={(e) => e.stopPropagation()}>
-          {/* Top right icons */}
-          <div className="relative flex items-center gap-2 justify-end mb-2 flex-shrink-0">
-            <button
-              onClick={startNewChat}
-              className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
-              title="New chat"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 5v14M5 12h14"/>
-              </svg>
-            </button>
-            <button
-              onClick={() => setShowHistory(!showHistory)}
-              className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
-              title="Chat history"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 3h18v18H3V3z"/>
-                <path d="M3 9h18M9 3v18"/>
-              </svg>
-            </button>
+          >
+            <div 
+              ref={chatDropdownRef}
+              className={`rounded-2xl rounded-t-none border border-[var(--foreground)]/20 border-t-0 bg-[var(--background)]/95 shadow-2xl pl-8 pr-8 flex flex-col transition-all duration-300 ease-out ${
+                minimized ? 'pt-2 pb-2' : 'pt-4 pb-8'
+              }`}
+               style={{ 
+                 position: 'absolute',
+                 top: 'calc(max(3px, calc(env(safe-area-inset-top, 0px) / 2)) - 0.3rem)',
+                 left: '1.5rem',
+                 right: '1.5rem',
+                 bottom: minimized ? undefined : '0.5rem',
+                 maxHeight: minimized ? '80px' : '200vh',
+                 transform: open 
+                   ? 'translateY(0)' 
+                   : 'translateY(calc(-100% - 1.5rem - max(3px, calc(env(safe-area-inset-top, 0px) / 2))))',
+               }}
+              onClick={(e) => e.stopPropagation()}>
+          {!minimized && (
+            <>
+              {/* Top right icons */}
+              <div className="relative flex items-center gap-2 justify-between mb-2 flex-shrink-0">
+                <h2 className="text-lg font-semibold text-[var(--foreground)]">Chat</h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={startNewChat}
+                    className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
+                    title="New chat"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => setShowHistory(!showHistory)}
+                    className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
+                    title="Chat history"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M3 3h18v18H3V3z"/>
+                      <path d="M3 9h18M9 3v18"/>
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setOpen(false);
+                      setMinimized(false);
+                    }}
+                    className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
+                    title="Close chat"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                  </button>
+                </div>
             
             {/* History panel - absolute positioned to overlay */}
             {showHistory && (
@@ -2111,9 +2344,12 @@ function ChatDropdown() {
                 )}
               </div>
             )}
-          </div>
+              </div>
+            </>
+          )}
           
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0">
+          {!minimized && (
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0 pb-15">
             {messages.length === 0 && (
               <div className="text-xs text-[var(--foreground)]/60">Ask a question about this page. I'll use the current page content as context.</div>
             )}
@@ -2125,11 +2361,10 @@ function ChatDropdown() {
               if (m.isLoading) {
                 return (
                   <div key={i} className="flex justify-start">
-                    <div className="max-w-[80%]">
-                      <div className="text-[10px] text-[var(--foreground)]/60 mb-1 ml-1">Chad</div>
-                      <div className="rounded-xl bg-[var(--background)]/80 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--foreground)]/10 flex items-center gap-2">
-                        <GlowSpinner size={16} ariaLabel="Loading" idSuffix={`chat-loading-${i}`} />
-                        <span className="text-xs text-[var(--foreground)]/60">Getting info...</span>
+                    <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
+                      <div className="text-[1.225rem] text-[var(--foreground)]/90 leading-relaxed flex items-center gap-2">
+                        <span className="inline-block w-2 h-2 bg-[var(--accent-cyan)] rounded-full animate-pulse"></span>
+                        Thinking...
                       </div>
                     </div>
                   </div>
@@ -2138,90 +2373,147 @@ function ChatDropdown() {
               
               return (
               <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-                <div className="max-w-[80%]">
-                  <div className="text-[10px] text-[var(--foreground)]/60 mb-1 ml-1">{m.role === 'user' ? 'You' : 'Chad'}</div>
-                  <div className={m.role === 'user' ? 'rounded-xl bg-[var(--accent-cyan)]/20 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--accent-cyan)]/30' : 'rounded-xl bg-[var(--background)]/80 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--foreground)]/10'}>
-                  {m.role === 'assistant' ? (
-                    <>
-                      <LessonBody body={sanitizeLessonBody(String(m.content || ''))} />
-                      {/* Render UI elements */}
-                      {m.uiElements && m.uiElements.length > 0 && (
-                        <div className="mt-3 space-y-2">
-                          {m.uiElements.map((ui, uiIdx) => {
-                            if (ui.type === 'button') {
-                              return (
-                                <button
-                                  key={uiIdx}
-                                  onClick={() => handleButtonClick(ui.action, ui.params)}
-                                  className="inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
-                                  style={{ color: 'white' }}
-                                >
-                                  {ui.label || 'Button'}
-                                </button>
-                              );
-                            } else if (ui.type === 'file_upload') {
-                              const files = uploadedFiles[ui.id] || [];
-                              const status = uploadStatus[ui.id] || 'idle';
-                              // Extract button label from params if provided
-                              const buttonLabel = ui.params?.buttonLabel || 'Generate';
-                              return (
-                                <FileUploadArea
-                                  key={uiIdx}
-                                  uploadId={ui.id}
-                                  message={ui.message}
-                                  files={files}
-                                  buttonLabel={buttonLabel}
-                                  action={ui.action}
-                                  status={status}
-                                  onFilesChange={(newFiles) => handleFileUpload(ui.id, newFiles)}
-                                  onGenerate={() => handleButtonClick(ui.action, ui.params, ui.id)}
-                                />
-                              );
-                            }
-                            return null;
-                          })}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <span>{m.content}</span>
-                  )}
+                {m.role === 'user' ? (
+                  <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-lg bg-[var(--accent-cyan)]/20 border border-[var(--accent-cyan)]/40">
+                    <div className="text-[1.225rem] text-[var(--foreground)]/90 leading-relaxed">
+                      {m.content}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
+                    <div className="text-[1.225rem] text-[var(--foreground)]/90 leading-relaxed">
+                      {m.role === 'assistant' ? (
+                        <>
+                          <LessonBody body={sanitizeLessonBody(String(m.content || ''))} />
+                          {/* Render UI elements */}
+                          {m.uiElements && m.uiElements.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                              {m.uiElements.map((ui, uiIdx) => {
+                                if (ui.type === 'button') {
+                                  return (
+                                    <button
+                                      key={uiIdx}
+                                      onClick={() => handleButtonClick(ui.action, ui.params)}
+                                      className="inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
+                                      style={{ color: 'white' }}
+                                    >
+                                      {ui.label || 'Button'}
+                                    </button>
+                                  );
+                                } else if (ui.type === 'file_upload') {
+                                  const files = uploadedFiles[ui.id] || [];
+                                  const status = uploadStatus[ui.id] || 'idle';
+                                  // Extract button label from params if provided
+                                  const buttonLabel = ui.params?.buttonLabel || 'Generate';
+                                  return (
+                                    <FileUploadArea
+                                      key={uiIdx}
+                                      uploadId={ui.id}
+                                      message={ui.message}
+                                      files={files}
+                                      buttonLabel={buttonLabel}
+                                      action={ui.action}
+                                      status={status}
+                                      onFilesChange={(newFiles) => handleFileUpload(ui.id, newFiles)}
+                                      onGenerate={() => handleButtonClick(ui.action, ui.params, ui.id)}
+                                    />
+                                  );
+                                }
+                                return null;
+                              })}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        m.content
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             );
             })}
-            {/* Scroll target for auto-scroll */}
-            <div ref={messagesEndRef} />
-          </div>
-          <div className="mt-2 flex items-center gap-2 flex-shrink-0">
-            <input
-              ref={chatInputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(); }}
-              placeholder="Type a message..."
-              className="flex-1 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
-            />
+              {/* Scroll target for auto-scroll */}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+          <div className={`flex items-center gap-2 flex-shrink-0 ${minimized ? '' : 'mt-2'}`}>
+            {minimized && (
+              <button
+                onClick={() => {
+                  setMinimized(false);
+                  requestAnimationFrame(() => {
+                    chatInputRef.current?.focus();
+                  });
+                }}
+                className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
+                title="Expand chat"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 15l-6-6-6 6"/>
+                </svg>
+              </button>
+            )}
+             <input
+               ref={chatInputRef}
+               value={input}
+               onChange={(e) => setInput(e.target.value)}
+               onKeyDown={(e) => { 
+                 if (e.key === 'Enter') {
+                   if (minimized) {
+                     setMinimized(false);
+                     // Wait for animation to complete before sending (300ms animation)
+                     setTimeout(() => {
+                       sendMessage();
+                     }, 300);
+                   } else {
+                     sendMessage();
+                   }
+                 }
+               }}
+               placeholder="Type a message..."
+               className="flex-1 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-3 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none transition-transform duration-300"
+               style={{ transform: 'scale(1)', transformOrigin: 'left center' }}
+             />
             <button
-              onClick={sendMessage}
+              onClick={() => {
+                if (minimized) {
+                  setMinimized(false);
+                  // Wait for animation to complete before sending (300ms animation)
+                  setTimeout(() => {
+                    sendMessage();
+                  }, 300);
+                } else {
+                  sendMessage();
+                }
+              }}
               disabled={sending}
-              className="inline-flex h-9 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 text-sm font-medium !text-white hover:opacity-95 disabled:opacity-60 disabled:!text-white"
-              style={{ color: 'white' }}
+              className="inline-flex h-11 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-base font-medium !text-white hover:opacity-95 disabled:opacity-60 disabled:!text-white transition-transform duration-300"
+              style={{ color: 'white', transform: 'scale(1)' }}
             >
               {sending ? 'Sending…' : 'Send'}
             </button>
-            {/* Bottom-left resize handle */}
-            <div
-              onMouseDown={(e) => { setResizing(true); setStart({ x: e.clientX, y: e.clientY, w: size.w, h: size.h }); }}
-              title="Resize"
-              className="max-md:hidden absolute left-2 bottom-2 h-3 w-3 cursor-nwse-resize opacity-0"
-            />
+            {minimized && (
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  setMinimized(false);
+                }}
+                className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
+                title="Close chat"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+              </button>
+            )}
           </div>
         </div>
-        </>
-      )}
-    </div>
+          </div>
+        </>,
+        document.body
+      ) : null}
+    </>
   );
 }
 
@@ -2322,8 +2614,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   // Listen for chat sending state changes
   useEffect(() => {
     const handleChatSending = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      setChatSending(customEvent.detail?.sending || false);
+      // Chat sending state is handled internally by ChatDropdown
+      // No need to track it here
     };
 
     document.addEventListener('synapse:chat-sending', handleChatSending as EventListener);
@@ -2628,14 +2920,13 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             </div>
 
             {!isMobile && (
-              <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2">
+              <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2 items-center gap-3">
                 <PomodoroTimer />
               </div>
             )}
 
             <div className="flex items-center gap-2 ml-auto">
               <div className="hidden md:flex items-center gap-2">
-                <ChatDropdown />
                 {/* Info button */}
                 <div
                   className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
@@ -2871,6 +3162,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <div className="absolute left-0 right-0 h-[4px] top-[2px] bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] opacity-90 blur-sm" />
           </div>
         </header>
+        )}
+        {/* Chat button positioned just below header */}
+        {authChecked && isAuthenticated && !isMobile && (
+          <div className="fixed left-1/2 transform -translate-x-1/2 z-40" style={{ top: 'calc(3.5rem + max(3px, calc(env(safe-area-inset-top, 0px) / 2)) - 0.2rem)' }}>
+            <ChatDropdown />
+          </div>
         )}
         <main className="flex-1">{children}</main>
       </div>
