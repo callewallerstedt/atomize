@@ -414,7 +414,7 @@ async function matchExamSnipeToCourse(
 EXAM SNIPE ANALYSIS:
 - Course Name: "${examSnipeInfo.courseName}"
 - Pattern Analysis: "${examSnipeInfo.patternAnalysis}"
-- Main Concepts: ${examSnipeInfo.concepts.map(c => `- ${c.name}: ${c.description}`).join('\n')}
+- Main Concepts: ${examSnipeInfo.concepts.map((c: { name: string; description: string }) => `- ${c.name}: ${c.description}`).join('\n')}
 - Sample Questions: ${examSnipeInfo.commonQuestions.join('\n')}
 
 AVAILABLE COURSES:
