@@ -42,7 +42,7 @@ type SurgeQuizResponse = {
   correctAnswer?: string;
   explanation?: string;
   modelAnswer?: string;
-  stage: "mc" | "harder";
+  stage: "mc" | "harder" | "review";
   score: number;
   submittedAt: number;
   assessment?: string;
@@ -841,7 +841,7 @@ export default function SurgePage() {
       topic: string;
       correctAnswer?: string;
       explanation?: string;
-      stage?: "mc" | "harder";
+      stage?: "mc" | "harder" | "review";
       modelAnswer?: string;
     }>;
     quizStageTransitions: Array<{ from: string; to: string; timestamp: number; topic: string }>;
