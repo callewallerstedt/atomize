@@ -266,6 +266,7 @@ export async function POST(req: Request) {
       } catch {
         data = { subject, topics: [] };
       }
+      }
     } else {
       // Handle case with minimal/no material - generate topics based on subject name
       if ((!combined || combined.trim().length < 50) && files.length === 0) {
