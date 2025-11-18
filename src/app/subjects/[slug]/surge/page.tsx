@@ -4060,10 +4060,6 @@ export default function SurgePage() {
             {phase === "learn" && !showTopicSelection && (
             <div className="space-y-4 min-h-[400px] max-h-[600px] overflow-y-auto rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/50 p-4">
               {conversation.filter(msg => {
-                // Hide all conversation during quiz phase (we use dedicated quiz UI)
-                if (phase === "quiz") {
-                  return false;
-                }
                 // Hide assistant messages that only contain topic suggestions (we show buttons instead)
                 if (msg.role === "assistant" && phase === "learn" && !currentTopic && showTopicSelection) {
                   return false;
@@ -4129,8 +4125,8 @@ export default function SurgePage() {
                 </div>
               ))}
               
-              {/* Show "Chad is thinking" during topic suggestion phase or when sending (but not during topic selection or quiz) */}
-              {phase !== "quiz" && (
+              {/* Show "Chad is thinking" during topic suggestion phase or when sending (but not during topic selection) */}
+              {(
                 (sending && !showTopicSelection) || // Show while sending (until topics are shown)
                 (phase === "learn" && !currentTopic && !showTopicSelection && !sending && conversation.length === 0) // Show if waiting to start topic suggestion
               ) && (
