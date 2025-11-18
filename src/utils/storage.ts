@@ -56,7 +56,7 @@ export type SurgeLogEntry = {
     topic: string;
     correctAnswer?: string;
     explanation?: string;
-    stage?: "mc" | "harder";
+    stage?: "mc" | "harder" | "review";
   }>;
   quizStageTransitions?: Array<{
     from: string;
