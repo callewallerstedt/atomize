@@ -2853,13 +2853,13 @@ export default function SurgePage() {
         currentData.surgeLog.forEach((e: any, idx: number) => {
           if (e.sessionId !== sessionId && originalTimestamps.has(e.sessionId)) {
             const originalTimestamp = originalTimestamps.get(e.sessionId)!;
-            const currentTimestamp = currentData.surgeLog[idx].timestamp;
+            const currentTimestamp = currentData.surgeLog![idx].timestamp;
             if (currentTimestamp !== originalTimestamp) {
               console.warn(`⚠️ RESTORING timestamp for entry ${e.sessionId} from ${currentTimestamp} (${new Date(currentTimestamp).toISOString()}) to ${originalTimestamp} (${new Date(originalTimestamp).toISOString()})`);
             }
             // Force restore
-            currentData.surgeLog[idx] = {
-              ...currentData.surgeLog[idx],
+            currentData.surgeLog![idx] = {
+              ...currentData.surgeLog![idx],
               timestamp: originalTimestamp
             };
           }
@@ -2912,11 +2912,11 @@ export default function SurgePage() {
         currentData.surgeLog.forEach((e: any, idx: number) => {
           if (e.sessionId !== sessionId && originalTimestamps.has(e.sessionId)) {
             const originalTimestamp = originalTimestamps.get(e.sessionId)!;
-            const currentTimestamp = currentData.surgeLog[idx].timestamp;
+            const currentTimestamp = currentData.surgeLog![idx].timestamp;
             if (currentTimestamp !== originalTimestamp) {
               console.error(`❌ ERROR: Entry ${e.sessionId} timestamp was changed! Restoring from ${currentTimestamp} (${new Date(currentTimestamp).toISOString()}) to ${originalTimestamp} (${new Date(originalTimestamp).toISOString()})`);
-              currentData.surgeLog[idx] = {
-                ...currentData.surgeLog[idx],
+              currentData.surgeLog![idx] = {
+                ...currentData.surgeLog![idx],
                 timestamp: originalTimestamp
               };
               anyRestored = true;
