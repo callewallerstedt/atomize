@@ -167,46 +167,121 @@ export async function POST(req: Request) {
     // Revert: do NOT pre-concatenate file contents. Attach original uploaded files to the model.
 
     const system = [
-      "Read ONLY the attached files and any provided text. Do not use external knowledge.",
+      "You are a topic extraction system. Your ONLY job is to extract EVERY topic, concept, method, and technique that appears in the attached files.",
+      "Read ONLY the attached files and any provided text. Do NOT use external knowledge.",
       "If the attached material is insufficient for topic extraction, return JSON with topics: [].",
-      "Task: Extract the most relevant learning topics and core skills from THESE materials.",
+      "",
       "Output STRICT JSON with this exact shape and key order:",
-      "{ subject: string; topics: { name: string; summary: string; coverage: number }[] }",
+      "{ subject: string; topics: { name: string; summary: string }[] }",
+      "",
+      "CRITICAL RULES - EXTRACT EVERYTHING FROM THE FILES:",
+      "- Extract EVERY single topic, concept, method, technique, theory, formula, algorithm, procedure, and subject area that appears in ALL attached files.",
+      "- You MUST extract 20-50+ topics if the material contains that many. Do NOT limit yourself to a small number.",
+      "- Include BOTH major topics AND subtopics as separate entries.",
+      "- Include ALL methods, techniques, formulas, theories, algorithms, procedures, and specific concepts mentioned in the files.",
+      "- Include ALL chapter headings, section titles, subsection titles, and major concepts from the material.",
+      "- If a topic appears multiple times or in different contexts, include it.",
+      "- Extract topics at multiple levels of granularity - both broad concepts AND specific details.",
+      "- Each topic name should be specific and concise (2-6 words), taken directly from the material.",
+      "",
+      "CRITICAL RULES - ONLY EXTRACT FROM PROVIDED FILES:",
+      "- ONLY extract topics that are EXPLICITLY mentioned or clearly present in the attached files.",
+      "- DO NOT invent, assume, or add topics that are not in the files.",
+      "- DO NOT use external knowledge to add topics not found in the files.",
+      "- If a topic is not in the files, DO NOT include it.",
+      "",
       "Inclusion criteria:",
-      "- Keep only explainable concepts, principles, models, theorems, laws, algorithms, procedures, or lab skills.",
-      "- If it cannot be taught or practiced as a standalone mini lesson, exclude it.",
+      "- Keep all explainable concepts, principles, models, theorems, laws, algorithms, procedures, or lab skills found in the files.",
+      "- Include both conceptual areas and essential methods or skills found in the files.",
+      "",
       "Exclusion criteria:",
       "- Exclude metadata, logistics, and admin: einsendeaufgabe, aufgabenstellung, studienheft, code, persönl, personal data, syllabus, grading, schedule, deadlines, instructions, file names, section headers with no conceptual content.",
       "- Exclude section numbers, page numbers, figure/table captions without substance, references, and acknowledgements.",
-      "Topic requirements:",
-      "- Produce 8–16 concise topics, each 2–6 words, covering the course material.",
-      "- Include both conceptual areas and essential methods or skills found in the files.",
-      "- Names must be specific and teachable, e.g., 'Heat Capacity', 'Calorific Value', 'Efficiency Analysis', 'Power Plant Balance'.",
-      "- No duplicates or near duplicates. Prefer the most general useful phrasing.",
+      "- Exclude exam questions, old tests, and administrative content from summaries.",
+      "",
       "Summaries:",
-      "- 1–2 sentences stating what the student will learn or be able to do. Must reflect the provided material.",
-      "Coverage:",
-      "- Integer 0–100 per topic, estimating portion of total content. Sum should be 95–105. Never exceed 105. Never return a topic with 0.",
+      "- A compact, comma-separated list of exactly what the student should learn in this topic, based ONLY on what's in the files.",
+      "- Focus on learning outcomes, concepts, skills, and knowledge found in the material.",
+      "- Ignore exam questions, old tests, or administrative content.",
+      "- Use commas to separate different learning points.",
+      "- Example: 'Understanding heat transfer mechanisms, calculating thermal efficiency, analyzing energy balance equations, applying conservation laws'.",
+      "",
       "Language and formatting:",
       "- Use the same language as the source materials. Capitalize like a title. No quotes.",
-      "- No subtopics, bullets, markdown, or code fences. JSON only.",
-      "Quality controls before returning:",
+      "- No markdown, no code fences, JSON only.",
+      "",
+      "Quality controls:",
       "- Remove any item that matches the exclusion criteria or is not teachable.",
-      "- Merge or rename overlapping items to avoid duplication.",
-      "- If fewer than 8 valid topics remain, prefer broader conceptual groupings found in the files rather than inventing new content.",
+      "- Extract ALL topics from the material - be exhaustive, not selective.",
+      "- If the material covers many topics, extract ALL of them - don't limit yourself.",
       "If any rule cannot be satisfied, return topics: []."
     ].join('\\n');
     
 
-    const inputContent: any[] = [
-      { type: "input_text", text: `Subject: ${subject}\nTask: Read all provided materials and extract the full set of topics and core concepts students need to learn.` },
-    ];
+    console.log(`[extract-by-ids] Processing ${fileIds.length} file IDs for subject: ${subject}`);
+    
+    // Verify all file IDs exist and are accessible
+    const validFileIds: string[] = [];
     for (const id of fileIds) {
-      inputContent.push({ type: "input_file", file_id: id });
+      try {
+        await client.files.retrieve(id);
+        validFileIds.push(id);
+        console.log(`[extract-by-ids] Verified file ID: ${id}`);
+      } catch (err: any) {
+        console.warn(`[extract-by-ids] Invalid or missing file ID ${id}:`, err?.message);
+      }
     }
+    
+    console.log(`[extract-by-ids] Valid file IDs: ${validFileIds.length}/${fileIds.length}`);
+    
+    // If no valid file IDs but we have contextText, use that as fallback
+    if (validFileIds.length === 0 && contextText && contextText.trim().length > 50) {
+      console.log(`[extract-by-ids] No valid file IDs, using contextText (${contextText.length} chars) as fallback`);
+      const inputContent: any[] = [
+        { type: "input_text", text: `Subject: ${subject}\n\nCRITICAL INSTRUCTIONS:\n1. Read through ALL of the material below completely and thoroughly.\n2. Extract EVERY topic, concept, method, technique, theory, formula, algorithm, and procedure that appears in the material.\n3. Extract 20-50+ topics if the material contains that many. Do NOT limit yourself.\n4. Include ALL major topics, subtopics, chapter headings, section titles, and specific concepts.\n5. Extract at multiple levels - both broad concepts AND specific details.\n6. ONLY extract topics that are EXPLICITLY in the material below. Do NOT add topics that aren't there.\n7. Do NOT use external knowledge to invent topics not found in the material.\n\nFor each topic's summary: Create a compact, comma-separated list of learning outcomes, concepts, skills, and knowledge found in the material. Focus on what the student should LEARN based on what's actually in the files.\n\nMaterial:\n${contextText}` },
+      ];
+      
+      const resp = await client.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: inputContent[0].text },
+        ],
+        temperature: 0,
+      });
+      
+      const out = (resp as any).choices?.[0]?.message?.content || "{}";
+      let data: any = {};
+      try {
+        data = JSON.parse(out);
+      } catch {
+        const s = out.indexOf("{"); const e = out.lastIndexOf("}");
+        if (s >= 0 && e > s) data = JSON.parse(out.slice(s, e + 1));
+      }
+      if (!data || !data.subject) data = { subject, topics: Array.isArray(data?.topics) ? data.topics : [] };
+      return NextResponse.json({ ok: true, data, detected_language_code: lang.code, detected_language_name: lang.name, debug: { fileIdsCount: 0, usedContextText: true, contextTextLength: contextText.length } });
+    }
+    
+    if (validFileIds.length === 0) {
+      console.error(`[extract-by-ids] No valid file IDs and no contextText available`);
+      return NextResponse.json({ ok: false, error: "No valid files or context provided" }, { status: 400 });
+    }
+    
+    const inputContent: any[] = [
+      { type: "input_text", text: `Subject: ${subject}\n\nCRITICAL INSTRUCTIONS:\n1. Read through ALL attached files completely and thoroughly.\n2. Extract EVERY topic, concept, method, technique, theory, formula, algorithm, and procedure that appears in the files.\n3. Extract 20-50+ topics if the material contains that many. Do NOT limit yourself.\n4. Include ALL major topics, subtopics, chapter headings, section titles, and specific concepts.\n5. Extract at multiple levels - both broad concepts AND specific details.\n6. ONLY extract topics that are EXPLICITLY in the attached files. Do NOT add topics that aren't there.\n7. Do NOT use external knowledge to invent topics not found in the files.\n\nFor each topic's summary: Create a compact, comma-separated list of learning outcomes, concepts, skills, and knowledge found in the files. Focus on what the student should LEARN based on what's actually in the material.` },
+    ];
+    
+    // Add ALL valid file IDs - ensure none are skipped
+    for (const id of validFileIds) {
+      inputContent.push({ type: "input_file", file_id: id });
+      console.log(`[extract-by-ids] Added file ID to input: ${id}`);
+    }
+    
     if (contextText) {
       inputContent.push({ type: "input_text", text: `Additional context (name, description, notes):\n${contextText}` });
     }
+    
+    console.log(`[extract-by-ids] Sending ${validFileIds.length} files to OpenAI for extraction`);
 
     const resp = await client.responses.create({
       model: "gpt-4o-mini",

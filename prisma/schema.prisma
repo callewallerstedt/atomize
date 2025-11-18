@@ -108,6 +108,7 @@ model ExamSnipeHistory {
   userId     String
   courseName String
   slug       String
+  subjectSlug String? // Link to Subject slug (nullable for backward compatibility)
   fileNames  Json
   results    Json
   createdAt  DateTime @default(now())
@@ -116,4 +117,5 @@ model ExamSnipeHistory {
 
   @@unique([userId, slug])
   @@index([userId, createdAt])
+  @@index([userId, subjectSlug])
 }

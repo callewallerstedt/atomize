@@ -11,6 +11,7 @@ export default function WordPopover({
   loading,
   error,
   content,
+  word,
   onClose,
 }: {
   open: boolean;
@@ -19,6 +20,7 @@ export default function WordPopover({
   loading: boolean;
   error: string | null;
   content: string;
+  word?: string;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -52,29 +54,55 @@ export default function WordPopover({
 
   if (!open || x === 0 || y === 0) return null;
 
-  const finalX = Math.max(12, Math.min(x, window.innerWidth - 380));
-  const finalY = Math.max(12, y);
+  // Center horizontally, position at bottom
+  const popoverWidth = 504; // Match lesson page width
+  const popoverMaxHeight = 400; // Estimate max height
+  const bottomMargin = 16; // Match lesson page margin
+  
+  // Center horizontally using 50% + translateX(-50%)
+  // This ensures it's always centered regardless of screen size
+  const finalX = '50%';
+  
+  // If y is near bottom (targeting bottom position), use bottom CSS property instead
+  // Check if y is within 100px of bottom (indicating we want bottom positioning)
+  const isBottomPosition = y > window.innerHeight - 100;
+  
+  // Calculate position - if targeting bottom, position from bottom, otherwise from top
+  const finalY = isBottomPosition 
+    ? undefined // Will use bottom CSS property
+    : Math.max(12, y);
+  
+  const finalBottom = isBottomPosition ? bottomMargin : undefined;
 
   return (
     <div className="fixed inset-0 z-50 pointer-events-none">
       <div
         ref={ref}
-        className="fixed z-50 w-[360px] max-w-[calc(100vw-24px)] rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/95 backdrop-blur-sm p-4 text-[var(--foreground)] shadow-2xl pointer-events-auto"
+        className="fixed z-50 w-[504px] max-w-[calc(100vw-24px)] max-h-[400px] overflow-y-auto rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/95 backdrop-blur-sm p-4 text-[var(--foreground)] shadow-2xl pointer-events-auto"
         style={{
-          left: `${finalX}px`,
-          top: `${finalY}px`
+          left: finalX,
+          ...(finalY !== undefined ? { top: `${finalY}px` } : {}),
+          ...(finalBottom !== undefined ? { bottom: `${finalBottom}px` } : {}),
+          transform: 'translateX(-50%)', // Center horizontally
         }}
       >
         {loading ? (
-          <div className="flex items-center gap-3 text-sm">
-            <span className="h-3 w-3 animate-pulse rounded-full bg-accent" />
-            Generating explanation…
+          <div className="flex items-center gap-3 text-xl">
+            <span className="h-4 w-4 animate-pulse rounded-full bg-accent" />
+            {word ? `Generating explanation for "${word}"…` : 'Generating explanation…'}
           </div>
         ) : error ? (
-          <div className="text-sm text-[#FFC0DA]">{error}</div>
+          <div className="text-xl text-[#FFC0DA]">{error}</div>
         ) : (
-          <div className="lesson-content text-sm">
-            <LessonBody body={sanitizeLessonBody(String(content || ""))} />
+          <div className="space-y-3">
+            {word && (
+              <div className="text-xl font-semibold text-[var(--accent-cyan)]">
+                "{word}"
+              </div>
+            )}
+            <div className="lesson-content text-xl max-h-64 overflow-y-auto leading-relaxed">
+              <LessonBody body={sanitizeLessonBody(String(content || ""))} />
+            </div>
           </div>
         )}
       </div>

@@ -76,6 +76,9 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
   const [mcResults, setMcResults] = useState<{ [key: number]: { correct: boolean; explanation: string } } | null>(null);
   const [generatingMcQuiz, setGeneratingMcQuiz] = useState(false);
   const [hoverWordRects, setHoverWordRects] = useState<Array<{ left: number; top: number; width: number; height: number }>>([]);
+  const [isScrolling, setIsScrolling] = useState(false);
+  const [cursorHidden, setCursorHidden] = useState(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const currentLesson = (content?.lessons?.[activeLessonIndex] ?? null) as TopicGeneratedLesson | null;
   const lessonFlashcards: LessonFlashcard[] = currentLesson?.flashcards ?? [];
   const lessonMetadata = currentLesson?.metadata || null;
@@ -175,6 +178,56 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
       setIsPlaying(false);
     }
   }
+
+  // Hide hover effect and cursor on scroll
+  useEffect(() => {
+    if (!content) return;
+
+    function handleScroll() {
+      // Clear hover effect immediately
+      setHoverWordRects([]);
+      setIsScrolling(true);
+      setCursorHidden(true);
+
+      // Clear existing timeout
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+
+      // Reset scrolling state after scroll ends (but keep cursor hidden until mouse moves)
+      scrollTimeoutRef.current = setTimeout(() => {
+        setIsScrolling(false);
+      }, 150);
+    }
+
+    function handleMouseMove() {
+      // Show cursor again when mouse moves after scrolling
+      setCursorHidden(false);
+    }
+
+    // Listen to scroll events on the lesson content container and window
+    const lessonContent = document.querySelector('.lesson-content');
+    if (lessonContent) {
+      lessonContent.addEventListener('scroll', handleScroll, { passive: true });
+      lessonContent.addEventListener('mousemove', handleMouseMove, { passive: true });
+    }
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('wheel', handleScroll, { passive: true });
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
+
+    return () => {
+      if (lessonContent) {
+        lessonContent.removeEventListener('scroll', handleScroll);
+        lessonContent.removeEventListener('mousemove', handleMouseMove);
+      }
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('wheel', handleScroll);
+      window.removeEventListener('mousemove', handleMouseMove);
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, [content]);
 
   useEffect(() => {
     return () => {
@@ -1255,7 +1308,7 @@ function toggleStar(flashcardId: string) {
                     )}
                     <div
                       className="lesson-content"
-                      style={{ cursor: hoverWordRects.length > 0 ? 'pointer' : 'default' }}
+                      style={{ cursor: (isScrolling || cursorHidden) ? 'none' : (hoverWordRects.length > 0 ? 'pointer' : 'default') }}
                       onClick={(e) => {
                         try {
                           const target = e.target as HTMLElement | null;

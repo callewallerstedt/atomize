@@ -88,6 +88,14 @@ export async function POST(req: Request) {
       "- Each example should be substantial—not just one-line calculations. Include reasoning, alternative approaches, and common mistakes.",
       "- Include typical pitfalls and how to avoid them. Explain WHY these mistakes happen.",
       "- Include at least: one table, one code example, some inline math and at least one display math block.",
+      "- PRACTICE PROBLEMS: When you write practice problems or exercises, wrap ONLY the problem statement in practice problem containers using this syntax:",
+      "  :::practice-problem",
+      "  [Problem statement here - can include multiple paragraphs, math, lists, etc.]",
+      "  :::",
+      "  ",
+      "  [Solution and explanation goes here, OUTSIDE the container]",
+      "  This will automatically style the problem in a distinctive lozenge-shaped box with a 'Practice Problem' label. The solution should be written immediately after the closing ::: marker, outside the container. Always provide complete, step-by-step solutions for any problems or examples you present.",
+      "- ALWAYS SOLVE EXAMPLES: When you present any example problem, worked example, or practice problem, you MUST provide a complete solution with step-by-step explanations. Never leave problems unsolved - students need to see how to work through them.",
       "- Build narrative flow: connect sections with transitions. Explain how concepts relate to each other.",
       "- End with a `## Quiz` section that lists the questions. Immediately after, include the collapsible `<details>` answer key covering every quiz item in order.",
       "- The metadata `quiz` must exactly match the in-body quiz questions and answers, same order and wording.",
@@ -98,6 +106,8 @@ export async function POST(req: Request) {
       // Scope control
       "Stay strictly on the assigned topic. Use the provided course context to avoid overlap with other lessons.",
       "If mode is simplify, keep scope identical but rewrite explanations to be easier, without changing the quiz meaning.",
+      "",
+      "QUESTION-SPECIFIC FOCUS: If the course_context or topicSummary mentions a specific practice question, the lesson should cover the general topic comprehensively BUT with particular emphasis on the specific aspect, method, or application mentioned in that question. Include detailed explanations, examples, and step-by-step procedures related to what the question is asking about. The lesson should enable the student to understand and solve that specific type of problem.",
       "",
       "FINAL REMINDER: The lesson body MUST be at least 3000 words of substantive content. If you finish writing and it's under 3000 words, ADD MORE sections, examples, explanations, or applications until you reach the required depth."
     ].join("\n");

@@ -1,0 +1,4247 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState, use, useCallback } from "react";
+import { createPortal } from "react-dom";
+import { useParams, useRouter } from "next/navigation";
+import GlowSpinner from "@/components/GlowSpinner";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import remarkGfm from "remark-gfm";
+import "katex/dist/katex.min.css";
+import { LessonBody } from "@/components/LessonBody";
+import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
+import WordPopover from "@/components/WordPopover";
+import { ensureClosedMarkdownFences } from "@/lib/markdownFences";
+import {
+  loadSubjectData,
+  StoredSubjectData,
+  getLastSurgeSession,
+  getSurgeLog,
+  addSurgeLogEntryAsync,
+  updateOrAddSurgeLogEntryAsync,
+  saveSubjectDataAsync,
+  SurgeLogEntry,
+} from "@/utils/storage";
+import { buildQuizJsonInstruction } from "@/utils/surgeQuizPrompts";
+
+type SurgeQuizQuestion = {
+  id: string;
+  question: string;
+  type: "mc" | "short";
+  stage: "mc" | "harder" | "review";
+  options?: string[];
+  correctOption?: string;
+  explanation?: string;
+  modelAnswer?: string;
+};
+
+type SurgeQuizResponse = {
+  answer: string;
+  isCorrect: boolean | null;
+  correctAnswer?: string;
+  explanation?: string;
+  modelAnswer?: string;
+  stage: "mc" | "harder";
+  score: number;
+  submittedAt: number;
+  assessment?: string;
+  whatsGood?: string;
+  whatsBad?: string;
+  enhancedExplanation?: string;
+  checked?: boolean;
+};
+
+function createQuizQuestionId(prefix: string, question: string) {
+  let hash = 0;
+  for (let i = 0; i < question.length; i++) {
+    hash = (hash << 5) - hash + question.charCodeAt(i);
+    hash |= 0;
+  }
+  return `${prefix}-${Math.abs(hash)}`;
+}
+
+function extractSurgeQuizQuestionsFromText(text: string): SurgeQuizQuestion[] {
+  const questions: SurgeQuizQuestion[] = [];
+  const seen = new Set<string>();
+  const pushUnique = (question: SurgeQuizQuestion) => {
+    if (!question.id) return;
+    if (seen.has(question.id)) return;
+    seen.add(question.id);
+    questions.push(question);
+  };
+
+  const blockRegex = /◊(MC|SA):([\s\S]*?)◊/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = blockRegex.exec(text)) !== null) {
+    const typeTag = match[1].toUpperCase();
+    const body = match[2].trim();
+    if (!body) continue;
+
+    if (typeTag === "MC") {
+      const segments = body.split("||").map((s) => s.trim()).filter(Boolean);
+      if (segments.length === 0) continue;
+      const questionAndOptions = segments[0];
+      const correctSegment = segments.find((s) => s.toUpperCase().startsWith("CORRECT"));
+      const explanationSegment = segments.find((s) => s.toUpperCase().startsWith("EXPLANATION"));
+      const correctLetter = correctSegment?.split(":")[1]?.trim().charAt(0).toUpperCase() || "";
+      const explanation = explanationSegment?.split(":").slice(1).join(":").trim() || "";
+      const firstOptionIdx = questionAndOptions.indexOf("A)");
+      const questionText =
+        firstOptionIdx >= 0
+          ? questionAndOptions.slice(0, firstOptionIdx).trim()
+          : questionAndOptions.trim();
+      if (!questionText) continue;
+
+      const optionMatches = Array.from(
+        questionAndOptions.matchAll(/([A-D])\)\s*([^A-D]+?)(?=\s*[A-D]\)|$)/g)
+      );
+      const options = optionMatches.map((opt) => opt[2].trim()).filter(Boolean);
+      if (options.length === 0) continue;
+      const id = createQuizQuestionId("mc", questionText);
+
+      pushUnique({
+        id,
+        question: questionText,
+        type: "mc",
+        stage: "mc",
+        options: options.slice(0, 4),
+        correctOption: correctLetter || undefined,
+        explanation,
+      });
+    } else if (typeTag === "SA") {
+      const segments = body.split("||").map((s) => s.trim()).filter(Boolean);
+      if (segments.length === 0) continue;
+      const questionText = segments[0];
+      const modelSegment = segments.find((s) => s.toUpperCase().startsWith("MODEL_ANSWER"));
+      const explanationSegment = segments.find((s) => s.toUpperCase().startsWith("EXPLANATION"));
+      if (!questionText) continue;
+      const modelAnswer = modelSegment?.split(":").slice(1).join(":").trim() || "";
+      const explanation = explanationSegment?.split(":").slice(1).join(":").trim() || "";
+      const id = createQuizQuestionId("sa", questionText);
+
+      pushUnique({
+        id,
+        question: questionText,
+        type: "short",
+        stage: "harder",
+        modelAnswer,
+        explanation,
+      });
+    }
+  }
+
+  // Attempt to parse JSON payloads embedded in the text
+  const jsonQuestions = extractQuizQuestionsFromJson(text);
+  jsonQuestions.forEach(pushUnique);
+
+  return questions;
+}
+
+type ChatMessage = {
+  role: "user" | "assistant" | "system";
+  content: string;
+  hidden?: boolean;
+  isLoading?: boolean;
+  autoGenerated?: boolean; // For auto-triggered messages that shouldn't be shown
+};
+
+type ParsedAction = {
+  name: string;
+  params: Record<string, string>;
+};
+
+type PracticeLogEntry = {
+  id: string;
+  timestamp: number;
+  topic: string;
+  question: string;
+  answer: string;
+  assessment: string;
+  grade: number;
+};
+
+type SurgePhase = "repeat" | "learn" | "quiz" | "complete";
+
+const PRACTICE_LOG_PREFIX = "atomicPracticeLog:";
+
+type LessonPart = { header: string; content: string };
+
+const TOPIC_SUGGESTION_TARGET = 4;
+const MIN_TOPIC_SUGGESTIONS = 3;
+
+function splitLessonContentIntoParts(fullMessage: string, fallbackHeader: string): LessonPart[] {
+  if (!fullMessage) return [];
+
+  const trySplit = (headerType: "h1" | "h2") => {
+    const headerRegex =
+      headerType === "h1"
+        ? /^#(?!#)\s+(.+)$/
+        : /^##(?!#)\s+(.+)$/;
+
+    const parts: LessonPart[] = [];
+    const lines = fullMessage.split("\n");
+
+    let currentHeader: string | null = null;
+    let currentContent: string[] = [];
+    let inFence = false;
+    let fenceChar: "`" | "~" | null = null;
+    let fenceLength = 0;
+
+    const ensureHeader = () => {
+      if (currentHeader === null) {
+        currentHeader = fallbackHeader || "Lesson";
+        currentContent = [];
+      }
+    };
+
+    const flushCurrent = () => {
+      if (currentHeader !== null && currentContent.length > 0) {
+        const content = currentContent.join("\n").trim();
+        if (content) {
+          parts.push({ header: currentHeader, content });
+        }
+      }
+    };
+
+    const fenceRegex = /^(\s*)(`{3,}|~{3,})/;
+
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      const fenceMatch = line.match(fenceRegex);
+      if (fenceMatch) {
+        const marker = fenceMatch[2];
+        const char = marker[0] as "`" | "~";
+        if (!inFence) {
+          inFence = true;
+          fenceChar = char;
+          fenceLength = marker.length;
+        } else if (fenceChar === char && marker.length >= fenceLength) {
+          inFence = false;
+          fenceChar = null;
+          fenceLength = 0;
+        }
+        ensureHeader();
+        currentContent.push(line);
+        continue;
+      }
+
+      if (inFence) {
+        ensureHeader();
+        currentContent.push(line);
+        continue;
+      }
+
+      const headerMatch = trimmedLine.match(headerRegex);
+      if (headerMatch) {
+        if (currentHeader !== null && currentContent.length > 0) {
+          const content = currentContent.join("\n").trim();
+          if (content) {
+            parts.push({ header: currentHeader, content });
+          }
+        }
+        currentHeader = headerMatch[1]?.trim() || fallbackHeader || "Lesson";
+        currentContent = [];
+        continue;
+      }
+
+      if (currentHeader === null && trimmedLine) {
+        currentHeader = fallbackHeader || "Lesson";
+        currentContent = [];
+      }
+
+      if (currentHeader !== null) {
+        currentContent.push(line);
+      }
+    }
+
+    flushCurrent();
+    return parts;
+  };
+
+  const h1Parts = trySplit("h1");
+  if (h1Parts.length > 0) {
+    return h1Parts;
+  }
+
+  const h2Parts = trySplit("h2");
+  if (h2Parts.length > 0) {
+    return h2Parts;
+  }
+
+  const trimmed = fullMessage.trim();
+  if (trimmed.length > 100) {
+    return [{ header: fallbackHeader || "Lesson", content: fullMessage }];
+  }
+
+  return [];
+}
+
+function extractTopicSuggestions(text: string, requiredCount = TOPIC_SUGGESTION_TARGET): string[] {
+  const topics: string[] = [];
+  const addTopic = (raw?: string | null) => {
+    if (!raw) return;
+    let topic = raw
+      .replace(/^[-•]\s*/, "")
+      .replace(/[`*"_]/g, "")
+      .trim();
+    if (!topic) return;
+    // Remove trailing punctuation or numbering artifacts
+    topic = topic.replace(/^[0-9]+\.\s*/, "").trim();
+    if (!topic) return;
+    if (!topics.includes(topic)) {
+      topics.push(topic);
+    }
+  };
+
+  // Direct TOPIC_SUGGESTION lines
+  const suggestionMatches = text.matchAll(/TOPIC_SUGGESTION:\s*(.+?)(?:\n|$)/gi);
+  for (const match of suggestionMatches) {
+    addTopic(match[1]);
+    if (topics.length >= requiredCount) {
+      return topics.slice(0, requiredCount);
+    }
+  }
+
+  // Bullet fallback
+  if (topics.length < requiredCount) {
+    const bulletMatches = text.matchAll(/(?:^|\n)[-•]\s*([^\n]+)/g);
+    for (const match of bulletMatches) {
+      addTopic(match[1]);
+      if (topics.length >= requiredCount) {
+        return topics.slice(0, requiredCount);
+      }
+    }
+  }
+
+  // Fallback: take first line after each TOPIC_SUGGESTION token even if malformed
+  if (topics.length < requiredCount) {
+    const chunks = text.split(/TOPIC_SUGGESTION:/i).slice(1);
+    for (const chunk of chunks) {
+      const candidate = chunk.split("\n")[0];
+      addTopic(candidate);
+      if (topics.length >= requiredCount) {
+        return topics.slice(0, requiredCount);
+      }
+    }
+  }
+
+  return topics.slice(0, requiredCount);
+}
+
+function sanitizeJsonPayload(raw: string): string {
+  let str = raw.trim();
+  if (!str) return "";
+  if (str.startsWith("```")) {
+    const firstBrace = str.indexOf("{");
+    const lastBrace = str.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      str = str.slice(firstBrace, lastBrace + 1);
+    }
+  }
+  const firstBrace = str.indexOf("{");
+  const lastBrace = str.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    let jsonStr = str.slice(firstBrace, lastBrace + 1);
+    // Remove trailing commas before closing brackets/braces (common JSON parsing issue)
+    jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+    return jsonStr;
+  }
+  return str;
+}
+
+function extractQuizQuestionsFromJson(raw: string): SurgeQuizQuestion[] {
+  const cleaned = sanitizeJsonPayload(raw);
+  if (!cleaned) return [];
+  let json: any;
+  try {
+    json = JSON.parse(cleaned);
+  } catch {
+    return [];
+  }
+  const results: SurgeQuizQuestion[] = [];
+  const mcArray: any[] = Array.isArray(json?.mc)
+    ? json.mc
+    : Array.isArray(json?.questions)
+    ? json.questions
+    : [];
+  mcArray.forEach((item, idx) => {
+    const question = (item?.question ?? "").toString().trim();
+    const optionsRaw: any[] = Array.isArray(item?.options) ? item.options : [];
+    const options = optionsRaw.map((opt) => {
+      let text = (opt ?? "").toString().trim();
+      // Remove letter prefixes like "A) ", "B) ", etc. if they exist
+      text = text.replace(/^[A-D]\)\s*/i, "");
+      return text;
+    }).filter(Boolean).slice(0, 4);
+    const correctOption = (item?.correctOption ?? item?.correct ?? item?.answer ?? "").toString().trim().charAt(0).toUpperCase();
+    const explanation = (item?.explanation ?? "").toString().trim();
+    if (!question || options.length < 2 || !correctOption) {
+      return;
+    }
+    results.push({
+      id: createQuizQuestionId("mc", question + idx),
+      question,
+      type: "mc",
+      stage: "mc",
+      options,
+      correctOption,
+      explanation,
+    });
+  });
+  const shortArray: any[] = Array.isArray(json?.short) ? json.short : [];
+  shortArray.forEach((item, idx) => {
+    const question = (item?.question ?? "").toString().trim();
+    const modelAnswer = (item?.modelAnswer ?? item?.answer ?? "").toString().trim();
+    const explanation = (item?.explanation ?? "").toString().trim();
+    if (!question || !modelAnswer) {
+      return;
+    }
+    results.push({
+      id: createQuizQuestionId("sa", question + idx),
+      question,
+      type: "short",
+      stage: "harder",
+      modelAnswer,
+      explanation,
+    });
+  });
+  return results;
+}
+
+function parseQuizJson(raw: string, stage: "mc" | "harder"): SurgeQuizQuestion[] {
+  const questions = extractQuizQuestionsFromJson(raw);
+  if (!questions.length) {
+    console.error("Surge quiz JSON parse failed; raw payload:", raw?.slice?.(0, 4000) ?? raw);
+    throw new Error("Empty quiz payload");
+  }
+  
+  // Filter by stage
+  let filtered = questions.filter((q) => q.stage === stage);
+  
+  // If we requested MC but got no MC questions, check if we got short questions
+  // In this case, we'll use them as harder questions instead (since short questions are harder)
+  if (stage === "mc" && filtered.length === 0) {
+    const shortQuestions = questions.filter((q) => q.type === "short" || q.stage === "harder");
+    if (shortQuestions.length > 0) {
+      console.warn("Received short answer questions when MC was requested. Using them as harder questions instead.");
+      // Return them as harder questions - the caller can handle this
+      return shortQuestions;
+    }
+  }
+  
+  // If we requested harder but got MC questions, that's fine - just return what we got
+  if (stage === "harder" && filtered.length === 0) {
+    const mcQuestions = questions.filter((q) => q.type === "mc" || q.stage === "mc");
+    if (mcQuestions.length > 0) {
+      console.warn("Received MC questions when harder was requested. Using them anyway.");
+      return mcQuestions;
+    }
+  }
+  
+  return filtered;
+}
+
+function buildSurgeContext(
+  slug: string,
+  data: StoredSubjectData | null,
+  practiceLog: PracticeLogEntry[],
+  lastSurge: SurgeLogEntry | null,
+  examSnipeData: string | null,
+  phase: SurgePhase,
+  currentTopic: string
+): string {
+  const courseLanguageName =
+    data?.course_language_name ||
+    (data?.course_language_code
+      ? data.course_language_code.toUpperCase()
+      : null);
+
+  const lines: string[] = [];
+  const courseName = data?.subject || slug;
+
+  lines.push(`SURGE MODE ACTIVE FOR COURSE "${courseName}" (slug: ${slug})`);
+  lines.push("");
+  
+  if (phase === "repeat") {
+    lines.push("CURRENT PHASE: REPEAT - Testing understanding of previously learned topics");
+    lines.push("");
+    if (lastSurge) {
+      lines.push("TOPICS FROM LAST SURGE SESSION:");
+      const topicsToRepeat = [
+        ...lastSurge.repeatedTopics.map(rt => rt.topic),
+        lastSurge.newTopic
+      ];
+      topicsToRepeat.forEach(topic => {
+        lines.push(`• ${topic}`);
+      });
+      lines.push("");
+      lines.push("INSTRUCTIONS:");
+      lines.push("- Generate focused quiz questions (at least 3 per topic) that test the most fundamental and important parts");
+      lines.push("- Questions must be DIFFERENT from previous questions asked about these topics");
+      lines.push("- Focus on understanding and implementation of core concepts");
+      lines.push("- Test the most important aspects that the user needs to remember");
+    } else {
+      lines.push("FIRST SURGE SESSION - No previous topics to repeat");
+      lines.push("Skip to LEARN phase or ask general course overview questions");
+    }
+  } else if (phase === "learn") {
+    lines.push("CURRENT PHASE: LEARN - Suggesting and teaching a new topic");
+    lines.push("");
+    if (!currentTopic) {
+      lines.push("INITIAL STEP - TOPIC SELECTION:");
+      lines.push("- CRITICAL: You MUST use the COURSE CONTEXT section below (course files, course summary, available topics)");
+      lines.push("- Analyze what topics have been covered in previous Surge sessions");
+      lines.push("- Check exam snipe analysis for high-priority concepts FROM THIS COURSE");
+      lines.push("- Review course material topics from the COURSE CONTEXT section");
+      lines.push("- Suggest exactly 4 topics that would provide maximum study value FOR THIS SPECIFIC COURSE");
+      lines.push("- Prioritize: (1) Exam snipe concepts not yet covered, (2) Course topics not yet learned");
+      lines.push("- CRITICAL: Use the exact concept names from EXAM SNIPE ANALYSIS or the course topics list. Do NOT output broad categories (e.g., 'Machine Learning overview'). Pick actionable, exam-ready topics (e.g., 'Naiv Bayesiansk Klassificering').");
+      lines.push("- ALL topic suggestions MUST be relevant to this course and based on the course context provided");
+      if (courseLanguageName) {
+        lines.push(`- LANGUAGE REQUIREMENT: Output all topic names exactly as they appear in ${courseLanguageName} (the course language). Do NOT translate them into any other language.`);
+      }
+      lines.push("");
+      lines.push("CRITICAL OUTPUT REQUIREMENTS:");
+      lines.push("- Your ENTIRE response must be EXACTLY these 4 lines (copy this format exactly):");
+      lines.push("TOPIC_SUGGESTION: Topic Name 1");
+      lines.push("TOPIC_SUGGESTION: Topic Name 2");
+      lines.push("TOPIC_SUGGESTION: Topic Name 3");
+      lines.push("TOPIC_SUGGESTION: Topic Name 4");
+      lines.push("");
+      lines.push("ABSOLUTE RULES:");
+      lines.push("- DO NOT use dashes, bullets, or any other formatting");
+      lines.push("- DO NOT write ANY text before the first TOPIC_SUGGESTION line");
+      lines.push("- DO NOT write ANY text after the last TOPIC_SUGGESTION line");
+      lines.push("- DO NOT write introductions, explanations, questions, or commentary");
+      lines.push("- DO NOT say 'here are the topics' or 'I suggest' or anything similar");
+      lines.push("- START your response immediately with 'TOPIC_SUGGESTION:' (no spaces before it)");
+      lines.push("- Each line must start with 'TOPIC_SUGGESTION: ' followed by the topic name");
+      lines.push("- Use exactly this format: 'TOPIC_SUGGESTION: [topic name]' on each line");
+      lines.push("- NO dashes, NO bullets, NO markdown formatting - just the 4 TOPIC_SUGGESTION lines");
+      lines.push("- If you write anything other than the 4 TOPIC_SUGGESTION lines, it will break the system");
+    } else {
+      lines.push("TEACHING TOPIC: " + currentTopic);
+      lines.push("");
+      lines.push("CRITICAL: The user has selected a topic to learn. You MUST generate a lesson, NOT suggest topics.");
+      lines.push("DO NOT suggest topics. DO NOT ask what topic to teach. The topic is: " + currentTopic);
+      if (courseLanguageName) {
+        lines.push(`LANGUAGE REQUIREMENT: Write the ENTIRE lesson (all explanations, examples, and questions) in ${courseLanguageName}. Do NOT switch languages or translate unless explicitly asked by the user.`);
+      } else {
+        lines.push("LANGUAGE REQUIREMENT: Detect the dominant language of the course materials and write the entire lesson in that language. Do NOT switch languages unless the user specifically requests it.");
+      }
+      lines.push("");
+      lines.push("INSTRUCTIONS FOR LESSON GENERATION:");
+      lines.push("- Generate a comprehensive, in-depth lesson on the selected topic: " + currentTopic);
+      lines.push("- Structure the lesson as 3-6 progressive chapters, each building on the previous");
+      lines.push("- CRITICAL LENGTH REQUIREMENTS: The lesson body MUST contain AT LEAST 3000 words of explanatory prose");
+      lines.push("- Target length: 4000-6000 words. If you reach 3000 words and haven't fully covered the topic, CONTINUE writing until you reach comprehensive depth");
+      lines.push("- Count only actual prose text—do not count LaTeX delimiters, code blocks, JSON syntax, or markdown formatting");
+      lines.push("- Expand each concept with genuine explanations, derivations, examples, and narrative transitions. Do NOT pad with fluff");
+      lines.push("");
+      lines.push("CRITICAL: EXPLAIN FOR BEGINNERS - NO PRIOR KNOWLEDGE ASSUMED:");
+      lines.push("- Assume the student has ZERO prior knowledge of this topic. Explain as if teaching someone completely new to the subject");
+      lines.push("- Start with the SIMPLEST possible explanations. Use everyday language and analogies before introducing technical terms");
+      lines.push("- Progressively increase complexity: Simple → Intermediate → Advanced. Each chapter should build naturally on the previous");
+      lines.push("- AVOID unnecessarily complex vocabulary. Use simple, clear words whenever possible. If you must use technical terms, define them immediately in plain language");
+      lines.push("- When introducing new concepts, explain them using familiar ideas first, then gradually introduce the formal terminology");
+      lines.push("- Break down complex ideas into smaller, digestible pieces. Don't jump ahead - ensure each step is fully understood before moving to the next");
+      lines.push("- Use concrete examples before abstract concepts. Show practical applications before diving into theory");
+      lines.push("- If a concept requires prerequisite knowledge, explain those prerequisites first in simple terms");
+      lines.push("- Write in a conversational, accessible tone. Avoid academic jargon unless absolutely necessary, and always explain it");
+      lines.push("- Remember: clarity and simplicity are more important than sounding sophisticated. The goal is understanding, not impressing");
+      lines.push("");
+      lines.push("CRITICAL: COURSE CONTEXT USAGE:");
+      lines.push("- The COURSE CONTEXT section below contains the course files, course summary, and available topics");
+      lines.push("- You MUST use this course context throughout ALL chapters of the lesson generation");
+      lines.push("- When explaining concepts, use terminology, notation, and examples that match the course material");
+      lines.push("- Reference specific content from the course files when relevant");
+      lines.push("- Ensure your explanations align with how the course teaches concepts");
+      lines.push("- If the topic is a custom topic (not in the course topics list), still explain it WITHIN the context of this course");
+      lines.push("- Connect the topic to other course topics and concepts where relevant");
+      lines.push("");
+      lines.push("CRITICAL: EXAM ANALYSIS CONTEXT USAGE:");
+      lines.push("- The EXAM SNIPE ANALYSIS section below contains HIGH-VALUE information from past exams FOR THIS COURSE");
+      lines.push("- You MUST use this exam analysis throughout ALL chapters of the lesson generation");
+      lines.push("- Prioritize concepts, methods, and question types that appear frequently in the exam analysis");
+      lines.push("- When creating examples, base them on the common question patterns from the exam analysis");
+      lines.push("- When explaining concepts, emphasize aspects that are frequently tested according to the exam analysis");
+      lines.push("- When teaching problem-solving methods, focus on approaches that match exam question formats");
+      lines.push("- Reference exam connections and patterns throughout the lesson to show exam relevance");
+      lines.push("- The exam analysis shows what examiners value most—your lesson should prepare students for exactly those questions");
+      lines.push("- If exam analysis shows specific question types or formats, include similar examples in your lesson");
+      lines.push("- If exam analysis shows common pitfalls or mistakes, address them explicitly in your lesson");
+      lines.push("- ALWAYS keep the exam analysis in mind when generating each chapter—it should inform your content choices");
+      lines.push("- COMBINE course context with exam analysis: Use course material to explain concepts, but prioritize exam-tested aspects");
+      lines.push("");
+      lines.push("STRUCTURE AND FORMATTING:");
+      lines.push("- Output MUST be a single Markdown document. No commentary outside the document. Use real newlines. Do not double-escape backslashes");
+      lines.push("- Use H1 headings (#) for chapter titles. Create 3-6 chapters that progress from basics to advanced");
+      lines.push("- Use H2 headings (##) and H3 headings (###) within chapters for sections and subsections");
+      lines.push("- Always put ONE blank line before and after headings, lists, code fences, tables, and display math");
+      lines.push("- Use multiple H2/H3 sections within each chapter. Each major section should contain multiple paragraphs (3-5 sentences each) before moving on");
+      lines.push("- Markdown only. No HTML except practice problem containers");
+      lines.push("- Tables must use pipe syntax with a header separator row (`|---|`)");
+      lines.push("- Every code fence MUST specify a language (```python, ```javascript, ```c, etc.). Snippets should be runnable or compile as shown");
+      lines.push("- Math uses KaTeX-compatible LaTeX only: inline `$...$`, display `\\[ ... \\]` on their own lines. Avoid environments like `align`. Use `\\text{}` for words. Escape `_` in text as needed");
+      lines.push("- Do NOT include links, images, Mermaid, or raw HTML other than practice problem containers");
+      lines.push("- Do NOT assume prior knowledge. Define symbols and notation when first used");
+      lines.push("");
+      lines.push("PEDAGOGY AND STRUCTURE:");
+      lines.push("- ADAPTIVE STRUCTURE: Organize the lesson in a way that best fits THIS SPECIFIC TOPIC. Do NOT use a rigid template or force topics into predefined chapter structures");
+      lines.push("- Let the topic guide the organization. Some topics need more theory first, others need examples first, some need both interwoven");
+      lines.push("- The goal is to teach the student HOW TO UNDERSTAND and HOW TO USE the topic, not just what it is");
+      lines.push("- PROGRESSIVE DIFFICULTY: Start simple and gradually increase complexity, but let the natural flow of the topic determine the progression");
+      lines.push("- BEGINNER-FIRST APPROACH: In early chapters, use the simplest possible language. Save technical terminology for later when concepts are understood");
+      lines.push("- DEPTH REQUIREMENT: Each concept must be explained thoroughly with context, motivation, and connections to other ideas");
+      lines.push("- FOCUS ON UNDERSTANDING: Explain not just what things are, but WHY they work, HOW they're used, and WHEN to apply them");
+      lines.push("- FOCUS ON USAGE: Include practical examples showing how to actually use the topic. Show real-world applications and problem-solving approaches");
+      lines.push("- Include MULTIPLE worked examples (at least 3-5 total across all chapters) that progress from easy to hard. Show all steps, and explain WHY each step is taken");
+      lines.push("- Each example should be substantial—not just one-line calculations. Include reasoning, alternative approaches, and common mistakes");
+      lines.push("- Include typical pitfalls and how to avoid them. Explain WHY these mistakes happen");
+      lines.push("- Include at least: one table, one code example, some inline math and at least one display math block");
+      lines.push("- PRACTICE PROBLEMS: When you write practice problems or exercises, wrap ONLY the problem statement in practice problem containers using this syntax:");
+      lines.push("  :::practice-problem");
+      lines.push("  [Problem statement here - can include multiple paragraphs, math, lists, etc.]");
+      lines.push("  :::");
+      lines.push("  ");
+      lines.push("  [Solution and explanation goes here, OUTSIDE the container]");
+      lines.push("  This will automatically style the problem in a distinctive lozenge-shaped box with a 'Practice Problem' label. The solution should be written immediately after the closing ::: marker, outside the container. Always provide complete, step-by-step solutions for any problems or examples you present.");
+      lines.push("- ALWAYS SOLVE EXAMPLES: When you present any example problem, worked example, or practice problem, you MUST provide a complete solution with step-by-step explanations. Never leave problems unsolved - students need to see how to work through them");
+      lines.push("- Build narrative flow: connect sections with transitions. Explain how concepts relate to each other");
+      lines.push("- Focus on exam preparation: ensure students can solve exam-style problems after completing all chapters");
+      lines.push("- Use the exam analysis to guide what problems to include and how to structure examples");
+      lines.push("");
+      lines.push("CHAPTER ORGANIZATION:");
+      lines.push("- Create 3-6 chapters that naturally break down the topic");
+      lines.push("- Let the topic's structure determine chapter organization. For example:");
+      lines.push("  * A procedural topic might organize by steps or stages");
+      lines.push("  * A conceptual topic might organize by building from simple to complex ideas");
+      lines.push("  * A tool/technology topic might organize by use cases or features");
+      lines.push("  * A mathematical topic might organize by techniques or problem types");
+      lines.push("- Each chapter should have a clear purpose that advances understanding and ability to use the topic");
+      lines.push("- Chapters should build on each other, but the progression should feel natural for the topic");
+      lines.push("- Each chapter should be substantial with multiple H2/H3 sections and multiple paragraphs");
+      lines.push("- CRITICAL: The difficulty curve must be gradual. Never jump from simple to complex without building the bridge in between");
+      lines.push("- DO NOT force topics into generic structures like 'Introduction → Concepts → Methods → Applications'. Instead, organize based on what makes sense for THIS topic");
+      lines.push("");
+      lines.push("OUTPUT FORMAT:");
+      lines.push("Write a single, continuous Markdown document with H1 headings for chapters:");
+      lines.push("");
+      lines.push("# Chapter 1: [Chapter Title]");
+      lines.push("");
+      lines.push("## Section Title");
+      lines.push("");
+      lines.push("[Substantial content with multiple paragraphs, examples, explanations, math, etc.]");
+      lines.push("");
+      lines.push("### Subsection Title");
+      lines.push("");
+      lines.push("[More content...]");
+      lines.push("");
+      lines.push("# Chapter 2: [Chapter Title]");
+      lines.push("");
+      lines.push("[Continue with 3-6 chapters total, each with H2/H3 sections and substantial content]");
+      lines.push("");
+      lines.push("REMEMBER: The topic is already selected. Generate the lesson NOW, do NOT suggest topics.");
+      lines.push("This is a comprehensive, progressive lesson that teaches from basics to exam-level competence. The lesson body MUST be at least 3000 words of substantive content.");
+    }
+  } else if (phase === "quiz") {
+    lines.push("CURRENT PHASE: QUIZ - Testing the new topic");
+    lines.push("");
+    lines.push("INSTRUCTIONS FOR QUIZ GENERATION:");
+    lines.push("- Generate exactly 5 multiple choice questions first (progressing from easy to hard, focusing on understanding and implementation)");
+    lines.push("- Format each MC question EXACTLY as: ◊MC: Question text? A) Option 1 B) Option 2 C) Option 3 D) Option 4 || CORRECT: <letter> || EXPLANATION: <short explanation>◊");
+    lines.push("- CORRECT must be the letter (A, B, C, D) for the right option, EXPLANATION must describe why it is correct");
+    lines.push("- After 5 MC questions are answered, generate 4 harder questions (short answer or explanation)");
+    lines.push("- Format each harder question EXACTLY as: ◊SA: Question text? || MODEL_ANSWER: <ideal answer> || EXPLANATION: <reasoning and steps>◊");
+    lines.push("- MODEL_ANSWER should be a concise but complete solution; EXPLANATION should walk through the reasoning");
+    lines.push("- Questions should test understanding of the topic just taught");
+    lines.push("- Use ◊ delimiters for ALL questions");
+  }
+
+  lines.push("");
+  lines.push("=".repeat(80));
+  lines.push("COURSE CONTEXT - CRITICAL: YOU MUST USE THIS CONTEXT");
+  lines.push("=".repeat(80));
+  lines.push("");
+  lines.push("⚠️ MANDATORY: All your responses (topic suggestions, lessons, explanations) MUST be based on");
+  lines.push("this course context. Use the course files, course summary, and topics listed below.");
+  lines.push("When explaining ANY topic (including custom topics), explain it WITHIN the context of this course.");
+  lines.push("");
+  if (data) {
+    if (data.course_context) {
+      lines.push("COURSE SUMMARY:");
+      lines.push(data.course_context);
+      lines.push("");
+    }
+    if (data.combinedText) {
+      lines.push(`COURSE FILES CONTENT (${data.combinedText.length} total chars, showing up to 20,000 chars):`);
+      lines.push("This contains the actual course material from uploaded files. Use this content to:");
+      lines.push("- Understand the course scope and depth");
+      lines.push("- Extract relevant examples and concepts");
+      lines.push("- Match terminology and notation used in the course");
+      lines.push("- Ensure your explanations align with how the course teaches concepts");
+      lines.push("");
+      lines.push(data.combinedText.slice(0, 20000)); // Increased to 20k chars
+      if (data.combinedText.length > 20000) {
+        lines.push("");
+        lines.push(`[Note: Course files content truncated. Total length: ${data.combinedText.length} chars]`);
+      }
+      lines.push("");
+    }
+    if (data.topics && data.topics.length > 0) {
+      lines.push("AVAILABLE TOPICS IN THIS COURSE:");
+      data.topics.forEach(topic => {
+        lines.push(`• ${topic.name}${topic.summary ? ` - ${topic.summary}` : ""}`);
+      });
+      lines.push("");
+      lines.push("When suggesting topics, prioritize topics from this list that align with exam snipe analysis.");
+    }
+  } else {
+    lines.push("⚠️ WARNING: No course data available");
+  }
+  lines.push("=".repeat(80));
+
+  lines.push("");
+  lines.push("=".repeat(80));
+  lines.push("EXAM SNIPE ANALYSIS - CRITICAL CONTEXT FOR LESSON GENERATION");
+  lines.push("=".repeat(80));
+  if (examSnipeData) {
+    lines.push("");
+    lines.push("⚠️ MANDATORY USAGE: This exam snipe analysis contains HIGH-VALUE information from past exams.");
+    lines.push("You MUST reference and use this analysis throughout ALL parts of the lesson you generate.");
+    lines.push("");
+    lines.push("HOW TO USE EXAM ANALYSIS IN LESSON GENERATION:");
+    lines.push("1. PRIORITIZE CONTENT: Focus on concepts, methods, and question types that appear frequently");
+    lines.push("2. SHAPE EXAMPLES: Base your worked examples on common question patterns from the analysis");
+    lines.push("3. EMPHASIZE TESTED ASPECTS: When explaining concepts, emphasize what examiners test most");
+    lines.push("4. MATCH EXAM FORMATS: Structure problem-solving methods to match exam question formats");
+    lines.push("5. ADDRESS COMMON PATTERNS: Include examples that mirror the question types shown in the analysis");
+    lines.push("6. REFERENCE EXAM CONNECTIONS: Throughout the lesson, show how content connects to exam questions");
+    lines.push("7. PREPARE FOR SPECIFIC QUESTIONS: If the analysis shows specific question types, teach those explicitly");
+    lines.push("8. ADDRESS PITFALLS: If the analysis mentions common mistakes, address them in your lesson");
+    lines.push("");
+    lines.push("EXAM SNIPE ANALYSIS DATA:");
+    lines.push(examSnipeData);
+    lines.push("");
+    lines.push("REMEMBER: The exam analysis shows what examiners value most. Your lesson should prepare students");
+    lines.push("for exactly those questions. Keep this analysis in mind when generating EVERY part of the lesson.");
+  } else {
+    lines.push("");
+    lines.push("⚠️ NO EXAM SNIPE ANALYSIS AVAILABLE:");
+    lines.push("No exam snipe data found. Generate lesson based on course materials and general best practices.");
+    lines.push("If exam snipe analysis becomes available, it should be prioritized for future lessons.");
+  }
+  lines.push("=".repeat(80));
+
+  if (practiceLog.length > 0) {
+    lines.push("");
+    lines.push("PRACTICE LOG HISTORY (last 20 entries):");
+    practiceLog.slice(-20).forEach(entry => {
+      lines.push(`[${entry.topic}] Q: ${entry.question} | A: ${entry.answer} | Grade: ${entry.grade}/10`);
+    });
+  }
+
+  if (lastSurge) {
+    lines.push("");
+    lines.push("LAST SURGE SESSION SUMMARY:");
+    lines.push(lastSurge.summary);
+  }
+
+  // Add all previously covered topics from surge log
+  if (data?.surgeLog && data.surgeLog.length > 0) {
+    lines.push("");
+    lines.push("ALL PREVIOUSLY COVERED TOPICS (from all Surge sessions):");
+    const coveredTopics = new Set<string>();
+    data.surgeLog.forEach(entry => {
+      entry.repeatedTopics.forEach(rt => coveredTopics.add(rt.topic));
+      if (entry.newTopic) coveredTopics.add(entry.newTopic);
+    });
+    if (coveredTopics.size > 0) {
+      Array.from(coveredTopics).forEach(topic => {
+        lines.push(`• ${topic}`);
+      });
+    } else {
+      lines.push("• No topics covered yet");
+    }
+  }
+
+  lines.push("");
+  return lines.join("\n");
+}
+
+export default function SurgePage() {
+  // In Next.js 16, useParams may return a Promise - unwrap it with use()
+  // Store params in a variable first to avoid enumeration issues
+  const paramsPromiseOrValue = useParams<{ slug: string }>();
+  // If it's a Promise, unwrap it; otherwise use directly
+  const params = paramsPromiseOrValue && typeof paramsPromiseOrValue === 'object' && 'then' in paramsPromiseOrValue
+    ? use(paramsPromiseOrValue as unknown as Promise<{ slug: string }>)
+    : (paramsPromiseOrValue as { slug: string } | undefined);
+  const slug = params?.slug ?? "";
+  const router = useRouter();
+
+  const [data, setData] = useState<StoredSubjectData | null>(null);
+  const [practiceLog, setPracticeLog] = useState<PracticeLogEntry[]>([]);
+  const [examSnipeData, setExamSnipeData] = useState<string | null>(null);
+  const [lastSurge, setLastSurge] = useState<SurgeLogEntry | null>(null);
+  const [phase, setPhase] = useState<SurgePhase>("repeat");
+  const [currentTopic, setCurrentTopic] = useState<string>("");
+  const [isMounted, setIsMounted] = useState(false);
+  // Try to resume existing in-progress session, or create new one
+  const [sessionId] = useState<string>(() => {
+    // Check if there's an in-progress session we should resume
+    try {
+      const stored = localStorage.getItem(`atomicSubjectData:${slug}`);
+      if (stored) {
+        const data = JSON.parse(stored);
+        const surgeLog = data?.surgeLog || [];
+        // Find the most recent in-progress session (has "(In Progress)" in summary)
+        const inProgress = surgeLog
+          .filter((e: any) => e.summary && e.summary.includes("(In Progress)"))
+          .sort((a: any, b: any) => b.timestamp - a.timestamp)[0];
+        if (inProgress) {
+          console.log("Resuming existing in-progress session:", {
+            sessionId: inProgress.sessionId,
+            timestamp: inProgress.timestamp,
+            date: new Date(inProgress.timestamp).toISOString()
+          });
+          return inProgress.sessionId;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check for existing session:", e);
+    }
+    // Create new session
+    const newId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    console.log("Creating new session:", newId);
+    return newId;
+  });
+  
+  const [conversation, setConversation] = useState<ChatMessage[]>([]);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const conversationRef = useRef<ChatMessage[]>([]);
+  const [surgeContext, setSurgeContext] = useState<string>("");
+  const harderQuestionsRequested = useRef(false);
+  const lastSavedQuizCount = useRef(0);
+  const [sessionData, setSessionData] = useState<{
+    repeatedTopics: Array<{
+      topic: string;
+      questions: Array<{ question: string; answer: string; grade: number }>;
+      averageScore: number;
+    }>;
+    newTopic: string;
+    newTopicLesson: string;
+    quizResults: Array<{
+      question: string;
+      answer: string;
+      grade: number;
+      topic: string;
+      correctAnswer?: string;
+      explanation?: string;
+      stage?: "mc" | "harder";
+      modelAnswer?: string;
+    }>;
+    quizStageTransitions: Array<{ from: string; to: string; timestamp: number; topic: string }>;
+    mcStageCompletedAt?: number;
+  }>({
+    repeatedTopics: [],
+    newTopic: "",
+    newTopicLesson: "",
+    quizResults: [],
+    quizStageTransitions: [],
+  });
+  const [currentQuestion, setCurrentQuestion] = useState<string>("");
+  const [lastAssistantMessage, setLastAssistantMessage] = useState<string>("");
+  
+  // Quiz state
+  const [quizQuestions, setQuizQuestions] = useState<SurgeQuizQuestion[]>([]);
+  const [currentQuizIndex, setCurrentQuizIndex] = useState<number>(0);
+  const [shortAnswer, setShortAnswer] = useState<string>("");
+  const [quizLoading, setQuizLoading] = useState(false);
+  const [quizFailureMessage, setQuizFailureMessage] = useState<string | null>(null);
+  const [quizInfoMessage, setQuizInfoMessage] = useState<string | null>(null);
+  const [quizResponses, setQuizResponses] = useState<Record<string, SurgeQuizResponse>>({});
+  const [checkingAnswer, setCheckingAnswer] = useState(false);
+  
+  const applyQuizQuestions = (
+    newQuestions: SurgeQuizQuestion[],
+    stage: "mc" | "harder" | "review",
+    replace = false
+  ): boolean => {
+    if (!newQuestions.length) return false;
+    
+    // Add topic to each question if not already present
+    const topicName = currentTopic || sessionData.newTopic || data?.subject || "Unknown Topic";
+    const questionsWithTopic = newQuestions.map(q => ({
+      ...q,
+      topic: (q as any).topic || topicName,
+    }));
+    
+    let added = false;
+    let insertionIndex: number | null = null;
+    let resetToFirstMc = false;
+    let jumpToHarder = false;
+
+    setQuizQuestions((prev) => {
+      const prevLength = prev.length;
+      if (stage === "mc" && (replace || prev.length === 0)) {
+        added = true;
+        insertionIndex = 0;
+        resetToFirstMc = true;
+        return questionsWithTopic;
+      }
+      const existingIds = new Set(prev.map((q) => q.id));
+      const additions = questionsWithTopic.filter((q) => !existingIds.has(q.id));
+      if (!additions.length) {
+        added = prev.some((q) => q.stage === stage);
+        return prev;
+      }
+      const hadStageQuestions = prev.some((q) => q.stage === stage);
+      insertionIndex = prev.length;
+      added = true;
+      if (stage === "harder" && !hadStageQuestions) {
+        jumpToHarder = true;
+      }
+      return [...prev, ...additions];
+    });
+
+    if (added) {
+      setQuizLoading(false);
+      setQuizInfoMessage(null);
+      setQuizFailureMessage(null);
+      setSending(false);
+      if (stage === "harder") {
+        harderQuestionsRequested.current = false;
+      }
+      if (stage === "harder" && jumpToHarder && insertionIndex !== null) {
+        setCurrentQuizIndex(insertionIndex);
+        setShortAnswer("");
+      } else if (stage === "mc" && resetToFirstMc) {
+        setCurrentQuizIndex(0);
+        setShortAnswer("");
+      }
+    }
+
+    return added;
+  };
+
+  // Word popover state
+  const [explanationPosition, setExplanationPosition] = useState({ x: 0, y: 0 });
+  const [explanationWord, setExplanationWord] = useState<string>("");
+  const [showExplanation, setShowExplanation] = useState(false);
+  const [explanationLoading, setExplanationLoading] = useState(false);
+  const [explanationError, setExplanationError] = useState<string | null>(null);
+  const [explanationContent, setExplanationContent] = useState<string>("");
+  const [hoverWordRects, setHoverWordRects] = useState<Array<{ left: number; top: number; width: number; height: number }>>([]);
+  const [isScrolling, setIsScrolling] = useState(false);
+  const [cursorHidden, setCursorHidden] = useState(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [suggestedTopics, setSuggestedTopics] = useState<string[]>([]);
+  const [showTopicSelection, setShowTopicSelection] = useState(false);
+  const [customTopicInput, setCustomTopicInput] = useState("");
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const topicSuggestionTriggered = useRef(false);
+  const userSetPhaseRef = useRef(false); // Track if user has manually set the phase
+  const initialPhaseSetRef = useRef(false); // Track if initial phase has been set to prevent override
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [examSnipeLoaded, setExamSnipeLoaded] = useState(false);
+  const [lessonParts, setLessonParts] = useState<LessonPart[]>([]);
+  const [currentPartIndex, setCurrentPartIndex] = useState(0);
+  const [showLessonCard, setShowLessonCard] = useState(false);
+  const currentPartIndexRef = useRef(0);
+
+  const scrollLessonToTop = useCallback(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch {
+      window.scrollTo(0, 0);
+    }
+    requestAnimationFrame(() => {
+      const lessonContent = document.querySelector(".surge-lesson-card .lesson-content");
+      if (lessonContent instanceof HTMLElement) {
+        try {
+          lessonContent.scrollTo({ top: 0, behavior: "smooth" });
+        } catch {
+          lessonContent.scrollTop = 0;
+        }
+      }
+    });
+  }, []);
+
+  // Scroll to top when part changes (but don't sync ref - ref is source of truth)
+  // REMOVED: Auto-scrolling interferes with user navigation during streaming
+  // useEffect(() => {
+  //   // Scroll to top of lesson content when part changes
+  //   if (showLessonCard && lessonParts.length > 0) {
+  //     const lessonContent = document.querySelector('.lesson-content');
+  //     if (lessonContent) {
+  //       lessonContent.scrollTop = 0;
+  //     }
+  //   }
+  // }, [currentPartIndex, showLessonCard, lessonParts.length]);
+
+  // Load course data, practice logs, exam snipe, and last surge
+  useEffect(() => {
+    const loaded = loadSubjectData(slug);
+    setData(loaded);
+    setDataLoaded(true);
+
+    // Load practice logs
+    try {
+      const logRaw = localStorage.getItem(`${PRACTICE_LOG_PREFIX}${slug}`);
+      if (logRaw) {
+        const logs = JSON.parse(logRaw) as PracticeLogEntry[];
+        setPracticeLog(logs);
+      }
+    } catch (e) {
+      console.warn("Failed to load practice logs:", e);
+    }
+
+    // Load exam snipe data
+    (async () => {
+      try {
+        const meRes = await fetch("/api/me", { credentials: "include" });
+        const meJson = await meRes.json().catch(() => ({}));
+        if (meJson?.user) {
+          // Try fetching by subjectSlug first
+          const examRes = await fetch(`/api/exam-snipe/history?subjectSlug=${encodeURIComponent(slug)}`, {
+            credentials: "include",
+          });
+          const examJson = await examRes.json().catch(() => ({}));
+          if (examRes.ok) {
+            // If we got a list, find the most recent one
+            if (examJson?.history && Array.isArray(examJson.history) && examJson.history.length > 0) {
+              const mostRecent = examJson.history[0];
+              if (mostRecent?.results) {
+                setExamSnipeData(JSON.stringify(mostRecent.results, null, 2));
+              }
+            } else if (examJson?.record?.results) {
+              // Single record response
+              setExamSnipeData(JSON.stringify(examJson.record.results, null, 2));
+            }
+          }
+        }
+        setExamSnipeLoaded(true);
+      } catch (e) {
+        console.warn("Failed to load exam snipe:", e);
+        setExamSnipeLoaded(true); // Mark as loaded even if failed (no exam snipe available)
+      }
+    })();
+
+    // Load last surge session
+    const last = getLastSurgeSession(slug);
+    const allEntries = (() => {
+      try {
+        const stored = localStorage.getItem(`atomicSubjectData:${slug}`);
+        if (stored) {
+          const data = JSON.parse(stored);
+          return (data?.surgeLog || []).map((e: any) => ({
+            sessionId: e.sessionId,
+            timestamp: e.timestamp,
+            date: new Date(e.timestamp).toISOString()
+          }));
+        }
+      } catch {}
+      return [];
+    })();
+    
+    console.log("=== LOADED LAST SURGE DEBUG ===");
+    console.log("Selected lastSurge:", {
+      sessionId: last?.sessionId,
+      timestamp: last?.timestamp,
+      date: last ? new Date(last.timestamp).toISOString() : "none"
+    });
+    console.log("All entries in localStorage:", JSON.stringify(allEntries, null, 2));
+    console.log("=== LOADED LAST SURGE DEBUG END ===");
+    setLastSurge(last);
+
+    // Reset user-set phase flag when slug changes (new course)
+    userSetPhaseRef.current = false;
+    initialPhaseSetRef.current = false;
+
+    // Always start with review phase
+    let initialPhase: "learn" | "repeat" = "repeat";
+    
+    // Calculate today's date in UTC for logging purposes
+    const today = new Date();
+    const todayYear = today.getUTCFullYear();
+    const todayMonth = today.getUTCMonth();
+    const todayDay = today.getUTCDate();
+    const todayDateUTC = new Date(Date.UTC(todayYear, todayMonth, todayDay));
+    
+    // Also check the last session for logging purposes
+    if (last) {
+      const lastDate = new Date(last.timestamp);
+      const lastYear = lastDate.getUTCFullYear();
+      const lastMonth = lastDate.getUTCMonth();
+      const lastDay = lastDate.getUTCDate();
+      const lastDateUTC = new Date(Date.UTC(lastYear, lastMonth, lastDay));
+      const daysDiff = Math.floor((todayDateUTC.getTime() - lastDateUTC.getTime()) / (1000 * 60 * 60 * 24));
+      
+      // Get all surge log entries for logging
+      const allSurgeLogs = getSurgeLog(slug);
+      
+      console.log("Phase determination:", {
+        hasLast: !!last,
+        lastSessionId: last.sessionId,
+        lastTimestamp: last.timestamp,
+        lastDate: new Date(last.timestamp).toISOString(),
+        daysDiff,
+        initialPhase,
+        allEntries: allSurgeLogs.map(e => ({
+          sessionId: e.sessionId,
+          timestamp: e.timestamp,
+          date: new Date(e.timestamp).toISOString(),
+          daysDiff: Math.floor((todayDateUTC.getTime() - new Date(Date.UTC(
+            new Date(e.timestamp).getUTCFullYear(),
+            new Date(e.timestamp).getUTCMonth(),
+            new Date(e.timestamp).getUTCDate()
+          )).getTime()) / (1000 * 60 * 60 * 24))
+        }))
+      });
+    }
+    
+    // Mark that initial phase has been set BEFORE setting the phase
+    // This prevents the second useEffect from overriding it
+    initialPhaseSetRef.current = true;
+    
+    // Set phase after ref is set
+    setPhase(initialPhase);
+    
+    // Debug logging with more details
+    if (last) {
+      const lastDate = new Date(last.timestamp);
+      const today = new Date();
+      
+      // Use UTC dates for calculation (same as above)
+      const lastYear = lastDate.getUTCFullYear();
+      const lastMonth = lastDate.getUTCMonth();
+      const lastDay = lastDate.getUTCDate();
+      
+      const todayYear = today.getUTCFullYear();
+      const todayMonth = today.getUTCMonth();
+      const todayDay = today.getUTCDate();
+      
+      const lastDateUTC = new Date(Date.UTC(lastYear, lastMonth, lastDay));
+      const todayDateUTC = new Date(Date.UTC(todayYear, todayMonth, todayDay));
+      const daysDiff = Math.floor((todayDateUTC.getTime() - lastDateUTC.getTime()) / (1000 * 60 * 60 * 24));
+      
+      console.log("Initial phase determination:", {
+        hasLast: !!last,
+        lastTimestamp: last.timestamp,
+        lastDateISO: lastDate.toISOString(),
+        lastDateLocal: lastDate.toLocaleDateString(),
+        lastDateUTC: lastDateUTC.toISOString(),
+        todayISO: today.toISOString(),
+        todayLocal: today.toLocaleDateString(),
+        todayDateUTC: todayDateUTC.toISOString(),
+        daysDiff,
+        initialPhase,
+        timestampDiff: today.getTime() - last.timestamp,
+        hoursDiff: (today.getTime() - last.timestamp) / (1000 * 60 * 60)
+      });
+    } else {
+      console.log("Initial phase determination:", {
+        hasLast: false,
+        initialPhase
+      });
+    }
+  }, [slug]);
+
+  // Listen for date updates from SurgeLog modal and reload lastSurge
+  useEffect(() => {
+    const handleDateUpdate = (event: CustomEvent<{ slug: string }>) => {
+      if (event.detail.slug === slug) {
+        // Reload lastSurge from localStorage
+        const updatedLast = getLastSurgeSession(slug);
+        setLastSurge(updatedLast);
+      }
+    };
+    
+    window.addEventListener('surgeLogDateUpdated', handleDateUpdate as EventListener);
+    return () => {
+      window.removeEventListener('surgeLogDateUpdated', handleDateUpdate as EventListener);
+    };
+  }, [slug]);
+
+  // Re-determine phase when lastSurge changes (e.g., after date editing)
+  // But only if user hasn't manually set the phase AND initial phase has been set
+  const lastSurgeTimestamp = lastSurge?.timestamp ?? null;
+  const conversationLength = conversation.length;
+  useEffect(() => {
+    // Don't auto-update phase if user has manually set it
+    if (userSetPhaseRef.current) {
+      return;
+    }
+    
+    // Don't update phase until initial phase has been set (to avoid race condition)
+    if (!initialPhaseSetRef.current) {
+      return;
+    }
+    
+    // Only update phase if user isn't actively learning
+    // (i.e., no current topic selected or not in the middle of a lesson)
+    if (currentTopic || sending || conversationLength > 1) {
+      return;
+    }
+    
+    if (lastSurge) {
+      const lastDate = new Date(lastSurge.timestamp);
+      const today = new Date();
+      const lastDay = new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate());
+      const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const daysDiff = Math.floor((todayDay.getTime() - lastDay.getTime()) / (1000 * 60 * 60 * 24));
+      
+      // Update phase based on date difference
+      if (daysDiff < 1) {
+        // Date is today - should be in learn phase
+        if (phase === "repeat") {
+          setPhase("learn");
+        }
+      } else {
+        // Date is yesterday or earlier - should be in repeat phase
+        if (phase === "learn") {
+          setPhase("repeat");
+        }
+      }
+    } else {
+      // No lastSurge - stay in repeat phase to show introduction
+      // Don't automatically switch to learn phase
+      // The introduction will be shown when there are no topics to review
+    }
+  }, [lastSurgeTimestamp, phase, currentTopic, sending, conversationLength]); // Use stable extracted values
+
+  // Build context when phase or data changes
+  useEffect(() => {
+    const context = buildSurgeContext(slug, data, practiceLog, lastSurge, examSnipeData || null, phase, currentTopic || "");
+    setSurgeContext(context);
+  }, [slug, data, practiceLog, lastSurge, examSnipeData, phase, currentTopic]);
+
+  // Save session incrementally when quiz results change or when entering quiz phase
+  const quizResultsCount = sessionData.quizResults.length;
+  const quizQuestionsCount = quizQuestions.length;
+  
+  useEffect(() => {
+    if (phase === "quiz" && quizResultsCount > 0 && quizResultsCount !== lastSavedQuizCount.current) {
+      // Save session after each question is answered (backup - main save happens in recordQuizAnswer)
+      lastSavedQuizCount.current = quizResultsCount;
+      saveCurrentSession(false);
+    } else if (phase === "quiz" && quizResultsCount === 0 && quizQuestionsCount > 0 && lastSavedQuizCount.current === 0) {
+      // Save initial session entry when quiz starts
+      saveCurrentSession(false);
+    }
+  }, [phase, quizResultsCount, quizQuestionsCount]);
+
+  // Initialize conversation with Chad greeting
+  useEffect(() => {
+    if (surgeContext && conversation.length === 0) {
+      const greeting = phase === "repeat"
+        ? "" // Don't show greeting in conversation - we'll show it in the UI instead
+        : phase === "learn" && !currentTopic
+        ? ""
+        : phase === "learn" && currentTopic
+        ? "" // Don't show "Generating lesson..." - go straight to "Chad is thinking..."
+        : phase === "quiz"
+        ? ""
+        : "Time to quiz what you just learned!";
+      
+      // If in learn phase without a topic, wait for data to load before triggering
+      if (phase === "learn" && !currentTopic && surgeContext && !topicSuggestionTriggered.current) {
+        // Wait for data and exam snipe to be loaded before triggering
+        if (dataLoaded && examSnipeLoaded) {
+          topicSuggestionTriggered.current = true;
+          // Don't add greeting, go straight to analysis
+          setConversation([]);
+          conversationRef.current = [];
+          setTimeout(() => {
+            // Automatically trigger Chad to analyze and suggest topics (no user message shown)
+            // Send empty conversation so Chad starts immediately
+            sendMessageWithExistingMessages([]);
+          }, 300);
+        }
+      } else if (phase === "learn" && currentTopic) {
+        // When topic is selected, don't add greeting - go straight to "Chad is thinking..."
+        setConversation([]);
+        conversationRef.current = [];
+      } else if (greeting) {
+        // Only add greeting for other phases
+        setConversation([
+          {
+            role: "assistant",
+            content: greeting,
+          },
+        ]);
+        conversationRef.current = [
+          {
+            role: "assistant",
+            content: greeting,
+          },
+        ];
+      }
+      
+      // Reset trigger when phase changes or topic is selected
+      if (phase !== "learn" || currentTopic) {
+        topicSuggestionTriggered.current = false;
+      }
+    }
+  }, [surgeContext, phase, lastSurge, currentTopic, dataLoaded, examSnipeLoaded]);
+
+  // Track if user clicked Start button for review
+  const reviewStartRequested = useRef(false);
+  
+  // Ensure we're mounted before rendering client-only content
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+  
+  // Trigger quiz generation when quiz phase starts (but only if user clicked Start)
+  useEffect(() => {
+    if (
+      phase === "repeat" &&
+      quizQuestions.length === 0 &&
+      !quizLoading &&
+      !sending &&
+      reviewStartRequested.current
+    ) {
+      // Reset the flag immediately to prevent re-triggering
+      reviewStartRequested.current = false;
+      
+      // Get all surge log entries and extract all unique topics
+      const allSurgeLogs = getSurgeLog(slug);
+      
+      if (allSurgeLogs.length === 0) {
+        return; // No surge logs, don't generate questions
+      }
+      
+      // Get the course/subject name to filter it out
+      const courseName = data?.subject || "";
+      
+      // Extract all unique topics from all surge log entries
+      const allTopics = new Set<string>();
+      allSurgeLogs.forEach(entry => {
+        // Add topics from repeatedTopics
+        if (entry.repeatedTopics && Array.isArray(entry.repeatedTopics)) {
+          entry.repeatedTopics.forEach(rt => {
+            if (rt?.topic && rt.topic !== courseName) {
+              allTopics.add(rt.topic);
+            }
+          });
+        }
+        // Add newTopic (but not if it's the course name)
+        if (entry.newTopic && entry.newTopic !== courseName) {
+          allTopics.add(entry.newTopic);
+        }
+        // Add topics from quizResults (but not if it's the course name)
+        if (entry.quizResults && Array.isArray(entry.quizResults)) {
+          entry.quizResults.forEach(result => {
+            if (result.topic && result.topic !== courseName) {
+              allTopics.add(result.topic);
+            }
+          });
+        }
+      });
+      
+      const topicsToReview = Array.from(allTopics);
+      
+      // Only generate review questions if there are topics to review
+      if (topicsToReview.length > 0) {
+        setQuizQuestions([]);
+        setQuizResponses({});
+        setCurrentQuizIndex(0);
+        setShortAnswer("");
+        harderQuestionsRequested.current = false;
+        requestReviewQuestions();
+      }
+    } else if (
+      phase === "quiz" &&
+      quizQuestions.length === 0 &&
+      !quizLoading &&
+      !sending
+    ) {
+      setQuizQuestions([]);
+      setQuizResponses({});
+      setCurrentQuizIndex(0);
+      setShortAnswer("");
+      harderQuestionsRequested.current = false;
+      requestQuizQuestions("mc");
+    }
+  }, [phase, quizQuestions.length, quizLoading, sending, lastSurge, slug]);
+
+  const getAnsweredCount = (stage: "mc" | "harder" | "review") => {
+    return Object.entries(quizResponses).reduce((count, [id]) => {
+      const question = quizQuestions.find((q) => q.id === id);
+      return question && question.stage === stage ? count + 1 : count;
+    }, 0);
+  };
+
+  const buildLessonPayload = () => {
+    const recordedLesson = sessionData.newTopicLesson?.trim();
+    if (recordedLesson) return recordedLesson;
+
+    if (lessonParts.length > 0) {
+      return lessonParts
+        .map((part) => `# ${part.header}\n${part.content}`)
+        .join("\n\n");
+    }
+
+    if (lastAssistantMessage.trim().length > 0) {
+      return lastAssistantMessage;
+    }
+
+    const lastAssistant = [...conversationRef.current].reverse().find((msg) => msg.role === "assistant");
+    return lastAssistant?.content || "";
+  };
+
+  async function requestReviewQuestions() {
+    // Prevent multiple simultaneous calls
+    if (quizLoading) {
+      console.log("Review questions already being generated, skipping duplicate call");
+      return;
+    }
+    
+    setQuizLoading(true);
+    setQuizFailureMessage(null);
+    setQuizInfoMessage("Chad is preparing review questions...");
+    setError(null);
+    
+    try {
+      const courseName = data?.subject || slug;
+      
+      // Get all surge log entries and extract all unique topics
+      const allSurgeLogs = getSurgeLog(slug);
+      
+      if (allSurgeLogs.length === 0) {
+        setQuizLoading(false);
+        setQuizInfoMessage(null);
+        return;
+      }
+      
+      // Extract all unique topics from all surge log entries
+      const allTopics = new Set<string>();
+      allSurgeLogs.forEach(entry => {
+        // Add topics from repeatedTopics
+        if (entry.repeatedTopics && Array.isArray(entry.repeatedTopics)) {
+          entry.repeatedTopics.forEach(rt => {
+            if (rt?.topic && rt.topic !== courseName) {
+              allTopics.add(rt.topic);
+            }
+          });
+        }
+        // Add newTopic (but not if it's the course name)
+        if (entry.newTopic && entry.newTopic !== courseName) {
+          allTopics.add(entry.newTopic);
+        }
+        // Add topics from quizResults (but not if it's the course name)
+        if (entry.quizResults && Array.isArray(entry.quizResults)) {
+          entry.quizResults.forEach(result => {
+            if (result.topic && result.topic !== courseName) {
+              allTopics.add(result.topic);
+            }
+          });
+        }
+      });
+      
+      const topicsToReview = Array.from(allTopics);
+      
+      // If no topics to review, don't try to generate questions
+      if (topicsToReview.length === 0) {
+        setQuizLoading(false);
+        setQuizInfoMessage(null);
+        return;
+      }
+
+      // Get all previous questions from all surge logs to avoid duplicates
+      const previousQuestions: string[] = [];
+      allSurgeLogs.forEach(entry => {
+        if (entry.quizResults && Array.isArray(entry.quizResults)) {
+          entry.quizResults.forEach(result => {
+            if (result.question) {
+              previousQuestions.push(result.question);
+            }
+          });
+        }
+      });
+
+      // Generate questions for each topic: 2 MC + 2 harder questions per topic
+      const allReviewQuestions: SurgeQuizQuestion[] = [];
+      
+      for (const topic of topicsToReview) {
+        // Get lesson content for this specific topic from any surge log entry
+        let topicLesson = "";
+        for (const entry of allSurgeLogs) {
+          if (entry.newTopic === topic && entry.newTopicLesson) {
+            topicLesson = entry.newTopicLesson;
+            break;
+          }
+        }
+        
+        // Ensure we have context - build it if missing
+        const contextToUse = surgeContext || buildSurgeContext(slug, data, practiceLog, lastSurge, examSnipeData || null, "repeat", topic);
+        
+        // Generate 2 MC questions for this topic
+        const mcRes = await fetch("/api/surge-quiz", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stage: "mc",
+            courseName: courseName || slug,
+            topicName: topic || "Unknown Topic",
+            context: contextToUse || "",
+            lessonContent: topicLesson,
+            mcQuestions: previousQuestions.join("\n"), // Pass previous questions to avoid duplicates
+            debugInstruction: `Generate EXACTLY 2 multiple-choice questions about "${topic}" for spaced repetition review. These questions must:
+- Test active recall of fundamental concepts from this topic
+- Be COMPLETELY DIFFERENT from all previous questions (check: ${previousQuestions.length} previous questions)
+- Focus on deep understanding, not just memorization
+- Help reinforce key concepts through active recall
+- Be suitable for spaced repetition practice`,
+          }),
+        });
+        
+        if (!mcRes.ok) {
+          const errorText = await mcRes.text();
+          throw new Error(errorText || "Failed to generate MC review questions");
+        }
+        
+        const mcPayload = await mcRes.json();
+        console.log("MC response payload:", { ok: mcPayload?.ok, hasRaw: !!mcPayload?.raw, stage: mcPayload?.stage, rawLength: mcPayload?.raw?.length });
+        const mcRaw = mcPayload?.raw || "";
+        if (!mcRaw) {
+          console.error("No raw data in MC response, payload:", mcPayload);
+          throw new Error("No raw data in MC response");
+        }
+        console.log("MC raw data (first 500 chars):", mcRaw.substring(0, 500));
+        const mcQuestions = parseQuizJson(mcRaw, "mc");
+        console.log("Parsed MC questions:", mcQuestions.length, mcQuestions.map(q => ({ id: q.id, question: q.question.substring(0, 50), type: q.type, stage: q.stage, hasOptions: !!q.options })));
+        
+        // Filter out duplicates from MC questions
+        const uniqueMcQuestions = mcQuestions.filter(q => {
+          const qLower = q.question.toLowerCase().trim();
+          return !previousQuestions.some(pq => {
+            const pqLower = pq.toLowerCase().trim();
+            // More thorough duplicate check - check if questions are too similar
+            const qWords = qLower.split(/\s+/).slice(0, 10).join(" ");
+            const pqWords = pqLower.split(/\s+/).slice(0, 10).join(" ");
+            return pqLower.includes(qWords) || qLower.includes(pqWords) || 
+                   qLower.slice(0, 50) === pqLower.slice(0, 50);
+          });
+        });
+        
+        // Take exactly 2 MC questions and assign topic
+        const mcToAdd = uniqueMcQuestions.slice(0, 2).map(q => ({
+          ...q,
+          topic: topic,
+        }));
+        allReviewQuestions.push(...mcToAdd);
+        
+        // Update previous questions list with the MC questions we just added
+        const updatedPreviousQuestions = [...previousQuestions, ...mcToAdd.map(q => q.question)];
+        
+        // Generate 2 harder questions for this topic
+        const harderRes = await fetch("/api/surge-quiz", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stage: "harder",
+            courseName: courseName || slug,
+            topicName: topic || "Unknown Topic",
+            context: contextToUse || "",
+            lessonContent: topicLesson,
+            mcQuestions: updatedPreviousQuestions.join("\n"), // Pass all previous questions including new MC
+            debugInstruction: `Generate EXACTLY 2 short-answer quiz questions about "${topic}" for spaced repetition review. These questions must:
+- Test active recall through deeper thinking and application
+- Be COMPLETELY DIFFERENT from all previous questions (check: ${updatedPreviousQuestions.length} previous questions)
+- Require the user to actively recall and explain concepts, not just recognize them
+- Focus on understanding, application, and critical thinking
+- Help reinforce key concepts through active recall and spaced repetition
+- Be suitable for spaced repetition practice that promotes deep learning`,
+          }),
+        });
+        
+        if (!harderRes.ok) {
+          const errorText = await harderRes.text();
+          throw new Error(errorText || "Failed to generate harder review questions");
+        }
+        
+        const harderPayload = await harderRes.json();
+        console.log("Harder response payload:", { ok: harderPayload?.ok, hasRaw: !!harderPayload?.raw, stage: harderPayload?.stage, rawLength: harderPayload?.raw?.length });
+        const harderRaw = harderPayload?.raw || "";
+        if (!harderRaw) {
+          console.error("No raw data in harder response, payload:", harderPayload);
+          throw new Error("No raw data in harder response");
+        }
+        console.log("Harder raw data (first 500 chars):", harderRaw.substring(0, 500));
+        const harderQuestions = parseQuizJson(harderRaw, "harder");
+        console.log("Parsed harder questions:", harderQuestions.length, harderQuestions.map(q => ({ id: q.id, question: q.question.substring(0, 50), type: q.type, stage: q.stage, hasModelAnswer: !!q.modelAnswer })));
+        
+        // Filter out duplicates from harder questions
+        const uniqueHarderQuestions = harderQuestions.filter(q => {
+          const qLower = q.question.toLowerCase().trim();
+          return !updatedPreviousQuestions.some(pq => {
+            const pqLower = pq.toLowerCase().trim();
+            // More thorough duplicate check
+            const qWords = qLower.split(/\s+/).slice(0, 10).join(" ");
+            const pqWords = pqLower.split(/\s+/).slice(0, 10).join(" ");
+            return pqLower.includes(qWords) || qLower.includes(pqWords) || 
+                   qLower.slice(0, 50) === pqLower.slice(0, 50);
+          });
+        });
+        
+        // Take exactly 2 harder questions and assign topic
+        const harderToAdd = uniqueHarderQuestions.slice(0, 2).map(q => ({
+          ...q,
+          topic: topic,
+        }));
+        allReviewQuestions.push(...harderToAdd);
+        
+        // Update previous questions for next topic
+        previousQuestions.push(...mcToAdd.map(q => q.question), ...harderToAdd.map(q => q.question));
+      }
+      
+      // Mix questions: 2 MC, then 2 harder per topic
+      // Shuffle the topics themselves for variety
+      const shuffledTopics = [...topicsToReview].sort(() => Math.random() - 0.5);
+      const finalQuestions: SurgeQuizQuestion[] = [];
+      for (const topic of shuffledTopics) {
+        // Filter by topic and type (not stage, since we'll set stage to "review" later)
+        const topicMc = allReviewQuestions.filter(q => (q as any).topic === topic && q.type === "mc").slice(0, 2);
+        const topicHarder = allReviewQuestions.filter(q => (q as any).topic === topic && q.type === "short").slice(0, 2);
+        // Add 2 MC, then 2 harder for this topic
+        finalQuestions.push(...topicMc, ...topicHarder);
+      }
+      
+      // If we didn't get enough questions, use what we have
+      if (finalQuestions.length === 0) {
+        finalQuestions.push(...allReviewQuestions);
+      }
+
+      if (finalQuestions.length === 0) {
+        throw new Error("No review questions generated");
+      }
+
+      // Set as review questions - keep their original type but mark stage as review
+      // This allows the UI to display them correctly (MC vs short answer)
+      console.log("Review questions generated:", {
+        totalQuestions: finalQuestions.length,
+        mcCount: finalQuestions.filter(q => q.type === "mc").length,
+        shortCount: finalQuestions.filter(q => q.type === "short").length,
+        topics: [...new Set(finalQuestions.map(q => (q as any).topic))]
+      });
+      
+      // Set as review questions - keep their original type but mark stage as review
+      // This allows the UI to display them correctly (MC vs short answer)
+      const reviewQuestions = finalQuestions.map(q => ({ 
+        ...q, 
+        stage: "review" as const,
+        // Keep the original type (mc or short) for proper display
+        type: q.type, // mc or short
+      }));
+      
+      setQuizQuestions(reviewQuestions);
+      setCurrentQuizIndex(0);
+      setQuizLoading(false);
+      setQuizInfoMessage(null);
+      
+      // Reset the flag to prevent re-triggering
+      reviewStartRequested.current = false;
+      
+      console.log("Review questions set in state:", reviewQuestions.length);
+    } catch (err: any) {
+      console.error("Failed to fetch review questions:", err);
+      setError(err?.message || "Chad couldn't generate the review questions. Please try again.");
+      setQuizFailureMessage("Chad couldn't generate the review. Try again?");
+      setQuizLoading(false);
+      setQuizInfoMessage(null);
+      
+      // Reset the flag even on error to allow retry
+      reviewStartRequested.current = false;
+    }
+  }
+
+  async function requestQuizQuestions(stage: "mc" | "harder", debugInstruction?: string) {
+    if (quizLoading) return;
+    const topicName = currentTopic || sessionData.newTopic || data?.subject || slug;
+    const courseName = data?.subject || slug;
+    let actualStage: "mc" | "harder" = stage;
+    harderQuestionsRequested.current = stage === "harder";
+    setQuizLoading(true);
+    setQuizFailureMessage(null);
+    setQuizInfoMessage(null);
+    setError(null);
+
+    // Build MC questions context for harder questions
+    const mcQuestionsContext = stage === "harder" 
+      ? quizQuestions
+          .filter((q) => q.stage === "mc")
+          .map((q, idx) => {
+            const options = q.options?.map((opt, optIdx) => 
+              `${String.fromCharCode(65 + optIdx)}) ${opt}`
+            ).join(" ") || "";
+            return `${idx + 1}. ${q.question} ${options} (Correct: ${q.correctOption})`;
+          })
+          .join("\n")
+      : "";
+
+    try {
+      const res = await fetch("/api/surge-quiz", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stage,
+          courseName,
+          topicName,
+          context: surgeContext,
+          lessonContent: buildLessonPayload(),
+          mcQuestions: mcQuestionsContext,
+          debugInstruction,
+        }),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || "Failed to generate quiz");
+      }
+      const payload = await res.json();
+      const raw = payload?.raw || "";
+      let newQuestions = parseQuizJson(raw, stage);
+      
+      // If we requested MC but got short/harder questions, use them as harder questions
+      if (stage === "mc" && newQuestions.length > 0 && (newQuestions[0]?.type === "short" || newQuestions[0]?.stage === "harder")) {
+        console.log("Received short answer questions when MC was requested. Using them as harder questions.");
+        actualStage = "harder";
+        // Update the stage on all questions
+        newQuestions = newQuestions.map(q => ({ ...q, stage: "harder" }));
+        harderQuestionsRequested.current = true;
+      }
+      
+      if (!newQuestions.length) {
+        throw new Error("No quiz questions returned");
+      }
+      const applied = applyQuizQuestions(newQuestions, actualStage, actualStage === "mc");
+      if (!applied) {
+        console.warn("Quiz questions response contained no new items; using existing set.");
+      }
+      if (actualStage === "harder" && !sessionData.mcStageCompletedAt) {
+        recordQuizStageTransition("mc", "harder");
+      }
+    } catch (err: any) {
+      console.error("Failed to fetch quiz questions:", err);
+      setError(err?.message || "Chad couldn't generate the quiz questions. Please try again.");
+      setQuizFailureMessage("Chad couldn't generate the quiz. Try again?");
+    } finally {
+      if (actualStage === "harder") {
+        harderQuestionsRequested.current = false;
+      }
+      setQuizLoading(false);
+      setQuizInfoMessage(null);
+    }
+  }
+
+  const evaluateShortAnswer = (userAnswer: string, modelAnswer: string) => {
+    const cleanTokens = (text: string) =>
+      text
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter((word) => word.length > 3);
+    const modelTokens = cleanTokens(modelAnswer);
+    const userTokens = cleanTokens(userAnswer);
+    if (modelTokens.length === 0) {
+      const baseScore = userTokens.length > 0 ? 7 : 0;
+      return { score: baseScore, isCorrect: userTokens.length > 0 ? null : false };
+    }
+    const uniqueModel = Array.from(new Set(modelTokens));
+    const matches = userTokens.filter((token) => uniqueModel.includes(token));
+    const ratio = matches.length / uniqueModel.length;
+    const score = Math.max(0, Math.min(10, Math.round(ratio * 10)));
+    return { score, isCorrect: ratio >= 0.7 };
+  };
+
+  const recordQuizStageTransition = (from: "mc" | "harder", to: "mc" | "harder") => {
+    setSessionData((prev) => ({
+      ...prev,
+      quizStageTransitions: [
+        ...prev.quizStageTransitions,
+        { from, to, timestamp: Date.now(), topic: currentTopic || prev.newTopic },
+      ],
+      mcStageCompletedAt: from === "mc" && to === "harder" ? Date.now() : prev.mcStageCompletedAt,
+    }));
+  };
+
+  const recordQuizAnswer = (
+    question: SurgeQuizQuestion,
+    userAnswer: string,
+    score: number,
+    isCorrect: boolean | null,
+    assessmentData?: {
+      assessment?: string;
+      whatsGood?: string;
+      whatsBad?: string;
+      enhancedExplanation?: string;
+      checked?: boolean;
+    }
+  ) => {
+    // Always update quizResponses - either create new or update existing
+    setQuizResponses((prev) => {
+      const existing = prev[question.id];
+      return {
+        ...prev,
+        [question.id]: {
+          ...existing,
+          answer: userAnswer,
+          isCorrect,
+          correctAnswer: question.correctOption,
+          explanation: question.explanation,
+          modelAnswer: question.modelAnswer,
+          stage: question.stage,
+          score,
+          submittedAt: existing?.submittedAt ?? Date.now(),
+          ...assessmentData,
+        },
+      };
+    });
+    
+    // Skip logging for review questions - they're just for practice, not for tracking
+    if (question.stage === "review") {
+      return true;
+    }
+    
+    // Always update sessionData quizResults and save immediately
+    let updatedSessionData: typeof sessionData;
+    setSessionData((prev) => {
+      const existingIndex = prev.quizResults.findIndex(
+        (result) => result.question === question.question && result.stage === question.stage
+      );
+      // Determine topic - use question topic if available, otherwise currentTopic, otherwise newTopic, otherwise fallback
+      const questionTopic = (question as any).topic || currentTopic || prev.newTopic || data?.subject || "Unknown Topic";
+      const newEntry = {
+        question: question.question,
+        answer: userAnswer,
+        grade: score,
+        topic: questionTopic,
+        // Only include correctAnswer for harder questions, not MC
+        ...(question.stage === "harder" ? { correctAnswer: question.correctOption } : {}),
+        explanation: assessmentData?.enhancedExplanation || question.explanation || question.modelAnswer,
+        stage: question.stage,
+        modelAnswer: question.modelAnswer,
+      };
+
+      console.log("Recording quiz answer:", {
+        question: question.question,
+        answer: userAnswer,
+        grade: score,
+        topic: currentTopic || prev.newTopic,
+        stage: question.stage,
+        hasAssessment: !!assessmentData,
+        existingIndex,
+      });
+
+      if (existingIndex !== -1) {
+        const updatedResults = [...prev.quizResults];
+        updatedResults[existingIndex] = newEntry;
+        console.log("Updated existing quiz result at index", existingIndex);
+        updatedSessionData = {
+          ...prev,
+          quizResults: updatedResults,
+        };
+        return updatedSessionData;
+      }
+
+      console.log("Added new quiz result. Total quiz results:", prev.quizResults.length + 1);
+      updatedSessionData = {
+        ...prev,
+        quizResults: [...prev.quizResults, newEntry],
+      };
+      return updatedSessionData;
+    });
+    
+    // Save session immediately with the updated data
+    saveCurrentSession(false, updatedSessionData!);
+    
+    return true;
+  };
+
+  const requestHarderQuestions = () => {
+    if (harderQuestionsRequested.current || quizLoading) return;
+    requestQuizQuestions("harder");
+  };
+
+  const handleMCOptionSelect = (optionLetter: string) => {
+    const currentQ = quizQuestions[currentQuizIndex];
+    if (!currentQ || currentQ.type !== "mc") return;
+    const normalized = optionLetter.trim().charAt(0).toUpperCase();
+    const correct = currentQ.correctOption?.trim().charAt(0).toUpperCase() || "";
+    const isCorrect = correct ? normalized === correct : null;
+    const score = isCorrect === null ? 0 : isCorrect ? 10 : 0;
+    
+    // Record the answer - this updates quizResponses state immediately
+    const recorded = recordQuizAnswer(currentQ, normalized, score, isCorrect);
+    if (!recorded) {
+      console.error("Failed to record MC answer");
+      return;
+    }
+    
+    // Note: setQuizResponses in recordQuizAnswer will trigger a re-render
+    // The button should become enabled after React re-renders with the updated state
+
+    // Only trigger harder questions for regular MC questions, not review questions
+    if (currentQ.stage === "review") {
+      return; // Review questions don't trigger harder questions generation
+    }
+
+    const totalMc = quizQuestions.filter((q) => q.stage === "mc").length;
+    const answeredMc = getAnsweredCount("mc") + 1;
+    if (answeredMc >= totalMc) {
+      if (quizQuestions.some((q) => q.stage === "harder")) {
+        setQuizLoading(false);
+      } else {
+        requestHarderQuestions();
+      }
+    }
+  };
+
+  const handleCheckAnswer = async () => {
+    const currentQ = quizQuestions[currentQuizIndex];
+    if (!currentQ || currentQ.type !== "short") return;
+    if (quizResponses[currentQ.id]?.checked) return;
+    const userAnswer = shortAnswer.trim();
+    if (!userAnswer) return;
+
+    setCheckingAnswer(true);
+    try {
+      const res = await fetch("/api/surge-quiz-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: currentQ.question,
+          answer: userAnswer,
+          modelAnswer: currentQ.modelAnswer || "",
+          explanation: currentQ.explanation || "",
+          topic: currentTopic || sessionData.newTopic || "",
+          lessonContent: buildLessonPayload(),
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to check answer");
+      }
+
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "Failed to check answer");
+      }
+
+      // Record the answer with assessment data
+      const isCorrect = data.grade >= 8;
+      const recorded = recordQuizAnswer(
+        currentQ,
+        userAnswer,
+        data.grade,
+        isCorrect,
+        {
+          assessment: data.assessment,
+          whatsGood: data.whatsGood,
+          whatsBad: data.whatsBad,
+          enhancedExplanation: data.enhancedExplanation,
+          checked: true,
+        }
+      );
+
+      if (!recorded) {
+        throw new Error("Failed to record answer");
+      }
+    } catch (err: any) {
+      console.error("Failed to check answer:", err);
+      setError(err?.message || "Failed to check answer. Please try again.");
+    } finally {
+      setCheckingAnswer(false);
+    }
+  };
+
+  const handleDebugQuizStart = () => {
+    const topicName = "Erlang Messaging"; // Set explicit topic for debug quiz
+    // Set the topic so it gets saved correctly
+    if (!currentTopic) {
+      setCurrentTopic(topicName);
+    }
+    // Update session data with the topic
+    setSessionData(prev => ({
+      ...prev,
+      newTopic: topicName,
+    }));
+    if (phase !== "quiz") {
+      setPhase("quiz");
+    }
+    setConversation([]);
+    conversationRef.current = [];
+    setCurrentQuestion("");
+    setLessonParts([]);
+    setShowLessonCard(false);
+    setShowTopicSelection(false);
+    setShowCustomInput(false);
+    setQuizQuestions([]);
+    setQuizResponses({});
+    setCurrentQuizIndex(0);
+    setShortAnswer("");
+    harderQuestionsRequested.current = false;
+    requestQuizQuestions(
+      "mc",
+      "Focus all questions on Erlang messaging patterns, mailbox semantics, and message-passing guarantees."
+    );
+  };
+
+  const handleNextQuestion = () => {
+    const currentQ = quizQuestions[currentQuizIndex];
+    if (!currentQ) return;
+    const response = quizResponses[currentQ.id];
+    if (!response) return;
+
+    // Handle review questions completion
+    if (currentQ.stage === "review") {
+      const reviewQuestions = quizQuestions.filter((q) => q.stage === "review");
+      const currentReviewIndex = reviewQuestions.findIndex((q) => q.id === currentQ.id);
+      const isLastReview = currentReviewIndex === reviewQuestions.length - 1;
+      
+      if (isLastReview) {
+        // Review complete - transition to learn phase
+        setPhase("learn");
+        setQuizQuestions([]);
+        setQuizResponses({});
+        setCurrentQuizIndex(0);
+        setShortAnswer("");
+        return;
+      }
+      
+      // Move to next review question
+      const nextReviewIdx = quizQuestions.findIndex(
+        (q, idx) => idx > currentQuizIndex && q.stage === "review"
+      );
+      if (nextReviewIdx !== -1) {
+        setCurrentQuizIndex(nextReviewIdx);
+      }
+      return;
+    }
+
+    if (currentQ.stage === "mc") {
+      const mcQuestions = quizQuestions.filter((q) => q.stage === "mc");
+      const currentMcIndex = mcQuestions.findIndex((q) => q.id === currentQ.id);
+      const isLastMc = currentMcIndex === mcQuestions.length - 1;
+      
+      const nextMcIdx = quizQuestions.findIndex(
+        (q, idx) => idx > currentQuizIndex && q.stage === "mc"
+      );
+      if (nextMcIdx !== -1) {
+        setCurrentQuizIndex(nextMcIdx);
+        // If we're moving to the last MC question (question 5), trigger harder questions generation
+        const nextQ = quizQuestions[nextMcIdx];
+        const nextMcIndex = mcQuestions.findIndex((q) => q.id === nextQ.id);
+        if (nextMcIndex === mcQuestions.length - 1) {
+          const hasHarder = quizQuestions.some((q) => q.stage === "harder");
+          if (!hasHarder && !harderQuestionsRequested.current && !quizLoading) {
+            requestHarderQuestions();
+          }
+        }
+        return;
+      }
+      const hasHarder = quizQuestions.some((q) => q.stage === "harder");
+      if (hasHarder) {
+        const firstHarderIdx = quizQuestions.findIndex((q) => q.stage === "harder");
+        if (firstHarderIdx !== -1) {
+          recordQuizStageTransition("mc", "harder");
+          setCurrentQuizIndex(firstHarderIdx);
+          setShortAnswer("");
+          setQuizLoading(false);
+        }
+      } else {
+        requestHarderQuestions();
+      }
+      return;
+    }
+
+    const nextHarderIdx = quizQuestions.findIndex(
+      (q, idx) => idx > currentQuizIndex && q.stage === "harder"
+    );
+    if (nextHarderIdx !== -1) {
+      setCurrentQuizIndex(nextHarderIdx);
+      setShortAnswer("");
+    } else {
+      setPhase("complete");
+      saveSession();
+    }
+  };
+
+  useEffect(() => {
+    if (phase !== "quiz") return;
+    const totalMc = quizQuestions.filter((q) => q.stage === "mc").length;
+    if (totalMc === 0) return;
+    if (getAnsweredCount("mc") < totalMc) return;
+    if (!quizQuestions.some((q) => q.stage === "harder")) {
+      requestHarderQuestions();
+    }
+  }, [phase, quizQuestions, quizResponses]);
+
+  const callPracticeLogger = async (question: string, answer: string) => {
+    if (!question || !answer) return null;
+
+    try {
+      const response = await fetch('/api/practice-logger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: question.trim(),
+          answer: answer.trim(),
+          courseSlug: slug,
+          existingLogs: practiceLog,
+        }),
+      });
+
+      if (!response.ok) {
+        console.error('Failed to log practice session:', response.statusText);
+        return null;
+      }
+
+      const result = await response.json();
+      
+      if (result.skipped) {
+        console.log("⏭️ Practice log skipped:", result.reason);
+        return null;
+      }
+      
+      if (result.success && result.logEntry) {
+        const logEntry: PracticeLogEntry = result.logEntry;
+        
+        // Update practice log state
+        setPracticeLog((prev) => {
+          const next = [...prev, logEntry];
+          try {
+            localStorage.setItem(`${PRACTICE_LOG_PREFIX}${slug}`, JSON.stringify(next));
+          } catch (error) {
+            console.warn("Failed to persist practice log:", error);
+          }
+          return next;
+        });
+
+        // Update session data based on phase
+        if (phase === "repeat") {
+          setSessionData((prev) => {
+            const topics = [...prev.repeatedTopics];
+            const topicIndex = topics.findIndex(t => t.topic === logEntry.topic);
+            const questionData = { question: logEntry.question, answer: logEntry.answer, grade: logEntry.grade };
+            
+            if (topicIndex >= 0) {
+              topics[topicIndex].questions.push(questionData);
+              const grades = topics[topicIndex].questions.map(q => q.grade);
+              topics[topicIndex].averageScore = grades.reduce((a, b) => a + b, 0) / grades.length;
+            } else {
+              topics.push({
+                topic: logEntry.topic,
+                questions: [questionData],
+                averageScore: logEntry.grade,
+              });
+            }
+            return { ...prev, repeatedTopics: topics };
+          });
+        }
+
+        return logEntry;
+      }
+    } catch (error) {
+      console.error('Error calling practice logger:', error);
+    }
+    return null;
+  };
+
+  const sendMessage = async (message: string) => {
+    if (sending || !message.trim()) return;
+
+    const userMessage: ChatMessage = { role: "user", content: message.trim() };
+    const newConversation = [...conversation, userMessage];
+    setConversation(newConversation);
+    conversationRef.current = newConversation;
+
+    // If there's a current question and we're in repeat phase, log the answer
+    if (currentQuestion && phase === "repeat") {
+      await callPracticeLogger(currentQuestion, message.trim());
+      setCurrentQuestion(""); // Clear after logging
+    }
+
+    await sendMessageWithExistingMessages(newConversation);
+  };
+
+  const sendMessageWithContext = async (messages: ChatMessage[], contextOverride?: string, topicOverride?: string, systemMessages?: ChatMessage[]) => {
+    if (sending) return;
+
+    const contextToUse = contextOverride || surgeContext;
+    const topicToCheck = topicOverride !== undefined ? topicOverride : (currentTopic || "");
+
+    // If messages is empty and we're in learn phase without topic, send a system message
+    // to trigger topic suggestions with full context
+    // BUT if we have a currentTopic, we're teaching, not suggesting
+    let historyForApi: ChatMessage[];
+    if (systemMessages && systemMessages.length > 0) {
+      // Use system messages directly (for topic selection - no user message shown)
+      historyForApi = systemMessages;
+    } else if (messages.length === 0 && phase === "learn" && !topicToCheck) {
+      historyForApi = [{ role: "system" as const, content: "You must output exactly 4 topic suggestions in this format:\nTOPIC_SUGGESTION: Topic Name 1\nTOPIC_SUGGESTION: Topic Name 2\nTOPIC_SUGGESTION: Topic Name 3\nTOPIC_SUGGESTION: Topic Name 4\n\nDo not write anything else. No explanations, no introductions, no dashes, no bullets. Just the 4 lines starting with TOPIC_SUGGESTION:" }];
+    } else if (messages.length > 0 && messages[messages.length - 1]?.role === "user") {
+      historyForApi = messages.slice(0, -1); // Remove last user message, it will be in the conversation
+    } else {
+      historyForApi = messages;
+    }
+
+    try {
+      setSending(true);
+      setError(null);
+
+      // If using system messages (topic selection), don't initialize conversation
+      // We'll show "Chad is thinking..." and only show buttons when done
+      if (systemMessages && systemMessages.length > 0) {
+        setConversation([]);
+        conversationRef.current = [];
+        setSuggestedTopics([]);
+        setShowTopicSelection(false);
+      }
+
+      const res = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: contextToUse,
+          messages: historyForApi.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+          path: `/subjects/${slug}/surge`,
+        }),
+      });
+
+      if (!res.ok || !res.body) {
+        throw new Error(`Chat failed (${res.status})`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = "";
+      let finalActions: ParsedAction[] = [];
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+
+        const chunk = decoder.decode(value, { stream: true });
+        chunk.split("\n").forEach((line) => {
+          if (!line.startsWith("data: ")) return;
+          const payload = line.slice(6);
+          if (!payload) return;
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed.type === "text") {
+              accumulated += parsed.content;
+              
+              // During topic suggestion phase, don't update conversation state
+              // We'll only show buttons once all 4 topics are parsed
+              const isTopicSuggestionPhase = phase === "learn" && !topicToCheck && !currentTopic;
+              
+              // Always parse topic suggestions during topic suggestion phase (even if not updating conversation)
+              if (isTopicSuggestionPhase) {
+                const topics = extractTopicSuggestions(accumulated, TOPIC_SUGGESTION_TARGET);
+                if (topics.length >= MIN_TOPIC_SUGGESTIONS) {
+                  setSuggestedTopics(topics);
+                  setShowTopicSelection(true);
+                  // Clear conversation to hide any streaming text
+                  setConversation([]);
+                  conversationRef.current = [];
+                  // Stop showing "Chad is thinking" now that topics are ready to display
+                  setSending(false);
+                }
+              } else {
+                // Normal streaming - update conversation
+                setConversation((prev) => {
+                  const updated = [...prev];
+                  if (updated[updated.length - 1]?.role === "assistant") {
+                    updated[updated.length - 1] = {
+                      ...updated[updated.length - 1],
+                      content: accumulated,
+                    };
+                  } else {
+                    updated.push({ role: "assistant", content: accumulated });
+                  }
+                  conversationRef.current = updated;
+                
+                  // Extract quiz questions during quiz phase
+                  const fullMessage = updated[updated.length - 1]?.content || "";
+                  if (phase === "quiz") {
+                    const parsedQuestions = extractSurgeQuizQuestionsFromText(fullMessage);
+                    const mcQuestions = parsedQuestions.filter((q) => q.stage === "mc");
+                    const harderQuestions = parsedQuestions.filter((q) => q.stage === "harder");
+                    let added = false;
+                    if (mcQuestions.length) {
+                      added = applyQuizQuestions(mcQuestions, "mc") || added;
+                    }
+                    if (harderQuestions.length) {
+                      const harderAdded = applyQuizQuestions(harderQuestions, "harder");
+                      if (harderAdded && !sessionData.mcStageCompletedAt) {
+                        recordQuizStageTransition("mc", "harder");
+                      }
+                      added = harderAdded || added;
+                    }
+                    if (added) {
+                      return updated;
+                    }
+                  } else {
+                    // Extract current question from assistant message (wrapped in ◊) for other phases
+                    const questionMatch = fullMessage.match(/◊([^◊]+)◊/);
+                    if (questionMatch) {
+                      setCurrentQuestion(questionMatch[1].trim());
+                    }
+                  }
+                
+                // Capture lesson content during learn phase and parse into parts
+                // Check both currentTopic state and conversation for topic selection
+                // Also check if this is a lesson generation message (contains "Generate a comprehensive lesson")
+                const isLessonGeneration = conversationRef.current.some(msg => 
+                  msg.role === "user" && msg.content.includes("Generate a comprehensive lesson")
+                );
+                const topicFromMessage = isLessonGeneration 
+                  ? conversationRef.current.find(msg => msg.role === "user" && msg.content.includes("Generate a comprehensive lesson"))
+                    ?.content.match(/Generate a comprehensive lesson on "(.+?)"/)?.[1] || ""
+                  : "";
+                const activeTopic = currentTopic || topicFromMessage;
+                
+                if (phase === "learn" && activeTopic && fullMessage.length > 20) {
+                  
+                  // Update currentTopic if it's not set (fix stale closure issue)
+                  if (!currentTopic && activeTopic) {
+                    setCurrentTopic(activeTopic);
+                  }
+                  
+                  setSessionData(prev => ({
+                    ...prev,
+                    newTopicLesson: fullMessage,
+                  }));
+                  
+                  const shouldAttemptSplit = /^#\s+/m.test(fullMessage) || fullMessage.length > 50 || fullMessage.includes("#");
+                  
+                  if (shouldAttemptSplit) {
+                    const fallbackHeaderTitle = activeTopic || currentTopic || "Lesson";
+                    const parts = splitLessonContentIntoParts(fullMessage, fallbackHeaderTitle);
+                    
+                    if (parts.length > 0) {
+                      const wasEmpty = lessonParts.length === 0;
+                      const refIdx = currentPartIndexRef.current;
+                      
+                      setLessonParts(parts);
+                      
+                      if (wasEmpty && refIdx === 0) {
+                        setCurrentPartIndex(0);
+                        currentPartIndexRef.current = 0;
+                      } else if (refIdx >= parts.length) {
+                        const lastIdx = parts.length - 1;
+                        setCurrentPartIndex(lastIdx);
+                        currentPartIndexRef.current = lastIdx;
+                      } else {
+                        setCurrentPartIndex(prev => {
+                          if (prev !== refIdx) {
+                            console.log("🔄 PAGE SWAP: Streaming update preserving user navigation - refIdx:", refIdx, "prev state:", prev, "new parts:", parts.length);
+                            return refIdx;
+                          }
+                          return prev;
+                        });
+                      }
+                      setShowLessonCard(true);
+                    } else if (fullMessage.length > 100) {
+                      const singlePart = [{ header: fallbackHeaderTitle, content: fullMessage }];
+                      const wasEmpty = lessonParts.length === 0;
+                      const refIdx = currentPartIndexRef.current;
+                      setLessonParts(singlePart);
+                      if (wasEmpty && refIdx === 0) {
+                        setCurrentPartIndex(0);
+                        currentPartIndexRef.current = 0;
+                      } else if (refIdx >= 0 && refIdx < singlePart.length) {
+                        setCurrentPartIndex(prev => prev !== refIdx ? refIdx : prev);
+                      } else {
+                        setCurrentPartIndex(0);
+                        currentPartIndexRef.current = 0;
+                      }
+                      setShowLessonCard(true);
+                    }
+                  } else if (fullMessage.length > 100) {
+                    const fallbackHeaderTitle = activeTopic || currentTopic || "Lesson";
+                    const singlePart = [{ header: fallbackHeaderTitle, content: fullMessage }];
+                    const wasEmpty = lessonParts.length === 0;
+                    const refIdx = currentPartIndexRef.current;
+                    setLessonParts(singlePart);
+                    if (wasEmpty && refIdx === 0) {
+                      setCurrentPartIndex(0);
+                      currentPartIndexRef.current = 0;
+                    } else if (refIdx >= 0 && refIdx < singlePart.length) {
+                      setCurrentPartIndex(prev => prev !== refIdx ? refIdx : prev);
+                    } else {
+                      setCurrentPartIndex(0);
+                      currentPartIndexRef.current = 0;
+                    }
+                    setShowLessonCard(true);
+                  }
+                }
+                
+                  setLastAssistantMessage(fullMessage);
+                  return updated;
+                });
+              }
+            } else if (parsed.type === "error") {
+              throw new Error(parsed.error || "Streaming error");
+            } else if (parsed.type === "done") {
+              // Finalize accumulated content
+              setConversation((prev) => {
+                const updated = [...prev];
+                if (updated[updated.length - 1]?.role === "assistant") {
+                  updated[updated.length - 1] = {
+                    ...updated[updated.length - 1],
+                    content: accumulated,
+                  };
+                }
+                conversationRef.current = updated;
+                
+                // Final parse of quiz questions after streaming is complete
+                if (phase === "quiz") {
+                  const parsedQuestions = extractSurgeQuizQuestionsFromText(accumulated);
+                  const mcQuestions = parsedQuestions.filter((q) => q.stage === "mc");
+                  const harderQuestions = parsedQuestions.filter((q) => q.stage === "harder");
+                  let added = false;
+                  if (mcQuestions.length) {
+                    added = applyQuizQuestions(mcQuestions, "mc") || added;
+                  }
+                  if (harderQuestions.length) {
+                    const harderAdded = applyQuizQuestions(harderQuestions, "harder");
+                    if (harderAdded && !sessionData.mcStageCompletedAt) {
+                      recordQuizStageTransition("mc", "harder");
+                    }
+                    added = harderAdded || added;
+                  }
+                  if (!added) {
+                    setQuizLoading(false);
+                    setSending(false);
+                  }
+                }
+                
+                // Final parse of lesson parts after streaming is complete
+                // Use currentTopic directly (set when topic is selected)
+                if (phase === "learn" && currentTopic && accumulated.length > 100) {
+                  const parts: Array<{ header: string; content: string }> = [];
+                  
+                  // Split by H1 markdown headers (# Chapter Title)
+                  // Use line-by-line parsing for more reliability
+                  const lines = accumulated.split('\n');
+                  let currentHeader: string | null = null;
+                  let currentContent: string[] = [];
+                  
+                  for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    // Check if this is an H1 header: starts with # followed by space (not ##)
+                    // More precise check: line starts with exactly one # followed by space
+                    const trimmedLine = line.trim();
+                    if (trimmedLine.startsWith('# ') && !trimmedLine.startsWith('##')) {
+                      // Save previous part if we have one
+                      if (currentHeader !== null && currentContent.length > 0) {
+                        const content = currentContent.join('\n').trim();
+                        if (content) {
+                          parts.push({ header: currentHeader, content });
+                        }
+                      }
+                      // Start new part - extract header text (remove # and any leading/trailing spaces)
+                      currentHeader = trimmedLine.replace(/^#\s+/, '').trim();
+                      currentContent = [];
+                    } else if (currentHeader !== null) {
+                      // Add to current part (including empty lines to preserve formatting)
+                      currentContent.push(line);
+                    } else if (currentHeader === null && trimmedLine) {
+                      // Content before first header - start with topic name
+                      if (parts.length === 0) {
+                        // Get topic from closure or currentTopic state
+                        const topicForHeader = currentTopic || (conversationRef.current.find(msg => 
+                          msg.role === "user" && msg.content.includes("Generate a comprehensive lesson")
+                        )?.content.match(/Generate a comprehensive lesson on "(.+?)"/)?.[1] || "") || "Lesson";
+                        currentHeader = topicForHeader;
+                        currentContent = [line];
+                      }
+                    }
+                  }
+                  
+                  // Add final part
+                  if (currentHeader !== null && currentContent.length > 0) {
+                    const content = currentContent.join('\n').trim();
+                    if (content) {
+                      parts.push({ header: currentHeader, content });
+                    }
+                  }
+                  
+                  // Fallback: if no H1 headers found, try H2
+                  if (parts.length === 0) {
+                    currentHeader = null;
+                    currentContent = [];
+                    for (let i = 0; i < lines.length; i++) {
+                      const line = lines[i];
+                      if (line.match(/^##\s+/)) {
+                        if (currentHeader !== null && currentContent.length > 0) {
+                          const content = currentContent.join('\n').trim();
+                          if (content) {
+                            parts.push({ header: currentHeader, content });
+                          }
+                        }
+                        currentHeader = line.replace(/^##\s+/, '').trim();
+                        currentContent = [];
+                      } else if (currentHeader !== null) {
+                        currentContent.push(line);
+                      }
+                    }
+                    if (currentHeader !== null && currentContent.length > 0) {
+                      const content = currentContent.join('\n').trim();
+                      if (content) {
+                        parts.push({ header: currentHeader, content });
+                      }
+                    }
+                  }
+                  
+                  // Final fallback: treat entire message as one part
+                  if (parts.length === 0 && accumulated.length > 200) {
+                    parts.push({ header: currentTopic || "Lesson", content: accumulated });
+                  }
+                  
+                  if (parts.length > 0) {
+                    const wasEmpty = lessonParts.length === 0;
+                    // ALWAYS use the ref - it's the source of truth for user navigation
+                    const refIdx = currentPartIndexRef.current;
+                    
+                    setLessonParts(parts);
+                    // CRITICAL: NEVER reset index if user has navigated (refIdx > 0)
+                    // Only reset if this is the FIRST time (wasEmpty) AND ref is still 0
+                    if (wasEmpty && refIdx === 0) {
+                      // First time, no navigation yet - reset to 0
+                      setCurrentPartIndex(0);
+                      currentPartIndexRef.current = 0;
+                    } else if (refIdx >= parts.length) {
+                      // Out of bounds, go to last part
+                      const lastIdx = parts.length - 1;
+                      setCurrentPartIndex(lastIdx);
+                      currentPartIndexRef.current = lastIdx;
+                    } else {
+                      // User has navigated OR streaming update - ALWAYS preserve ref
+                      // This ensures user navigation is NEVER overwritten by streaming
+                      setCurrentPartIndex(prev => {
+                        if (prev !== refIdx) {
+                          console.log("🔄 PAGE SWAP: Final parse preserving user navigation - refIdx:", refIdx, "prev state:", prev, "new parts:", parts.length);
+                          return refIdx;
+                        }
+                        return prev;
+                      });
+                    }
+                    setShowLessonCard(true);
+                  }
+                }
+                
+                return updated;
+              });
+
+              if (phase === "learn" && !currentTopic && !showTopicSelection) {
+                const finalTopics = extractTopicSuggestions(accumulated, TOPIC_SUGGESTION_TARGET);
+                if (finalTopics.length >= MIN_TOPIC_SUGGESTIONS) {
+                  setSuggestedTopics(finalTopics);
+                  setShowTopicSelection(true);
+                  setConversation([]);
+                  conversationRef.current = [];
+                  setSending(false);
+                }
+              }
+            }
+          } catch (err) {
+            if (!(err instanceof SyntaxError)) {
+              throw err;
+            }
+          }
+        });
+      }
+
+      // Process actions (if any)
+      for (const action of finalActions) {
+        // Actions are handled, but practice logging is done via API call in sendMessage
+      }
+    } catch (err: any) {
+      setError(err?.message || "Failed to send message");
+      console.error("Chat error:", err);
+    } finally {
+      setSending(false);
+      // Also stop quiz loading when sending is done (in case questions weren't parsed)
+      if (phase === "quiz") {
+        setQuizLoading(false);
+      }
+    }
+  };
+
+  // Wrapper function for backward compatibility
+  const sendMessageWithExistingMessages = async (messages: ChatMessage[]) => {
+    return sendMessageWithContext(messages);
+  };
+
+  const handleTopicSelect = (topic: string) => {
+    setCurrentTopic(topic);
+    setSessionData(prev => ({ ...prev, newTopic: topic }));
+    setShowTopicSelection(false);
+    setSuggestedTopics([]);
+    setConversation([]);
+    conversationRef.current = [];
+    setCurrentQuestion("");
+    setLessonParts([]);
+    setCurrentPartIndex(0);
+    currentPartIndexRef.current = 0;
+    setShowLessonCard(false);
+    // Reset trigger so we can send a new message
+    topicSuggestionTriggered.current = false;
+    // Wait for state to update, then rebuild context and send system message
+    setTimeout(() => {
+      // Rebuild context with the new topic - use current state values
+      const updatedContext = buildSurgeContext(slug, data, practiceLog, lastSurge, examSnipeData, phase, topic);
+      setSurgeContext(updatedContext);
+      
+      // Send a user message to trigger lesson generation
+      // The context already includes all the lesson generation instructions
+      // We'll hide this message from the UI, but it triggers the lesson generation
+      const userMessage: ChatMessage = { 
+        role: "user", 
+        content: `Generate a comprehensive lesson on "${topic}". Use H1 headings (#) for chapters. The context contains all instructions.` 
+      };
+      
+      // Initialize assistant message immediately so user sees generation starting
+      // Also reset lesson state to ensure clean start
+      setConversation([userMessage, { role: "assistant", content: "" }]);
+      conversationRef.current = [userMessage, { role: "assistant", content: "" }];
+      setLessonParts([]);
+      setCurrentPartIndex(0);
+      currentPartIndexRef.current = 0;
+      setShowLessonCard(false);
+      
+      // Send with the updated context directly and the topic to prevent topic suggestions
+      sendMessageWithContext([userMessage], updatedContext, topic);
+    }, 300);
+  };
+
+  const handleCustomTopicSubmit = () => {
+    if (customTopicInput.trim()) {
+      handleTopicSelect(customTopicInput.trim());
+      setCustomTopicInput("");
+      setShowCustomInput(false);
+    }
+  };
+
+  // Keyboard navigation for lesson parts
+  useEffect(() => {
+    if (!showLessonCard || lessonParts.length === 0) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      // Only handle arrow keys when lesson card is visible and not typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const currentIdx = currentPartIndexRef.current;
+        if (currentIdx > 0) {
+          const newIdx = currentIdx - 1;
+          currentPartIndexRef.current = newIdx;
+          setCurrentPartIndex(newIdx);
+          scrollLessonToTop();
+          console.log("🔄 PAGE SWAP: ArrowLeft key - navigating to part", newIdx + 1, "of", lessonParts.length, "| ref:", newIdx, "state:", newIdx);
+        }
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        const currentIdx = currentPartIndexRef.current;
+        if (currentIdx < lessonParts.length - 1) {
+          const newIdx = currentIdx + 1;
+          currentPartIndexRef.current = newIdx;
+          setCurrentPartIndex(newIdx);
+          scrollLessonToTop();
+          console.log("🔄 PAGE SWAP: ArrowRight key - navigating to part", newIdx + 1, "of", lessonParts.length, "| ref:", newIdx, "state:", newIdx);
+        } else {
+          // Last part, move to quiz phase - but only if not sending
+          if (!sending && phase === "learn") {
+            setTimeout(() => {
+              setPhase("quiz");
+              setConversation([]);
+              conversationRef.current = [];
+              setCurrentQuestion("");
+            }, 0);
+          }
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showLessonCard, lessonParts.length, phase, scrollLessonToTop]);
+
+  // Hide hover effect and cursor on scroll
+  useEffect(() => {
+    if (!showLessonCard && phase !== "learn") return;
+
+    function handleScroll() {
+      // Clear hover effect immediately
+      setHoverWordRects([]);
+      setIsScrolling(true);
+      setCursorHidden(true);
+
+      // Clear existing timeout
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+
+      // Reset scrolling state after scroll ends (but keep cursor hidden until mouse moves)
+      scrollTimeoutRef.current = setTimeout(() => {
+        setIsScrolling(false);
+      }, 150);
+    }
+
+    function handleMouseMove() {
+      // Show cursor again when mouse moves after scrolling
+      setCursorHidden(false);
+    }
+
+    // Listen to scroll events on the lesson content container and window
+    const lessonContent = document.querySelector('.lesson-content');
+    if (lessonContent) {
+      lessonContent.addEventListener('scroll', handleScroll, { passive: true });
+      lessonContent.addEventListener('mousemove', handleMouseMove, { passive: true });
+    }
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('wheel', handleScroll, { passive: true });
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
+
+    return () => {
+      if (lessonContent) {
+        lessonContent.removeEventListener('scroll', handleScroll);
+        lessonContent.removeEventListener('mousemove', handleMouseMove);
+      }
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('wheel', handleScroll);
+      window.removeEventListener('mousemove', handleMouseMove);
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, [showLessonCard, phase]);
+
+  const handlePhaseTransition = () => {
+    if (phase === "repeat") {
+      setPhase("learn");
+      setCurrentTopic("");
+      setSuggestedTopics([]);
+      setShowTopicSelection(false);
+      setShowCustomInput(false);
+      setConversation([]);
+      conversationRef.current = [];
+      setCurrentQuestion("");
+      topicSuggestionTriggered.current = false;
+    } else if (phase === "learn") {
+      setPhase("quiz");
+      setConversation([]);
+      conversationRef.current = [];
+      setCurrentQuestion("");
+    } else if (phase === "quiz") {
+      setPhase("complete");
+      saveSession();
+    }
+  };
+
+  const saveCurrentSession = async (isComplete = false, overrideSessionData?: typeof sessionData) => {
+    try {
+      const dataToSave = overrideSessionData || sessionData;
+      
+      // Generate summary for next session
+      const repeatedTopicsList = dataToSave.repeatedTopics.length > 0
+        ? dataToSave.repeatedTopics.map(rt => `${rt.topic} (avg: ${rt.averageScore.toFixed(1)}/10)`).join(", ")
+        : "No previous topics";
+      const quizAvg = dataToSave.quizResults.length > 0
+        ? (dataToSave.quizResults.reduce((a, b) => a + b.grade, 0) / dataToSave.quizResults.length).toFixed(1)
+        : "N/A";
+      const stageNote = dataToSave.mcStageCompletedAt
+        ? " MC quiz completed before moving to harder questions."
+        : "";
+      const statusLabel = isComplete ? "" : " (In Progress)";
+      const summary = `Last Surge session reviewed: ${repeatedTopicsList}. New topic introduced: ${currentTopic || dataToSave.newTopic}. Quiz results: ${dataToSave.quizResults.length} questions with average score ${quizAvg}/10.` + stageNote;
+
+      // CRITICAL: Load fresh data ONCE from localStorage to get the latest edited timestamps
+      // This ensures we don't overwrite dates that were edited in the modal
+      const currentData = loadSubjectData(slug);
+      
+      // Check if this session already exists and get its timestamp (may have been edited)
+      let existingTimestamp: number | null = null;
+      if (currentData?.surgeLog) {
+        const existingEntry = currentData.surgeLog.find(e => e.sessionId === sessionId);
+        if (existingEntry) {
+          existingTimestamp = existingEntry.timestamp;
+          console.log("Found existing entry for current session:", {
+            sessionId,
+            existingTimestamp,
+            existingDate: new Date(existingTimestamp).toISOString(),
+            willPreserve: true
+          });
+        }
+      }
+      
+      const entry: SurgeLogEntry = {
+        sessionId,
+        timestamp: existingTimestamp || Date.now(), // Use existing timestamp if available (may have been edited)
+        repeatedTopics: dataToSave.repeatedTopics,
+        newTopic: currentTopic || dataToSave.newTopic,
+        newTopicLesson: dataToSave.newTopicLesson || lastAssistantMessage,
+        quizResults: dataToSave.quizResults,
+        quizStageTransitions: dataToSave.quizStageTransitions,
+        mcStageCompletedAt: dataToSave.mcStageCompletedAt,
+        summary: summary + statusLabel,
+      };
+
+      console.log("Saving surge session entry:", {
+        sessionId: entry.sessionId,
+        timestamp: entry.timestamp,
+        timestampDate: new Date(entry.timestamp).toISOString(),
+        newTopic: entry.newTopic,
+        quizResultsCount: entry.quizResults.length,
+        isComplete,
+      });
+
+      if (currentData) {
+        if (!currentData.surgeLog) {
+          currentData.surgeLog = [];
+        }
+        
+        // CRITICAL: Before modifying, preserve ALL other entries' timestamps
+        // Store original timestamps for all entries to prevent accidental overwrites
+        // This Map will be used to restore any timestamps that get accidentally changed
+        const originalTimestamps = new Map<string, number>();
+        currentData.surgeLog.forEach((e: any) => {
+          originalTimestamps.set(e.sessionId, e.timestamp);
+        });
+        
+        console.log("=== SAVE SESSION - PRESERVING TIMESTAMPS ===");
+        console.log("Original timestamps map:", Array.from(originalTimestamps.entries()).map(([id, ts]) => ({
+          sessionId: id,
+          timestamp: ts,
+          date: new Date(ts).toISOString()
+        })));
+        
+        // Find existing session with same sessionId
+        const existingIndex = currentData.surgeLog.findIndex(e => e.sessionId === sessionId);
+        
+        console.log("=== SAVE SESSION DEBUG START ===");
+        console.log("Current sessionId:", sessionId);
+        console.log("All existing entries before save:", JSON.stringify(currentData.surgeLog.map((e: any, idx: number) => ({
+          index: idx,
+          sessionId: e.sessionId,
+          timestamp: e.timestamp,
+          date: new Date(e.timestamp).toISOString(),
+          isCurrentSession: e.sessionId === sessionId
+        })), null, 2));
+        
+        // CRITICAL: FIRST, restore ALL other entries' timestamps BEFORE we modify anything
+        // This must happen FIRST to prevent any accidental overwrites
+        console.log("=== STEP 1: RESTORING ALL OTHER ENTRIES' TIMESTAMPS (BEFORE UPDATE) ===");
+        currentData.surgeLog.forEach((e: any, idx: number) => {
+          if (e.sessionId !== sessionId && originalTimestamps.has(e.sessionId)) {
+            const originalTimestamp = originalTimestamps.get(e.sessionId)!;
+            const currentTimestamp = currentData.surgeLog[idx].timestamp;
+            if (currentTimestamp !== originalTimestamp) {
+              console.warn(`⚠️ RESTORING timestamp for entry ${e.sessionId} from ${currentTimestamp} (${new Date(currentTimestamp).toISOString()}) to ${originalTimestamp} (${new Date(originalTimestamp).toISOString()})`);
+            }
+            // Force restore
+            currentData.surgeLog[idx] = {
+              ...currentData.surgeLog[idx],
+              timestamp: originalTimestamp
+            };
+          }
+        });
+        
+        // NOW update the current session
+        if (existingIndex !== -1) {
+          // Update existing session - preserve the existing timestamp (may have been edited by user)
+          const existingEntry = currentData.surgeLog[existingIndex];
+          console.log("=== STEP 2: UPDATING EXISTING SESSION at index", existingIndex, "===");
+          console.log("Existing entry before update:", {
+            sessionId: existingEntry.sessionId,
+            timestamp: existingEntry.timestamp,
+            date: new Date(existingEntry.timestamp).toISOString()
+          });
+          console.log("New entry data (will be merged):", {
+            sessionId: entry.sessionId,
+            timestamp: entry.timestamp,
+            date: new Date(entry.timestamp).toISOString(),
+            quizResultsCount: entry.quizResults.length
+          });
+          
+          // CRITICAL: Use the existing entry's timestamp, not the new entry's timestamp
+          currentData.surgeLog[existingIndex] = {
+            ...entry,
+            timestamp: existingEntry.timestamp, // Preserve the original/edited timestamp
+          };
+          
+          console.log("After merge - entry at index", existingIndex, ":", {
+            sessionId: currentData.surgeLog[existingIndex].sessionId,
+            timestamp: currentData.surgeLog[existingIndex].timestamp,
+            date: new Date(currentData.surgeLog[existingIndex].timestamp).toISOString(),
+            preserved: currentData.surgeLog[existingIndex].timestamp === existingEntry.timestamp
+          });
+        } else {
+          // Add new session
+          console.log("=== STEP 2: ADDING NEW SESSION ===");
+          console.log("New entry:", {
+            sessionId: entry.sessionId,
+            timestamp: entry.timestamp,
+            date: new Date(entry.timestamp).toISOString()
+          });
+          currentData.surgeLog.push(entry);
+        }
+        
+        // CRITICAL: FINAL check - restore ALL other entries' timestamps one more time
+        // This is a safety net to catch any overwrites that might have happened
+        console.log("=== STEP 3: FINAL TIMESTAMP RESTORATION CHECK ===");
+        let anyRestored = false;
+        currentData.surgeLog.forEach((e: any, idx: number) => {
+          if (e.sessionId !== sessionId && originalTimestamps.has(e.sessionId)) {
+            const originalTimestamp = originalTimestamps.get(e.sessionId)!;
+            const currentTimestamp = currentData.surgeLog[idx].timestamp;
+            if (currentTimestamp !== originalTimestamp) {
+              console.error(`❌ ERROR: Entry ${e.sessionId} timestamp was changed! Restoring from ${currentTimestamp} (${new Date(currentTimestamp).toISOString()}) to ${originalTimestamp} (${new Date(originalTimestamp).toISOString()})`);
+              currentData.surgeLog[idx] = {
+                ...currentData.surgeLog[idx],
+                timestamp: originalTimestamp
+              };
+              anyRestored = true;
+            }
+          }
+        });
+        if (!anyRestored) {
+          console.log("✓ All timestamps preserved correctly");
+        }
+        console.log("=== FINAL TIMESTAMP CHECK COMPLETE ===");
+        
+        console.log("After timestamp restoration:", JSON.stringify(currentData.surgeLog.map((e: any) => ({
+          sessionId: e.sessionId,
+          timestamp: e.timestamp,
+          date: new Date(e.timestamp).toISOString(),
+          wasRestored: e.sessionId !== sessionId && originalTimestamps.has(e.sessionId)
+        })), null, 2));
+        
+        console.log("All entries in memory after update and timestamp preservation (before save):", JSON.stringify(currentData.surgeLog.map((e: any, idx: number) => ({
+          index: idx,
+          sessionId: e.sessionId,
+          timestamp: e.timestamp,
+          date: new Date(e.timestamp).toISOString(),
+          wasPreserved: e.sessionId !== sessionId && originalTimestamps.has(e.sessionId)
+        })), null, 2));
+        console.log("=== SAVE SESSION DEBUG END ===");
+        
+        // Keep only last 50 sessions
+        if (currentData.surgeLog.length > 50) {
+          currentData.surgeLog = currentData.surgeLog.slice(-50);
+        }
+        
+        console.log("=== BEFORE SAVING TO STORAGE ===");
+        console.log("Data to save - all surgeLog entries:", JSON.stringify(currentData.surgeLog.map((e: any, idx: number) => ({
+          index: idx,
+          sessionId: e.sessionId,
+          timestamp: e.timestamp,
+          date: new Date(e.timestamp).toISOString()
+        })), null, 2));
+        
+        await saveSubjectDataAsync(slug, currentData);
+        
+        // CRITICAL: Verify the save immediately after
+        const verifyAfterSave = loadSubjectData(slug);
+        if (verifyAfterSave?.surgeLog) {
+          console.log("=== AFTER SAVING TO STORAGE - VERIFICATION ===");
+          console.log("All entries after save:", JSON.stringify(verifyAfterSave.surgeLog.map((e: any, idx: number) => ({
+            index: idx,
+            sessionId: e.sessionId,
+            timestamp: e.timestamp,
+            date: new Date(e.timestamp).toISOString(),
+            isCurrentSession: e.sessionId === sessionId
+          })), null, 2));
+          
+          // Check if any timestamps were lost
+          const editedEntry = verifyAfterSave.surgeLog.find((e: any) => e.sessionId === sessionId);
+          if (editedEntry) {
+            console.log("Current session entry after save:", {
+              sessionId: editedEntry.sessionId,
+              timestamp: editedEntry.timestamp,
+              date: new Date(editedEntry.timestamp).toISOString(),
+              expectedTimestamp: existingIndex !== -1 ? originalTimestamps.get(sessionId) : entry.timestamp,
+              match: editedEntry.timestamp === (existingIndex !== -1 ? originalTimestamps.get(sessionId) : entry.timestamp)
+            });
+          }
+          
+          // Check all other entries to see if their timestamps were preserved
+          verifyAfterSave.surgeLog.forEach((e: any) => {
+            if (e.sessionId !== sessionId && originalTimestamps.has(e.sessionId)) {
+              const original = originalTimestamps.get(e.sessionId)!;
+              if (e.timestamp !== original) {
+                console.error(`ERROR: Entry ${e.sessionId} timestamp was changed from ${original} (${new Date(original).toISOString()}) to ${e.timestamp} (${new Date(e.timestamp).toISOString()})`);
+              } else {
+                console.log(`✓ Entry ${e.sessionId} timestamp preserved: ${e.timestamp} (${new Date(e.timestamp).toISOString()})`);
+              }
+            }
+          });
+          console.log("=== VERIFICATION END ===");
+        }
+      } else {
+        // No existing data, create new
+        const newData: StoredSubjectData = {
+          subject: slug,
+          files: [],
+          combinedText: "",
+          nodes: {},
+          surgeLog: [entry],
+        };
+        await saveSubjectDataAsync(slug, newData);
+        console.log("Created new subject data with surge session");
+      }
+    } catch (e) {
+      console.error("Failed to save surge session:", e);
+    }
+  };
+
+  const saveSession = async () => {
+    await saveCurrentSession(true);
+  };
+
+  const [inputValue, setInputValue] = useState("");
+
+  // Word click handler (copied from lesson page)
+  async function onWordClick(word: string, parentText: string, e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.target) return;
+
+    // Position at middle bottom of screen
+    // x is the horizontal center, y will be adjusted by WordPopover to stay on screen
+    const x = window.innerWidth / 2;
+    const y = window.innerHeight - 20; // Target: 20px from bottom (WordPopover will adjust if needed)
+
+    setExplanationPosition({ x, y });
+    setExplanationWord(word);
+    setShowExplanation(true);
+    setExplanationLoading(true);
+    setExplanationError(null);
+    setExplanationContent("");
+
+    try {
+      const idx = parentText.indexOf(word);
+      const localContext = idx >= 0 ? parentText.slice(Math.max(0, idx - 120), Math.min(parentText.length, idx + word.length + 120)) : parentText.slice(0, 240);
+      const res = await fetch("/api/quick-explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: data?.subject || slug,
+          topic: currentTopic || sessionData.newTopic || "",
+          word,
+          localContext,
+          courseTopics: data?.topics?.map(t => t.name) || [],
+          languageName: data?.course_language_name || ""
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
+      setExplanationContent(json.content || "");
+    } catch (err: any) {
+      setExplanationError(err?.message || "Failed to explain");
+    } finally {
+      setExplanationLoading(false);
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen flex-col bg-[var(--background)]">
+      <div className="mx-auto w-full max-w-4xl px-6 py-8">
+        <div className="mb-6">
+
+          {/* Phase Indicator */}
+          <div className="mb-4">
+            <div className="flex items-baseline text-xs mb-2 relative" style={{ lineHeight: '1.25rem', height: '1.25rem' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (phase !== "repeat") {
+                    // Check surge logs and log what we find
+                    const allSurgeLogs = getSurgeLog(slug);
+                    const lastSurgeCheck = getLastSurgeSession(slug);
+                    
+                    console.log("=== REVIEW BUTTON CLICKED ===");
+                    console.log("Total surge log entries:", allSurgeLogs.length);
+                    console.log("All surge log entries:", allSurgeLogs);
+                    console.log("Last surge session:", lastSurgeCheck);
+                    
+                    // Extract all unique topics from all surge log entries
+                    const allTopics = new Set<string>();
+                    const topicsBySource: { repeatedTopics: string[]; newTopics: string[]; quizResults: string[] } = {
+                      repeatedTopics: [],
+                      newTopics: [],
+                      quizResults: []
+                    };
+                    
+                    allSurgeLogs.forEach((entry, idx) => {
+                      console.log(`\nEntry ${idx + 1}:`, {
+                        timestamp: new Date(entry.timestamp).toLocaleDateString(),
+                        repeatedTopics: entry.repeatedTopics?.map(rt => rt?.topic).filter(Boolean) || [],
+                        newTopic: entry.newTopic || "",
+                        quizResultsTopics: entry.quizResults?.map(r => r.topic).filter(Boolean) || [],
+                        quizResultsCount: entry.quizResults?.length || 0
+                      });
+                      
+                      // Add topics from repeatedTopics
+                      if (entry.repeatedTopics && Array.isArray(entry.repeatedTopics)) {
+                        entry.repeatedTopics.forEach(rt => {
+                          if (rt?.topic) {
+                            allTopics.add(rt.topic);
+                            topicsBySource.repeatedTopics.push(rt.topic);
+                          }
+                        });
+                      }
+                      // Add newTopic
+                      if (entry.newTopic) {
+                        allTopics.add(entry.newTopic);
+                        topicsBySource.newTopics.push(entry.newTopic);
+                      }
+                      // Add topics from quizResults
+                      if (entry.quizResults && Array.isArray(entry.quizResults)) {
+                        entry.quizResults.forEach(result => {
+                          if (result.topic) {
+                            allTopics.add(result.topic);
+                            topicsBySource.quizResults.push(result.topic);
+                          }
+                        });
+                      }
+                    });
+                    
+                    const topicsToReview = Array.from(allTopics);
+                    
+                    console.log("\nTopics by source:");
+                    console.log("  - From repeatedTopics:", [...new Set(topicsBySource.repeatedTopics)]);
+                    console.log("  - From newTopics:", [...new Set(topicsBySource.newTopics)]);
+                    console.log("  - From quizResults:", [...new Set(topicsBySource.quizResults)]);
+                    console.log("\nTotal unique topics found:", topicsToReview.length);
+                    console.log("All topics to review:", topicsToReview);
+                    
+                    // Check if any entry is due for review (at least 1 day old)
+                    if (lastSurgeCheck) {
+                      const lastDate = new Date(lastSurgeCheck.timestamp);
+                      const today = new Date();
+                      const lastDay = new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate());
+                      const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                      const daysDiff = Math.floor((todayDay.getTime() - lastDay.getTime()) / (1000 * 60 * 60 * 24));
+                      console.log("\nLast surge date:", lastDate.toLocaleDateString());
+                      console.log("Today date:", today.toLocaleDateString());
+                      console.log("Days difference:", daysDiff);
+                      console.log("Due for review:", daysDiff >= 1 ? "YES" : "NO");
+                    }
+                    
+                    console.log("===========================");
+                    
+                    userSetPhaseRef.current = true; // Mark that user manually set the phase
+                    setPhase("repeat");
+                    setQuizQuestions([]);
+                    setQuizResponses({});
+                    setCurrentQuizIndex(0);
+                    setShortAnswer("");
+                    setConversation([]);
+                    conversationRef.current = [];
+                    setCurrentQuestion("");
+                  }
+                }}
+                className={`absolute ${phase === "repeat" ? "text-sm font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] bg-clip-text text-transparent" : "text-[var(--foreground)]/30"} transition-opacity hover:opacity-70 cursor-pointer`}
+                style={{ lineHeight: '1.25rem', left: '15%', transform: 'translateX(-50%)' }}
+              >
+                Review
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (phase !== "learn") {
+                    userSetPhaseRef.current = true; // Mark that user manually set the phase
+                    setPhase("learn");
+                    setCurrentTopic("");
+                    setSuggestedTopics([]);
+                    setShowTopicSelection(false);
+                    setShowCustomInput(false);
+                    setConversation([]);
+                    conversationRef.current = [];
+                    setCurrentQuestion("");
+                    topicSuggestionTriggered.current = false;
+                  }
+                }}
+                className={`absolute ${phase === "learn" ? "text-sm font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] bg-clip-text text-transparent" : "text-[var(--foreground)]/30"} transition-opacity hover:opacity-70 cursor-pointer`}
+                style={{ lineHeight: '1.25rem', left: '50%', transform: 'translateX(-50%)' }}
+              >
+                Learn
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  if (event.metaKey || event.ctrlKey || event.altKey) {
+                    event.preventDefault();
+                    handleDebugQuizStart();
+                  } else if (phase !== "quiz" && phase === "learn" && currentTopic) {
+                    userSetPhaseRef.current = true; // Mark that user manually set the phase
+                    setPhase("quiz");
+                    setConversation([]);
+                    conversationRef.current = [];
+                    setCurrentQuestion("");
+                  }
+                }}
+                className={`absolute ${phase === "quiz" ? "text-sm font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] bg-clip-text text-transparent" : "text-[var(--foreground)]/30"} transition-opacity hover:opacity-70 cursor-pointer`}
+                style={{ lineHeight: '1.25rem', left: '85%', transform: 'translateX(-50%)' }}
+                title="Hold Alt/Ctrl (or Cmd) while clicking to run the Erlang quiz debug"
+              >
+                Quiz
+              </button>
+            </div>
+            <div className={`flex-1 h-2 rounded-full mt-1 ${phase === "repeat" || phase === "learn" || phase === "quiz" || phase === "complete" ? "bg-[var(--accent-cyan)]/10" : "bg-[var(--foreground)]/10"}`}>
+              <div 
+                className={`h-full rounded-full transition-all ${phase === "repeat" || phase === "learn" || phase === "quiz" || phase === "complete" ? "bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)]" : ""}`} 
+                style={{ width: phase === "repeat" ? "15%" : phase === "learn" ? "50%" : phase === "quiz" ? "85%" : "100%" }} 
+              />
+            </div>
+          </div>
+
+          <div className="text-sm text-[var(--foreground)]/70">
+            {phase === "complete" && "Session complete! Great work!"}
+          </div>
+        </div>
+
+        {phase === "complete" ? (
+          <div className="rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--accent-cyan)]/10 p-6 text-center">
+            <div className="text-lg font-semibold text-[var(--foreground)] mb-2">
+              🎉 Surge Complete!
+            </div>
+            <div className="text-sm text-[var(--foreground)]/70 mb-4">
+              You've reviewed {sessionData.repeatedTopics.length} topic(s) and learned {sessionData.newTopic || currentTopic}
+            </div>
+            <button
+              onClick={() => router.push(`/subjects/${slug}/surge`)}
+              className="px-4 py-2 rounded-lg bg-[var(--accent-cyan)]/20 hover:bg-[var(--accent-cyan)]/30 text-[var(--foreground)] transition-colors"
+            >
+              Start Another Surge
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Review Page - Show when in repeat phase and no questions yet */}
+            {isMounted && phase === "repeat" && quizQuestions.length === 0 && !quizLoading && !quizInfoMessage && (
+              <div className="w-full flex justify-center">
+                <div className="w-full max-w-2xl">
+                  {(() => {
+                    // Get all surge log entries and extract all unique topics
+                    const allSurgeLogs = getSurgeLog(slug);
+                    
+                    // Get the course/subject name to filter it out
+                    const courseName = data?.subject || "";
+                    
+                    // Extract all unique topics from all surge log entries
+                    const allTopics = new Set<string>();
+                    allSurgeLogs.forEach(entry => {
+                      // Add topics from repeatedTopics
+                      if (entry.repeatedTopics && Array.isArray(entry.repeatedTopics)) {
+                        entry.repeatedTopics.forEach(rt => {
+                          if (rt?.topic && rt.topic !== courseName) {
+                            allTopics.add(rt.topic);
+                          }
+                        });
+                      }
+                      // Add newTopic (but not if it's the course name)
+                      if (entry.newTopic && entry.newTopic !== courseName) {
+                        allTopics.add(entry.newTopic);
+                      }
+                      // Add topics from quizResults (but not if it's the course name)
+                      if (entry.quizResults && Array.isArray(entry.quizResults)) {
+                        entry.quizResults.forEach(result => {
+                          if (result.topic && result.topic !== courseName) {
+                            allTopics.add(result.topic);
+                          }
+                        });
+                      }
+                    });
+                    
+                    const topicsToReview = Array.from(allTopics);
+                    
+                    if (topicsToReview.length === 0) {
+                      // No topics to review - show introduction
+                      return (
+                        <div className="rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 p-8">
+                          <div className="text-center mb-8">
+                            <div className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] mb-4" style={{ fontFamily: 'var(--font-orbitron), sans-serif' }}>
+                              Welcome to Surge
+                            </div>
+                            <div className="text-lg font-semibold text-[var(--foreground)] mb-6">
+                              Your accelerated learning session
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-4 text-left mb-8">
+                            <div className="text-base text-[var(--foreground)]/90">
+                              <strong className="text-[var(--accent-cyan)]">Surge</strong> is a three-phase learning system designed to help you master topics quickly and effectively:
+                            </div>
+                            
+                            <div className="space-y-3">
+                              <div className="flex items-start gap-3">
+                                <div className="text-xl font-bold text-[var(--accent-cyan)] mt-0.5">1</div>
+                                <div>
+                                  <div className="font-semibold text-[var(--foreground)] mb-1">Review Phase</div>
+                                  <div className="text-sm text-[var(--foreground)]/70">
+                                    Test your understanding of previously learned topics with focused quiz questions.
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-start gap-3">
+                                <div className="text-xl font-bold text-[var(--accent-pink)] mt-0.5">2</div>
+                                <div>
+                                  <div className="font-semibold text-[var(--foreground)] mb-1">Learn Phase</div>
+                                  <div className="text-sm text-[var(--foreground)]/70">
+                                    Explore new topics with interactive lessons tailored to your course.
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-start gap-3">
+                                <div className="text-xl font-bold text-[var(--accent-cyan)] mt-0.5">3</div>
+                                <div>
+                                  <div className="font-semibold text-[var(--foreground)] mb-1">Quiz Phase</div>
+                                  <div className="text-sm text-[var(--foreground)]/70">
+                                    Reinforce your learning with comprehensive quizzes on the new material.
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div className="pt-4 border-t border-[var(--foreground)]/10 text-sm text-[var(--foreground)]/80">
+                              Since this is your first Surge session, we'll start with the <strong>Learn Phase</strong> to introduce you to new topics.
+                            </div>
+                          </div>
+                          
+                          <div className="text-center">
+                            <button
+                              onClick={() => {
+                                setPhase("learn");
+                                setCurrentTopic("");
+                                setSuggestedTopics([]);
+                                setShowTopicSelection(false);
+                                setShowCustomInput(false);
+                                setConversation([]);
+                                conversationRef.current = [];
+                                setCurrentQuestion("");
+                                topicSuggestionTriggered.current = false;
+                              }}
+                              className="px-8 py-3 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/20 to-[var(--accent-pink)]/20 hover:from-[var(--accent-cyan)]/30 hover:to-[var(--accent-pink)]/30 text-[var(--foreground)] font-medium transition-all border border-[var(--accent-cyan)]/30"
+                            >
+                              Continue
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+                    
+                    // Has topics to review
+                    return (
+                      <div className="rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 p-8">
+                        <div className="text-center mb-6">
+                          <div className="text-xl font-semibold text-[var(--foreground)] mb-2">
+                            Let's review
+                          </div>
+                          <div className="text-sm text-[var(--foreground)]/70 mb-6">
+                            We'll go through focused questions on these topics:
+                          </div>
+                          <div className="space-y-2 mb-6">
+                            {topicsToReview.map((topic, idx) => (
+                              <div key={idx} className="text-base text-[var(--foreground)]">
+                                • {topic}
+                              </div>
+                            ))}
+                          </div>
+                          <button
+                            onClick={async () => {
+                              // Prevent multiple clicks
+                              if (quizLoading || reviewStartRequested.current) {
+                                console.log("Already generating review questions, please wait...");
+                                return;
+                              }
+                              
+                              // Set flag immediately to prevent duplicate calls
+                              reviewStartRequested.current = true;
+                              
+                              // Reset quiz state
+                              setQuizQuestions([]);
+                              setQuizResponses({});
+                              setCurrentQuizIndex(0);
+                              setShortAnswer("");
+                              harderQuestionsRequested.current = false;
+                              
+                              // Call the function directly - it has guards to prevent multiple calls
+                              await requestReviewQuestions();
+                            }}
+                            className="px-8 py-3 rounded-lg bg-[var(--accent-cyan)]/20 hover:bg-[var(--accent-cyan)]/30 text-[var(--foreground)] font-medium transition-colors"
+                          >
+                            Start
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+            
+            {/* Loading state for review questions */}
+            {isMounted && phase === "repeat" && quizQuestions.length === 0 && (quizLoading || quizInfoMessage) && (
+              <div className="w-full flex justify-center">
+                <div className="flex items-center gap-2 text-[var(--foreground)]/60">
+                  <GlowSpinner size={20} inline ariaLabel="Setting up review" idSuffix="surge-review" />
+                  <span className="text-sm">{quizInfoMessage || "Chad is setting up the review..."}</span>
+                </div>
+              </div>
+            )}
+            
+            {/* Quiz View - Review or Regular Quiz */}
+            {(phase === "quiz" || phase === "repeat") && quizQuestions.length > 0 && currentQuizIndex < quizQuestions.length ? (
+              <div className="rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 p-6">
+                {(() => {
+                  const currentQ = quizQuestions[currentQuizIndex];
+                  if (!currentQ) return null;
+                  const stageQuestions = quizQuestions.filter((q) => q.stage === currentQ.stage);
+                  const stageIndex = stageQuestions.findIndex((q) => q.id === currentQ.id);
+                  const currentResponse = quizResponses[currentQ.id];
+                  const awaitingHarder =
+                    currentQ.stage === "mc" &&
+                    !!currentResponse &&
+                    !quizQuestions.some((q) => q.stage === "harder") &&
+                    getAnsweredCount("mc") >= stageQuestions.length;
+                  const nextLabel =
+                    currentQ.stage === "review"
+                      ? quizQuestions.findIndex((q, idx) => idx > currentQuizIndex && q.stage === "review") === -1
+                        ? "Complete Review"
+                        : "Next Question"
+                      : currentQ.stage === "mc"
+                      ? quizQuestions.some((q, idx) => idx > currentQuizIndex && q.stage === "mc")
+                        ? "Next Question"
+                        : quizQuestions.some((q) => q.stage === "harder")
+                        ? "Start Hard Quiz"
+                        : "Next Question"
+                      : quizQuestions.findIndex((q, idx) => idx > currentQuizIndex && q.stage === "harder") === -1
+                      ? "Finish Quiz"
+                      : "Next Question";
+
+                  const explanationBlock = () => {
+                    if (!currentResponse) return null;
+                    if (currentQ.type === "mc") {
+                      const userIdx = currentResponse.answer
+                        ? currentResponse.answer.charCodeAt(0) - 65
+                        : -1;
+                      const correctIdx = currentQ.correctOption
+                        ? currentQ.correctOption.charCodeAt(0) - 65
+                        : -1;
+                      return (
+                        <div className="space-y-3 rounded-lg border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-4">
+                          <div className="text-sm font-semibold text-[var(--foreground)]">
+                            {currentResponse.isCorrect === null
+                              ? "Answer recorded"
+                              : currentResponse.isCorrect
+                              ? "Correct!"
+                              : "Not quite"}
+                          </div>
+                          {currentQ.explanation && (
+                            <div className="text-sm text-[var(--foreground)]/80">
+                              <div className="font-semibold mb-1">Explanation</div>
+                              <LessonBody body={sanitizeLessonBody(currentQ.explanation)} />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    const hasAssessment = currentResponse.checked && currentResponse.assessment;
+                    
+                    return (
+                      <div className="space-y-4 rounded-lg border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-4">
+                        {hasAssessment ? (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <div className="text-sm font-semibold text-[var(--foreground)]">
+                                {currentResponse.isCorrect ? "Great job!" : "Review your answer"}
+                              </div>
+                              <div className={`text-lg font-bold ${
+                                currentResponse.score >= 8 ? "text-green-500" :
+                                currentResponse.score >= 6 ? "text-yellow-500" :
+                                "text-red-500"
+                              }`}>
+                                Grade: {currentResponse.score}/10
+                              </div>
+                            </div>
+                            
+                            {currentResponse.assessment && (
+                              <div className="text-sm text-[var(--foreground)]/80">
+                                <div className="font-semibold mb-1">Assessment</div>
+                                <div>{currentResponse.assessment}</div>
+                              </div>
+                            )}
+                            
+                            {currentResponse.whatsGood && (
+                              <div className="text-sm text-[var(--foreground)]/80">
+                                <div className="font-semibold mb-1 text-green-500">✓ What's Good</div>
+                                <div>{currentResponse.whatsGood}</div>
+                              </div>
+                            )}
+                            
+                            {currentResponse.whatsBad && (
+                              <div className="text-sm text-[var(--foreground)]/80">
+                                <div className="font-semibold mb-1 text-red-500">✗ What Needs Improvement</div>
+                                <div>{currentResponse.whatsBad}</div>
+                              </div>
+                            )}
+                            
+                            {currentResponse.enhancedExplanation && (
+                              <div className="text-sm text-[var(--foreground)]/80 border-t border-[var(--foreground)]/10 pt-3">
+                                <div className="font-semibold mb-2">Enhanced Explanation</div>
+                                <LessonBody body={sanitizeLessonBody(currentResponse.enhancedExplanation)} />
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <div className="text-sm font-semibold text-[var(--foreground)]">
+                              {currentResponse.isCorrect === null
+                                ? "Answer recorded"
+                                : currentResponse.isCorrect
+                                ? "Great job!"
+                                : "Review the model answer"}
+                            </div>
+                            {currentQ.modelAnswer && (
+                              <div className="text-sm text-[var(--foreground)]/80">
+                                <div className="font-semibold mb-1">Model answer</div>
+                                <LessonBody body={sanitizeLessonBody(currentQ.modelAnswer)} />
+                              </div>
+                            )}
+                            {currentQ.explanation && (
+                              <div className="text-sm text-[var(--foreground)]/80">
+                                <div className="font-semibold mb-1">Explanation</div>
+                                <LessonBody body={sanitizeLessonBody(currentQ.explanation)} />
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    );
+                  };
+
+                  return (
+                    <>
+                      <div className="mb-4 flex items-center justify-between">
+                        <div className="text-xs text-[var(--foreground)]/50">
+                          {`Question ${currentQuizIndex + 1} of ${quizQuestions.length} ${
+                            currentQ.stage === "review" 
+                              ? (currentQ.type === "mc" ? "(Multiple Choice)" : "(Short Answer)")
+                              : currentQ.stage === "mc" 
+                              ? "(Multiple Choice)" 
+                              : "(Short Answer)"
+                          }`}
+                        </div>
+                        <div className="text-xs text-[var(--foreground)]/50">
+                          {currentQ.stage === "review" 
+                            ? (currentQ.type === "mc" ? "Review - Multiple Choice" : "Review - Short Answer")
+                            : currentQ.stage === "mc" 
+                            ? "Easy Questions" 
+                            : "Harder Questions"}
+                        </div>
+                      </div>
+
+                    <div className="space-y-6">
+                      {/* Question */}
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium text-[var(--foreground)]/70 uppercase tracking-wide">
+                          Question
+                        </div>
+                        <div className="text-lg font-semibold text-[var(--foreground)]">
+                          <LessonBody body={sanitizeLessonBody(currentQ.question.endsWith("?") ? currentQ.question : `${currentQ.question}?`)} />
+                        </div>
+                      </div>
+
+                      {/* Answer Input */}
+                      {currentQ.type === 'mc' ? (
+                        <div className="space-y-3">
+                          <div className="text-sm font-medium text-[var(--foreground)]/70 uppercase tracking-wide mb-3">
+                            Select an answer:
+                          </div>
+                          <div className="space-y-2">
+                            {currentQ.options?.map((option, optIdx) => {
+                              const optionLetter = String.fromCharCode(65 + optIdx);
+                              const response = quizResponses[currentQ.id];
+                              const isAnswered = !!response;
+                              const isSelected = response?.answer === optionLetter;
+                              const isCorrect =
+                                currentQ.correctOption &&
+                                currentQ.correctOption.toUpperCase() === optionLetter;
+                              const optionClasses = isAnswered
+                                ? isCorrect
+                                  ? "border-green-500 bg-green-500/10"
+                                  : isSelected
+                                  ? "border-red-500 bg-red-500/10"
+                                  : "border-[var(--foreground)]/10 opacity-60"
+                                : "border-[var(--foreground)]/20 bg-[var(--background)]/60 hover:border-[var(--accent-cyan)]/30 hover:bg-[var(--accent-cyan)]/10";
+                              return (
+                                <button
+                                  key={optIdx}
+                                  onClick={() => handleMCOptionSelect(optionLetter)}
+                                  disabled={isAnswered}
+                                  className={`w-full text-left px-4 py-3 rounded-lg border transition-all text-[var(--foreground)] ${optionClasses} disabled:cursor-not-allowed`}
+                                >
+                                  <span className="font-semibold mr-2">{optionLetter})</span>
+                                  {option}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="text-sm font-medium text-[var(--foreground)]/70 uppercase tracking-wide">
+                            Your answer:
+                          </div>
+                          <textarea
+                            value={shortAnswer}
+                            onChange={(e) => setShortAnswer(e.target.value)}
+                            placeholder="Type your answer here..."
+                            disabled={!!quizResponses[currentQ.id]?.checked}
+                            className="w-full min-h-[120px] px-4 py-3 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/60 text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-cyan)]/50 resize-none disabled:opacity-70 disabled:cursor-not-allowed"
+                          />
+                        </div>
+                      )}
+
+                      {explanationBlock()}
+
+                      {/* Submit / Next Buttons */}
+                      <div className="flex justify-end pt-2">
+                        {currentQ.type === 'mc' ? (
+                          <button
+                            onClick={handleNextQuestion}
+                            disabled={!quizResponses[currentQ.id]?.answer || awaitingHarder || quizLoading}
+                            className="px-6 py-2 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] text-white font-medium transition-opacity disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
+                          >
+                            {awaitingHarder ? "Generating harder questions..." : nextLabel}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={quizResponses[currentQ.id]?.checked ? handleNextQuestion : handleCheckAnswer}
+                            disabled={
+                              quizLoading ||
+                              checkingAnswer ||
+                              (!quizResponses[currentQ.id]?.checked && !shortAnswer.trim())
+                            }
+                            className="px-6 py-2 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] text-white font-medium transition-opacity disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
+                          >
+                            {checkingAnswer
+                              ? "Checking..."
+                              : quizResponses[currentQ.id]?.checked
+                              ? nextLabel
+                              : shortAnswer.trim()
+                              ? "Check Answer"
+                              : "Enter an answer"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    </>
+                  );
+                })()}
+              </div>
+            ) : null}
+
+            {/* Learn Phase Topic Recommendation */}
+            {phase === "learn" && showTopicSelection && suggestedTopics.length >= MIN_TOPIC_SUGGESTIONS && (
+              <div className="rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/90 p-8 shadow-[0_20px_60px_-30px_rgba(20,200,255,0.4)]">
+                {(() => {
+                  const [recommendedTopic, ...otherTopics] = suggestedTopics;
+                  return (
+                    <>
+                      <div className="text-sm font-semibold text-[var(--accent-cyan)] uppercase tracking-[0.2em] mb-2 text-center">
+                        Chad recommends starting with
+                      </div>
+                      <div className="text-3xl font-bold text-center text-[var(--foreground)] mb-3">
+                        {recommendedTopic}
+                      </div>
+                      <div className="text-sm text-[var(--foreground)]/70 text-center max-w-2xl mx-auto mb-6">
+                        This topic best matches your current progress and the course priorities. Start here to get the fastest momentum, or pick another option below.
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-3 justify-center items-center mb-8">
+                        <button
+                          onClick={() => handleTopicSelect(recommendedTopic)}
+                          className="px-8 py-3 rounded-xl bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] text-[var(--foreground)] font-semibold tracking-wide uppercase shadow-lg shadow-[var(--accent-cyan)]/30 hover:shadow-[var(--accent-pink)]/30 transition-all"
+                        >
+                          Start with {recommendedTopic}
+                        </button>
+                      </div>
+                      {otherTopics.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="text-xs font-semibold text-[var(--foreground)]/60 uppercase tracking-[0.3em] text-center">
+                            Other options
+                          </div>
+                          <div className="flex flex-wrap justify-center gap-2">
+                            {otherTopics.map((topic, idx) => (
+                              <button
+                                key={topic}
+                                onClick={() => handleTopicSelect(topic)}
+                                className="px-3 py-1.5 rounded-full border border-[var(--accent-cyan)]/30 bg-[var(--background)]/60 text-xs font-medium text-[var(--foreground)]/80 hover:bg-[var(--accent-cyan)]/10 transition-colors"
+                              >
+                                {topic}
+                              </button>
+                            ))}
+                            <button
+                              onClick={() => setShowCustomInput((prev) => !prev)}
+                              className="px-3 py-1.5 rounded-full border border-dashed border-[var(--foreground)]/30 text-xs font-medium text-[var(--foreground)]/70 hover:border-[var(--accent-cyan)]/50 hover:text-[var(--foreground)] transition-colors"
+                            >
+                              + Custom topic
+                            </button>
+                          </div>
+                          {showCustomInput && (
+                            <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
+                              <input
+                                type="text"
+                                value={customTopicInput}
+                                onChange={(e) => setCustomTopicInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && !e.shiftKey) {
+                                    handleCustomTopicSubmit();
+                                  }
+                                }}
+                                placeholder="Enter custom topic..."
+                                className="flex-1 min-w-[200px] rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-2 text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-cyan)]/50"
+                                autoFocus
+                              />
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={handleCustomTopicSubmit}
+                                  disabled={!customTopicInput.trim()}
+                                  className="px-4 py-2 rounded-lg bg-[var(--accent-cyan)]/20 hover:bg-[var(--accent-cyan)]/30 text-[var(--foreground)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  Add topic
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setShowCustomInput(false);
+                                    setCustomTopicInput("");
+                                  }}
+                                  className="px-4 py-2 rounded-lg bg-[var(--foreground)]/5 hover:bg-[var(--foreground)]/10 text-[var(--foreground)] transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {suggestedTopics.length < TOPIC_SUGGESTION_TARGET && (
+                        <div className="text-center text-xs text-[var(--foreground)]/60 mt-6">
+                          Chad only surfaced {suggestedTopics.length} topics this time. You can continue with these or enter your own.
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Lesson Card View */}
+            {phase === "learn" && showLessonCard && lessonParts.length > 0 ? (
+              <div className="space-y-4" key={`lesson-card-${currentPartIndex}`}>
+                <div 
+                  className="rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 p-6 min-h-[500px] flex flex-col lesson-content surge-lesson-card" 
+                  key={`lesson-part-${currentPartIndex}`}
+                  data-topic={currentTopic}
+                  data-part-index={currentPartIndex}
+                  data-total-parts={lessonParts.length}
+                >
+                  {/* Part Header */}
+                  <div className="mb-4 pb-4 border-b border-[var(--foreground)]/10">
+                    <div className="text-xs text-[var(--foreground)]/50 mb-1">
+                      Part {currentPartIndex + 1} of {lessonParts.length}
+                    </div>
+                    <h2 className="text-xl font-bold text-[var(--foreground)]">
+                      {(() => {
+                        const part = lessonParts[currentPartIndex];
+                        if (!part) {
+                          console.log("🔄 PAGE SWAP: Render - currentPartIndex:", currentPartIndex, "lessonParts.length:", lessonParts.length, "ref:", currentPartIndexRef.current);
+                          return "Loading...";
+                        }
+                        return part.header?.replace(/^Chapter\s+\d+:\s*/i, '').trim() || "Loading...";
+                      })()}
+                    </h2>
+                  </div>
+                  
+                  {/* Part Content */}
+                  <div 
+                    className="flex-1 overflow-y-auto mb-4 lesson-content relative"
+                    key={`lesson-content-${currentPartIndex}`}
+                    style={{ cursor: (isScrolling || cursorHidden) ? 'none' : (hoverWordRects.length > 0 ? 'pointer' : 'default') }}
+                    onClick={(e) => {
+                      try {
+                        const target = e.target as HTMLElement | null;
+                        if (!target) return;
+                        // Ignore clicks inside links, code, pre, and KaTeX
+                        if (target.closest("a, code, pre, .katex")) return;
+                        const x = (e as any).clientX as number;
+                        const y = (e as any).clientY as number;
+                        const doc: any = document as any;
+                        let range: Range | null = null;
+                        if (doc.caretRangeFromPoint) {
+                          range = doc.caretRangeFromPoint(x, y);
+                        } else if (doc.caretPositionFromPoint) {
+                          const pos = doc.caretPositionFromPoint(x, y);
+                          if (pos) {
+                            range = document.createRange();
+                            range.setStart(pos.offsetNode, pos.offset);
+                            range.collapse(true);
+                          }
+                        }
+                        if (!range) return;
+                        let node = range.startContainer;
+                        if (node.nodeType !== Node.TEXT_NODE) {
+                          // find nearest text node
+                          const asEl = node as unknown as HTMLElement;
+                          const walker = document.createTreeWalker(asEl, NodeFilter.SHOW_TEXT);
+                          node = walker.nextNode() || node;
+                        }
+                        if (node.nodeType !== Node.TEXT_NODE) return;
+                        const text = (node.textContent || "");
+                        let idx = Math.max(0, Math.min(range.startOffset, text.length));
+                        // expand to word boundaries
+                        const isWordChar = (ch: string) => /[\p{L}\p{N}\u2019'\-]/u.test(ch);
+                        let start = idx;
+                        while (start > 0 && isWordChar(text[start - 1])) start--;
+                        let end = idx;
+                        while (end < text.length && isWordChar(text[end])) end++;
+                        // Trim any trailing whitespace
+                        while (end > start && /\s/.test(text[end - 1])) end--;
+                        if (start === end) return;
+                        
+                        const word = text.slice(start, end).trim();
+                        if (!word) return;
+                        
+                        // Create word range to check if mouse is actually over the word
+                        const wordRange = document.createRange();
+                        wordRange.setStart(node, start);
+                        wordRange.setEnd(node, end);
+                        
+                        const boundingRect = wordRange.getBoundingClientRect();
+                        const clientRects = wordRange.getClientRects();
+                        
+                        // Check if mouse is actually within the word's bounding rect
+                        // This ensures we only trigger on clicks directly over the word, not just on the same line
+                        let isMouseOverWord = false;
+                        
+                        if (boundingRect && boundingRect.width > 0 && boundingRect.height > 0) {
+                          isMouseOverWord = 
+                            x >= boundingRect.left && 
+                            x <= boundingRect.right && 
+                            y >= boundingRect.top && 
+                            y <= boundingRect.bottom;
+                        } else if (clientRects && clientRects.length > 0) {
+                          // Check if mouse is over any of the client rects (for multi-line words)
+                          for (let i = 0; i < clientRects.length; i++) {
+                            const rect = clientRects[i];
+                            if (rect && rect.width > 0 && rect.height > 0) {
+                              if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                                isMouseOverWord = true;
+                                break;
+                              }
+                            }
+                          }
+                        }
+                        
+                        // Only trigger word click if mouse is actually over the word
+                        if (!isMouseOverWord) return;
+                        
+                        const container = (node.parentElement as HTMLElement | null)?.closest("p, li, td, th, blockquote, div") as HTMLElement | null;
+                        const parentText = (container?.innerText || node.parentElement?.textContent || text).trim();
+                        onWordClick(word, parentText, e as any);
+                      } catch {}
+                    }}
+                    onMouseMove={(e) => {
+                      try {
+                        const target = e.target as HTMLElement | null;
+                        if (!target) return setHoverWordRects([]);
+                        if (target.closest("a, code, pre, .katex")) return setHoverWordRects([]);
+                        const x = (e as any).clientX as number;
+                        const y = (e as any).clientY as number;
+                        
+                        const doc: any = document as any;
+                        let range: Range | null = null;
+                        if (doc.caretRangeFromPoint) {
+                          range = doc.caretRangeFromPoint(x, y);
+                        } else if (doc.caretPositionFromPoint) {
+                          const pos = doc.caretPositionFromPoint(x, y);
+                          if (pos) {
+                            range = document.createRange();
+                            range.setStart(pos.offsetNode, pos.offset);
+                            range.collapse(true);
+                          }
+                        }
+                        if (!range) return setHoverWordRects([]);
+                        let node = range.startContainer;
+                        if (node.nodeType !== Node.TEXT_NODE) {
+                          const asEl = node as unknown as HTMLElement;
+                          const walker = document.createTreeWalker(asEl, NodeFilter.SHOW_TEXT);
+                          node = walker.nextNode() || node;
+                        }
+                        if (node.nodeType !== Node.TEXT_NODE) return setHoverWordRects([]);
+                        const text = (node.textContent || "");
+                        let idx = Math.max(0, Math.min(range.startOffset, text.length));
+                        // Word character: letters, numbers, apostrophes, hyphens
+                        const isWordChar = (ch: string) => /[\p{L}\p{N}\u2019'\-]/u.test(ch);
+                        // Expand backwards to find word start
+                        let start = idx;
+                        while (start > 0 && isWordChar(text[start - 1])) start--;
+                        // Expand forwards to find word end
+                        let end = idx;
+                        while (end < text.length && isWordChar(text[end])) end++;
+                        // Trim any trailing whitespace
+                        while (end > start && /\s/.test(text[end - 1])) end--;
+                        if (start === end) return setHoverWordRects([]);
+                        
+                        const wordRange = document.createRange();
+                        wordRange.setStart(node, start);
+                        wordRange.setEnd(node, end);
+                        
+                        // Get CSS zoom factor and compensate coordinates
+                        const htmlZoom = parseFloat(window.getComputedStyle(document.documentElement).zoom || '1');
+                        
+                        const boundingRect = wordRange.getBoundingClientRect();
+                        const clientRects = wordRange.getClientRects();
+                        
+                        // Check if mouse is actually within the word's bounding rect
+                        // This ensures we only highlight when directly over the word, not just on the same line
+                        const isMouseOverWord = boundingRect && 
+                          x >= boundingRect.left && 
+                          x <= boundingRect.right && 
+                          y >= boundingRect.top && 
+                          y <= boundingRect.bottom;
+                        
+                        if (boundingRect && boundingRect.width > 0 && boundingRect.height > 0 && isMouseOverWord) {
+                          // Compensate for CSS zoom
+                          const rect = {
+                            left: boundingRect.left / htmlZoom,
+                            top: boundingRect.top / htmlZoom,
+                            width: boundingRect.width / htmlZoom,
+                            height: boundingRect.height / htmlZoom,
+                          };
+                          setHoverWordRects([rect]);
+                        } else {
+                          // Fallback to getClientRects for multi-line words
+                          if (!clientRects || clientRects.length === 0) return setHoverWordRects([]);
+                          // Check if mouse is over any of the client rects
+                          let isMouseOverAnyRect = false;
+                          for (let i = 0; i < clientRects.length; i++) {
+                            const rect = clientRects[i];
+                            if (rect && rect.width > 0 && rect.height > 0) {
+                              if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                                isMouseOverAnyRect = true;
+                                break;
+                              }
+                            }
+                          }
+                          if (!isMouseOverAnyRect) return setHoverWordRects([]);
+                          
+                          const validRects: Array<{ left: number; top: number; width: number; height: number }> = [];
+                          for (let i = 0; i < clientRects.length; i++) {
+                            const rect = clientRects[i];
+                            if (rect && rect.width > 0 && rect.height > 0) {
+                              validRects.push({
+                                left: rect.left / htmlZoom,
+                                top: rect.top / htmlZoom,
+                                width: rect.width / htmlZoom,
+                                height: rect.height / htmlZoom,
+                              });
+                            }
+                          }
+                          setHoverWordRects(validRects);
+                        }
+                      } catch (err) {
+                        setHoverWordRects([]);
+                      }
+                    }}
+                    onMouseLeave={() => setHoverWordRects([])}
+                  >
+                    <LessonBody key={`lesson-body-${currentPartIndex}`} body={sanitizeLessonBody(lessonParts[currentPartIndex]?.content || "")} />
+                    <style jsx global>{`
+                      .lesson-content p { margin: 0.45rem 0 !important; }
+                      .lesson-content ul, .lesson-content ol { margin: 0.4rem 0 !important; }
+                      .lesson-content h1, .lesson-content h2 { margin-top: 0.6rem !important; margin-bottom: 0.35rem !important; }
+                      .lesson-content h3 { margin-top: 0.5rem !important; margin-bottom: 0.3rem !important; }
+                    `}</style>
+                  </div>
+                  
+                  {/* Navigation */}
+                  <div className="flex items-center justify-between pt-4 border-t border-[var(--foreground)]/10">
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        // Always check ref to get latest value
+                        const currentIdx = currentPartIndexRef.current;
+                        
+                        if (currentIdx > 0) {
+                          const newIdx = currentIdx - 1;
+                          // Update both state and ref immediately
+                          currentPartIndexRef.current = newIdx;
+                          setCurrentPartIndex(newIdx);
+                          scrollLessonToTop();
+                          console.log("🔄 PAGE SWAP: Previous button clicked - navigating to part", newIdx + 1, "of", lessonParts.length, "| ref:", newIdx, "state:", newIdx);
+                        }
+                      }}
+                      disabled={currentPartIndex === 0}
+                      className="p-2 rounded-lg bg-[var(--foreground)]/5 hover:bg-[var(--foreground)]/10 text-[var(--foreground)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                      aria-label="Previous part"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                    <div className="text-sm text-[var(--foreground)]/60">
+                      {currentPartIndex + 1} / {lessonParts.length}
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        // Always check current state and ref to get latest value
+                        const currentIdx = currentPartIndexRef.current;
+                        const maxIdx = lessonParts.length - 1;
+                        
+                        if (currentIdx < maxIdx) {
+                          const newIdx = currentIdx + 1;
+                          // Update both state and ref immediately
+                          currentPartIndexRef.current = newIdx;
+                          setCurrentPartIndex(newIdx);
+                          scrollLessonToTop();
+                          console.log("🔄 PAGE SWAP: Next button clicked - navigating to part", newIdx + 1, "of", lessonParts.length, "| ref:", newIdx, "state:", newIdx);
+                        } else {
+                          // Last part, move to quiz phase (only if not sending)
+                          if (!sending) {
+                            handlePhaseTransition();
+                          }
+                        }
+                      }}
+                      disabled={currentPartIndex === lessonParts.length - 1 && sending}
+                      className="p-2 rounded-lg bg-[var(--accent-cyan)]/20 hover:bg-[var(--accent-cyan)]/30 text-[var(--foreground)] transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label={currentPartIndex < lessonParts.length - 1 ? "Next part" : "Start Quiz"}
+                    >
+                      {currentPartIndex < lessonParts.length - 1 ? (
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      ) : (
+                        <span className="text-sm font-medium">{sending ? "Generating..." : "Start Quiz"}</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+            {/* Chat Messages */}
+            {phase === "learn" && !showTopicSelection && (
+            <div className="space-y-4 min-h-[400px] max-h-[600px] overflow-y-auto rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/50 p-4">
+              {conversation.filter(msg => {
+                // Hide all conversation during quiz phase (we use dedicated quiz UI)
+                if (phase === "quiz") {
+                  return false;
+                }
+                // Hide assistant messages that only contain topic suggestions (we show buttons instead)
+                if (msg.role === "assistant" && phase === "learn" && !currentTopic && showTopicSelection) {
+                  return false;
+                }
+                // Hide any assistant messages during topic selection phase (before buttons appear)
+                if (msg.role === "assistant" && phase === "learn" && !currentTopic && !showTopicSelection) {
+                  return false;
+                }
+                // Hide messages that contain "Great choice" or similar phrases
+                if (msg.role === "assistant" && /great choice|excellent choice|good choice/i.test(msg.content)) {
+                  return false;
+                }
+                // Hide lesson content when showing lesson cards OR when it contains H1 headers (lesson being generated)
+                if (msg.role === "assistant" && phase === "learn" && currentTopic) {
+                  // Check if message contains H1 headers (lesson content)
+                  const hasH1Header = msg.content && /^#\s+/m.test(msg.content);
+                  if (hasH1Header || showLessonCard) {
+                    return false;
+                  }
+                }
+                // Hide the user message that triggers lesson generation
+                if (msg.role === "user" && phase === "learn" && currentTopic && msg.content.includes("Generate a comprehensive lesson")) {
+                  return false;
+                }
+                return !msg.autoGenerated;
+              }).map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-center"}`}
+                >
+                  {msg.role === "user" ? (
+                    <div className="max-w-[80%] rounded-lg px-4 py-2 bg-[var(--accent-cyan)]/20 text-[var(--foreground)]">
+                      <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
+                    </div>
+                  ) : (
+                    <div className="max-w-[90%] w-full flex justify-center">
+                      <div className="w-full text-left">
+                        {/* Use LessonBody for better markdown/LaTeX rendering like lesson pages */}
+                        {phase === "learn" && currentTopic ? (
+                          <div className="prose prose-invert max-w-none [&_*]:text-[var(--foreground)]">
+                            <LessonBody body={sanitizeLessonBody(msg.content.replace(/TOPIC_SUGGESTION:\s*/gi, ''))} />
+                          </div>
+                        ) : (
+                          <div className="w-full text-left prose prose-invert max-w-none text-sm [&_*]:text-[var(--foreground)]">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm, remarkMath]}
+                              rehypePlugins={[rehypeKatex]}
+                            >
+                              {ensureClosedMarkdownFences(
+                                msg.content
+                                  .replace(/\\\(/g, '$')
+                                  .replace(/\\\)/g, '$')
+                                  .replace(/\\\[/g, '$$')
+                                  .replace(/\\\]/g, '$$')
+                                  .replace(/TOPIC_SUGGESTION:\s*/gi, '')
+                              )}
+                            </ReactMarkdown>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+              
+              {/* Show "Chad is thinking" during topic suggestion phase or when sending (but not during topic selection or quiz) */}
+              {phase !== "quiz" && (
+                (sending && !showTopicSelection) || // Show while sending (until topics are shown)
+                (phase === "learn" && !currentTopic && !showTopicSelection && !sending && conversation.length === 0) // Show if waiting to start topic suggestion
+              ) && (
+                <div className="flex justify-center">
+                  <div className="flex items-center gap-2 text-[var(--foreground)]/60">
+                    <GlowSpinner size={20} inline ariaLabel="Thinking" idSuffix="surge-chat" />
+                    <span className="text-sm">Chad is thinking...</span>
+                  </div>
+                </div>
+              )}
+              
+            </div>
+            )}
+          </>
+            )}
+
+            {/* Show quiz generation status when no questions are available */}
+            {phase === "quiz" && quizQuestions.length === 0 && (
+              <div className="flex justify-center py-12 w-full">
+                {quizLoading ? (
+                  <div className="flex items-center gap-2 text-[var(--foreground)]/60">
+                    <GlowSpinner size={20} inline ariaLabel="Thinking" idSuffix="surge-quiz" />
+                    <span className="text-sm">
+                      {quizInfoMessage || "Chad is preparing some questions..."}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 text-center text-[var(--foreground)]/70">
+                    <span className="text-sm">
+                      {quizFailureMessage || "Quiz not ready yet. Want to try again?"}
+                    </span>
+                    <button
+                      onClick={() => requestQuizQuestions("mc")}
+                      className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] text-white text-sm font-medium hover:opacity-90"
+                    >
+                      Retry Quiz
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {error && (
+              <div className="rounded-lg bg-red-500/20 border border-red-500/30 p-3 text-sm text-red-400">
+                {error}
+              </div>
+            )}
+
+          </div>
+        )}
+      </div>
+      
+      {/* Hover word rectangles overlay - rendered via portal */}
+      {typeof window !== 'undefined' && hoverWordRects.length > 0 && createPortal(
+        <>
+          {hoverWordRects.map((rect, idx) => (
+            <div
+              key={idx}
+              className="pointer-events-none fixed z-40"
+              style={{
+                left: `${rect.left}px`,
+                top: `${rect.top}px`,
+                width: `${rect.width}px`,
+                height: `${rect.height}px`,
+                transform: 'none',
+              }}
+            >
+              <div
+                style={{
+                  position: 'absolute',
+                  left: '-4px',
+                  right: '-4px',
+                  bottom: '-2px',
+                  height: '2px',
+                  background: 'linear-gradient(90deg, rgba(0,229,255,0.8), rgba(255,45,150,0.8))',
+                  borderRadius: '1px',
+                  WebkitMaskImage: 'linear-gradient(to right, transparent 0, #000 4px, #000 calc(100% - 4px), transparent 100%)',
+                  maskImage: 'linear-gradient(to right, transparent 0, #000 4px, #000 calc(100% - 4px), transparent 100%)',
+                }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'linear-gradient(135deg, rgba(0,229,255,0.15), rgba(255,45,150,0.15))',
+                  borderRadius: '2px',
+                }}
+              />
+            </div>
+          ))}
+        </>,
+        document.body
+      )}
+      
+      {/* Word Popover */}
+      <WordPopover
+        open={showExplanation}
+        x={explanationPosition.x}
+        y={explanationPosition.y}
+        loading={explanationLoading}
+        error={explanationError}
+        content={explanationContent}
+        word={explanationWord}
+        onClose={() => {
+          setShowExplanation(false);
+          setExplanationWord("");
+          setExplanationContent("");
+          setExplanationError(null);
+        }}
+      />
+    </div>
+  );
+}
+

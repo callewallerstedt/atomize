@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import React, { Suspense, useEffect, useState, useRef } from "react";
+import React, { Suspense, useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import GlowSpinner from "@/components/GlowSpinner";
 import CourseCreateModal from "@/components/CourseCreateModal";
@@ -83,15 +83,314 @@ export default function Page() {
   );
 }
 
-function WelcomeMessage() {
+type UIElement = {
+  type: 'button' | 'file_upload';
+  id: string;
+  label?: string;
+  message?: string;
+  action?: string;
+  params?: Record<string, string>;
+};
+
+type HomepageMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  uiElements?: UIElement[];
+  tutorial?: boolean;
+};
+
+type ScriptStep = {
+  id: string;
+  text: string;
+  uiElements?: UIElement[];
+};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// File upload component for homepage
+function HomepageFileUploadArea({ 
+  uploadId, 
+  message, 
+  files, 
+  onFilesChange, 
+  onGenerate,
+  buttonLabel,
+  action,
+  status
+}: { 
+  uploadId: string; 
+  message?: string; 
+  files: File[]; 
+  onFilesChange: (files: File[]) => void;
+  onGenerate: () => void;
+  buttonLabel?: string;
+  action?: string;
+  status?: 'idle' | 'ready' | 'processing' | 'success';
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    if (droppedFiles.length > 0) {
+      onFilesChange(droppedFiles);
+    }
+  };
+  
+  return (
+    <div className="space-y-2">
+      <div
+        onClick={() => fileInputRef.current?.click()}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`rounded-lg border-2 border-dashed p-4 cursor-pointer transition-colors ${
+          isDragging
+            ? 'border-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10'
+            : 'border-[var(--accent-cyan)]/40 bg-[var(--background)]/60 hover:border-[var(--accent-cyan)]/60 hover:bg-[var(--background)]/80'
+        }`}
+      >
+        <div className="text-xs text-[var(--foreground)]/70 text-center">
+          {isDragging ? 'Drop files here' : (message || 'Upload files or drag and drop')}
+        </div>
+        {files.length > 0 && (
+          <div className="mt-2 text-xs text-[var(--foreground)]/60">
+            {files.length} file{files.length !== 1 ? 's' : ''} selected
+          </div>
+        )}
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        accept=".pdf,.txt,.md,.docx,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        onChange={(e) => {
+          const selectedFiles = Array.from(e.target.files || []);
+          if (selectedFiles.length > 0) {
+            onFilesChange(selectedFiles);
+          }
+        }}
+      />
+      {files.length > 0 && (
+        <button
+          onClick={onGenerate}
+          disabled={status === 'processing'}
+          className="w-full inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity disabled:opacity-50"
+          style={{ color: 'white' }}
+        >
+          {status === 'processing' ? 'Processing...' : (buttonLabel || 'Create')}
+        </button>
+      )}
+      {status === 'processing' && (
+        <div className="text-xs text-[var(--foreground)]/60 text-center">
+          Creating course...
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WelcomeMessage({ tutorialSignal }: { tutorialSignal: number }) {
+  const router = useRouter();
   const [welcomeText, setWelcomeText] = useState("");
   const [aiName, setAiName] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [inputFocused, setInputFocused] = useState(false);
-  const [homepageMessages, setHomepageMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [homepageMessages, setHomepageMessages] = useState<HomepageMessage[]>([]);
+  const [isTutorialActive, setIsTutorialActive] = useState(false);
+  const tutorialScript = useMemo<ScriptStep[]>(
+    () => [
+      { id: "welcome", text: "Welcome to Synapse. I'm Chad, your personal assistant built into Synapse to help structure, explain and run actions for you." },
+      { id: "method", text: "I'm always with you, whatever page you're on. Just start typing and i will pop up ready to assist" },
+      { 
+        id: "cta",
+        text: "Let's look at the features of Synapse.",
+        uiElements: [
+          {
+            type: "button",
+            id: "tutorial_start",
+            label: "Start",
+            action: "tutorial_continue",
+            params: {}
+          }
+        ]
+      }
+    ],
+    []
+  );
+  const featureScript = useMemo<ScriptStep[]>(
+    () => [
+      {
+        id: "features",
+        text: `Use this chat like mission control. Ask me to start a course, do an exam snipe, open a page or explain something from your current lesson.
+
+---
+
+## Exam Snipe
+
+I prefer past exam theses, so when creating a new course, make sure to have those ready.
+
+---
+
+## Courses
+
+Courses store every document you add. I extract topics for you so you can easily navigate to the ones you need.
+
+---
+
+## Practice Mode
+
+Practice Mode turns those lessons into practice questions that stimulate active recall. I keep track of what you've covered so you can focus on the areas you need to improve.
+
+---
+
+## Surge
+
+Surge is for those who want to minimize friction and get results fast. I will prioritize the highest-value concepts, so we can build good general understanding easily and quickly.`
+      }
+    ],
+    []
+  );
+  const tutorialPlaybackRef = useRef(false);
+  const streamTutorialMessage = useCallback(
+    async (text: string, uiElements?: UIElement[]) => {
+      if (!text && !uiElements) return;
+      let messageIndex = -1;
+      setHomepageMessages((prev) => {
+        const next = [
+          ...prev,
+          {
+            role: "assistant" as const,
+            content: "",
+            uiElements: [],
+            tutorial: true
+          }
+        ];
+        messageIndex = next.length - 1;
+        return next;
+      });
+      await sleep(150);
+      if (messageIndex === -1) return;
+      for (let i = 1; i <= text.length; i++) {
+        if (!tutorialPlaybackRef.current) return;
+        const slice = text.slice(0, i);
+        setHomepageMessages((prev) => {
+          if (!prev[messageIndex]) return prev;
+          const next = [...prev];
+          next[messageIndex] = {
+            ...next[messageIndex],
+            content: slice,
+            tutorial: true,
+            uiElements: i === text.length && uiElements ? uiElements : next[messageIndex].uiElements
+          };
+          return next;
+        });
+        await sleep(18);
+      }
+      if (text.length === 0 && uiElements) {
+        setHomepageMessages((prev) => {
+          if (!prev[messageIndex]) return prev;
+          const next = [...prev];
+          next[messageIndex] = {
+            ...next[messageIndex],
+            uiElements,
+            tutorial: true
+          };
+          return next;
+        });
+      }
+    },
+    []
+  );
+  const playScript = useCallback(async (steps: ScriptStep[]) => {
+    tutorialPlaybackRef.current = true;
+    for (const step of steps) {
+      if (!tutorialPlaybackRef.current) return;
+      await streamTutorialMessage(step.text, step.uiElements);
+      await sleep(250);
+    }
+  }, [streamTutorialMessage]);
+  const startTutorial = useCallback(() => {
+    tutorialPlaybackRef.current = false;
+    setHomepageMessages([]);
+    setIsTutorialActive(true);
+    setAiName("Chad");
+    setShowThinking(false);
+    thinkingRef.current = false;
+    setIsCreatingCourse(false);
+    courseCreationInProgress.current = false;
+    setHomepageSending(false);
+    setInputValue("");
+    setInputFocused(false);
+    setIsStreaming(false);
+    tutorialPlaybackRef.current = true;
+    (async () => {
+      await playScript(tutorialScript);
+    })();
+  }, [playScript, tutorialScript]);
+  useEffect(() => {
+    if (!tutorialSignal) return;
+    startTutorial();
+  }, [tutorialSignal, startTutorial]);
+  // Load saved homepage chat history on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = localStorage.getItem('synapse:home-chat');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.every((m) => typeof m?.role === 'string' && typeof m?.content === 'string')) {
+          setHomepageMessages(parsed);
+        }
+      }
+    } catch {}
+  }, []);
+
+  // Persist chat history (limit to last 200 messages)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const trimmed = homepageMessages.slice(-200);
+      localStorage.setItem('synapse:home-chat', JSON.stringify(trimmed));
+    } catch {}
+  }, [homepageMessages]);
   const [homepageSending, setHomepageSending] = useState(false);
+  const [showThinking, setShowThinking] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<Record<string, File[]>>({});
+  const [uploadStatus, setUploadStatus] = useState<Record<string, 'idle' | 'ready' | 'processing' | 'success'>>({});
+  const [isCreatingCourse, setIsCreatingCourse] = useState(false);
   const hasStreamed = useRef(false);
+  const thinkingRef = useRef(false);
+  const courseCreationInProgress = useRef(false);
+  const isCreatingCourseRef = useRef(false);
+
+  const resetHomepageChat = useCallback(() => {
+    tutorialPlaybackRef.current = false;
+    setHomepageMessages([]);
+    setShowThinking(false);
+    thinkingRef.current = false;
+    setHomepageSending(false);
+    setIsCreatingCourse(false);
+    setIsTutorialActive(false);
+    courseCreationInProgress.current = false;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('synapse:home-chat');
+    }
+  }, []);
 
   useEffect(() => {
     if (hasStreamed.current || typeof window === "undefined") return;
@@ -218,12 +517,322 @@ function WelcomeMessage() {
     });
   }, []);
 
-  if (!welcomeText && !isStreaming && !aiName) return null;
+  // Parse UI elements and actions from Chad's messages
+  function parseUIElementsAndActions(content: string): { cleanedContent: string; uiElements: UIElement[]; actions: Array<{ name: string; params: Record<string, string> }> } {
+    // Allow spaces around pipes: ACTION:name | param:value | param2:value
+    const actionRegex = /ACTION:(\w+)(?:\s*\|\s*([^|]+(?:\s*\|\s*[^|]+)*))?/g;
+    const buttonRegex = /BUTTON:(\w+)(?:\s*\|\s*([^|]+(?:\s*\|\s*[^|]+)*))?/g;
+    const fileUploadRegex = /FILE_UPLOAD:(\w+)(?:\s*\|\s*([^|]+(?:\s*\|\s*[^|]+)*))?/g;
+    
+    const uiElements: UIElement[] = [];
+    const actions: Array<{ name: string; params: Record<string, string> }> = [];
+    
+    // Parse buttons
+    let match;
+    while ((match = buttonRegex.exec(content)) !== null) {
+      const id = match[1];
+      const params: Record<string, string> = {};
+      if (match[2]) {
+        match[2].split('|').forEach(param => {
+          const colonIndex = param.indexOf(':');
+          if (colonIndex > 0) {
+            const key = param.slice(0, colonIndex).trim();
+            let value = param.slice(colonIndex + 1).trim();
+            const spaceIndex = value.search(/[\s\n\r]/);
+            if (spaceIndex > 0) {
+              value = value.slice(0, spaceIndex);
+            }
+            if (key && value) {
+              params[key] = value;
+            }
+          }
+        });
+      }
+      uiElements.push({
+        type: 'button',
+        id,
+        label: params.label || 'Button',
+        action: params.action,
+        params: Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'label' && k !== 'action'))
+      });
+    }
+    
+    // Parse file uploads
+    while ((match = fileUploadRegex.exec(content)) !== null) {
+      const id = match[1];
+      const params: Record<string, string> = {};
+      if (match[2]) {
+        match[2].split('|').forEach(param => {
+          const colonIndex = param.indexOf(':');
+          if (colonIndex > 0) {
+            const key = param.slice(0, colonIndex).trim();
+            let value = param.slice(colonIndex + 1).trim();
+            const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel', 'description'];
+            if (!spaceAllowedParams.includes(key)) {
+              const spaceIndex = value.search(/[\s\n\r]/);
+              if (spaceIndex > 0) {
+                value = value.slice(0, spaceIndex);
+              }
+            }
+            if (key && value) {
+              params[key] = value;
+            }
+          }
+        });
+      }
+      const buttonLabel = params.buttonLabel || 'Generate';
+      const action = params.action || 'generate_course';
+      uiElements.push({
+        type: 'file_upload',
+        id,
+        message: params.message || 'Upload files',
+        action,
+        params: {
+          ...Object.fromEntries(Object.entries(params).filter(([k]) => k !== 'message' && k !== 'action' && k !== 'buttonLabel')),
+          buttonLabel
+        }
+      });
+    }
+    
+    // Parse actions
+    while ((match = actionRegex.exec(content)) !== null) {
+      const actionName = match[1];
+      const params: Record<string, string> = {};
+      if (match[2]) {
+        match[2].split('|').forEach(param => {
+          const colonIndex = param.indexOf(':');
+          if (colonIndex > 0) {
+            const key = param.slice(0, colonIndex).trim();
+            let value = param.slice(colonIndex + 1).trim();
+            const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel', 'description'];
+            if (!spaceAllowedParams.includes(key)) {
+              const spaceIndex = value.search(/[\s\n\r]/);
+              if (spaceIndex > 0) {
+                value = value.slice(0, spaceIndex);
+              }
+            }
+            if (key === 'slug' && value) {
+              value = value.replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+            }
+            if (key && value) {
+              params[key] = value;
+            }
+          }
+        });
+      }
+      actions.push({ name: actionName, params });
+    }
+    
+    // Remove all commands from content for display
+    const cleanedContent = content
+      .replace(actionRegex, '')
+      .replace(buttonRegex, '')
+      .replace(fileUploadRegex, '')
+      .trim();
+    
+    return { cleanedContent, uiElements, actions };
+  }
+
+  function triggerTextCourseCreation(descriptionParam: string, courseNameParam: string, userMessage?: string) {
+    if (courseCreationInProgress.current) return;
+
+    const userOriginalMessage = userMessage || '';
+    const actualDescription = (userOriginalMessage && userOriginalMessage.trim().length > 0)
+      ? userOriginalMessage.trim()
+      : descriptionParam.trim();
+
+    if (!actualDescription) return;
+
+    courseCreationInProgress.current = true;
+    setIsCreatingCourse(true);
+
+    const finalName = courseNameParam || 'New Course';
+
+    document.dispatchEvent(new CustomEvent('synapse:create-course-with-text', { 
+      detail: { 
+        name: finalName, 
+        syllabus: actualDescription,
+        topics: []
+      } 
+    }));
+
+  }
+
+  useEffect(() => {
+    isCreatingCourseRef.current = isCreatingCourse;
+  }, [isCreatingCourse]);
+
+  useEffect(() => {
+    thinkingRef.current = showThinking;
+  }, [showThinking]);
+
+  useEffect(() => {
+    const handleCourseCreated = (e: Event) => {
+      if (!isCreatingCourseRef.current) return;
+      const detail = (e as CustomEvent).detail || {};
+      const courseName = detail?.name || 'that topic';
+      const wasError = !!detail?.error;
+
+      setIsCreatingCourse(false);
+      courseCreationInProgress.current = false;
+
+      setHomepageMessages((prev) => {
+        const copy = [...prev];
+        if (copy.length > 0 && copy[copy.length - 1].role === 'assistant' && copy[copy.length - 1].content === '') {
+          copy.pop();
+        }
+        copy.push({
+          role: 'assistant',
+          content: wasError
+            ? 'Something went wrong creating that course. Try again.'
+            : `Course created about ${courseName}. Dive in when you’re ready.`,
+        });
+        return copy;
+      });
+    };
+
+    document.addEventListener('synapse:course-created', handleCourseCreated as EventListener);
+    return () => document.removeEventListener('synapse:course-created', handleCourseCreated as EventListener);
+  }, []);
+
+  // Execute actions
+  function executeActions(actions: Array<{ name: string; params: Record<string, string> }>, userMessage?: string) {
+    actions.forEach(action => {
+      if (action.name === 'create_course') {
+        const isHomepage = typeof window !== 'undefined' && window.location.pathname === '/';
+        if (isHomepage) {
+          triggerTextCourseCreation(action.params.syllabus || action.params.description || '', action.params.name || '', userMessage);
+          return;
+        }
+        const name = action.params.name || 'New Course';
+        const syllabus = action.params.syllabus || '';
+        document.dispatchEvent(new CustomEvent('synapse:create-course', { detail: { name, syllabus } }));
+      } else if (action.name === 'create_course_from_text') {
+        const description = action.params.description || '';
+        const courseName = action.params.name || '';
+        triggerTextCourseCreation(description, courseName, userMessage);
+      } else if (action.name === 'open_course_modal') {
+        document.dispatchEvent(new CustomEvent('synapse:open-course-modal'));
+      } else if (action.name === 'navigate') {
+        const path = action.params.path;
+        if (path && typeof window !== 'undefined') {
+          router.push(path);
+        }
+      } else if (action.name === 'navigate_course') {
+        let slug = action.params.slug;
+        if (slug && typeof window !== 'undefined') {
+          if (!slug.match(/^[a-z0-9\-_]+$/)) {
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                const exactMatch = subjects.find(s => s.name.toLowerCase() === slug.toLowerCase());
+                if (exactMatch) {
+                  slug = exactMatch.slug;
+                } else {
+                  const partialMatch = subjects.find(s => s.name.toLowerCase().includes(slug.toLowerCase()) || slug.toLowerCase().includes(s.name.toLowerCase()));
+                  if (partialMatch) {
+                    slug = partialMatch.slug;
+                  }
+                }
+              }
+            } catch {}
+          }
+          slug = slug.trim().replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+          if (slug) {
+            router.push(`/subjects/${slug}`);
+          }
+        }
+      } else if (action.name === 'navigate_practice') {
+        let slug = action.params.slug;
+        if (slug && typeof window !== 'undefined') {
+          if (!slug.match(/^[a-z0-9\-_]+$/)) {
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                const exactMatch = subjects.find(s => s.name.toLowerCase() === slug.toLowerCase());
+                if (exactMatch) {
+                  slug = exactMatch.slug;
+                } else {
+                  const partialMatch = subjects.find(s => s.name.toLowerCase().includes(slug.toLowerCase()) || slug.toLowerCase().includes(s.name.toLowerCase()));
+                  if (partialMatch) {
+                    slug = partialMatch.slug;
+                  }
+                }
+              }
+            } catch {}
+          }
+          slug = slug.trim().replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+          if (slug) {
+            router.push(`/subjects/${slug}/practice`);
+          }
+        }
+      } else if (action.name === 'start_exam_snipe') {
+        router.push('/exam-snipe');
+      }
+    });
+  }
+
+  // Handle button click
+  function handleButtonClick(action: string | undefined, params: Record<string, string> | undefined, uploadId?: string) {
+    if (uploadId && uploadedFiles[uploadId] && uploadedFiles[uploadId].length > 0) {
+      const files = uploadedFiles[uploadId];
+      if (uploadId) {
+        setUploadStatus(prev => ({ ...prev, [uploadId]: 'processing' }));
+      }
+      if (action === 'start_exam_snipe') {
+        router.push('/exam-snipe');
+        (window as any).__pendingExamFiles = files;
+        if (uploadId) {
+          setUploadStatus(prev => ({ ...prev, [uploadId]: 'success' }));
+        }
+      } else if (action === 'generate_course' || action === 'create_course') {
+        const name = params?.name || 'New Course';
+        const syllabus = params?.syllabus || '';
+        document.dispatchEvent(new CustomEvent('synapse:create-course-with-files', { detail: { files, name, syllabus } }));
+        if (uploadId) {
+          setUploadStatus(prev => ({ ...prev, [uploadId]: 'success' }));
+        }
+      }
+      setUploadedFiles(prev => {
+        if (!prev[uploadId] || prev[uploadId].length === 0) return prev;
+        return { ...prev, [uploadId]: [] };
+      });
+    } else if (action) {
+      if (action === 'tutorial_continue') {
+        setHomepageMessages(prev => {
+          const copy = [...prev];
+          const lastIndex = copy.length - 1;
+          if (lastIndex >= 0) {
+            copy[lastIndex] = { ...copy[lastIndex], uiElements: [] };
+          }
+          return copy;
+        });
+        (async () => {
+          await playScript(featureScript);
+          setIsTutorialActive(false);
+          tutorialPlaybackRef.current = false;
+        })();
+        return;
+      }
+      if (action === 'generate_course' || action === 'create_course') {
+        return;
+      }
+      executeActions([{ name: action, params: params || {} }]);
+    }
+  }
+  
+  // Handle file upload
+  function handleFileUpload(uploadId: string, files: File[]) {
+    setUploadedFiles(prev => ({ ...prev, [uploadId]: files }));
+    setUploadStatus(prev => ({ ...prev, [uploadId]: files.length > 0 ? 'ready' : 'idle' }));
+  }
 
   // Function to render text with styled "Synapse" instances
   const renderTextWithSynapse = (text: string) => {
     const parts: React.ReactNode[] = [];
-    const regex = /(\b[sS]ynapse\b)/g;
+    const regex = /(\b[sS]ynapse\b|\b[Ss]urge\b)/g;
     let lastIndex = 0;
     let match;
 
@@ -232,16 +841,33 @@ function WelcomeMessage() {
       if (match.index > lastIndex) {
         parts.push(text.slice(lastIndex, match.index));
       }
-      // Add styled "Synapse"
-      parts.push(
-        <span
-          key={match.index}
-          className="text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider font-semibold"
-          style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}
-        >
-          {match[0]}
-        </span>
-      );
+      const matchedWord = match[0];
+      const lower = matchedWord.toLowerCase();
+      const isSynapse = lower === 'synapse';
+      const isSurge = lower === 'surge';
+      if (isSynapse) {
+        parts.push(
+          <span
+            key={`${match.index}-synapse`}
+            className="text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider font-semibold"
+            style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}
+          >
+            {matchedWord}
+          </span>
+        );
+      } else if (isSurge) {
+        parts.push(
+          <span
+            key={`${match.index}-surge`}
+            className="text-transparent bg-clip-text bg-gradient-to-r from-[#00E5FF] via-[#FF2D96] to-[#00E5FF] bg-[length:200%_200%] animate-[gradient-shift_2s_linear_infinite]"
+            style={{ fontFamily: "'Orbitron', var(--font-rajdhani), sans-serif", letterSpacing: '0.08em' }}
+          >
+            {matchedWord}
+          </span>
+        );
+      } else {
+        parts.push(matchedWord);
+      }
       lastIndex = match.index + match[0].length;
     }
     // Add remaining text
@@ -254,7 +880,7 @@ function WelcomeMessage() {
 
   const handleSendMessage = async () => {
     const text = inputValue.trim();
-    if (!text || !welcomeText || homepageSending) return;
+    if (!text || !welcomeText || homepageSending || isTutorialActive) return;
     
     // If this is the first message, add the welcome message as the first assistant message
     const isFirstMessage = homepageMessages.length === 0;
@@ -268,6 +894,8 @@ function WelcomeMessage() {
     setInputValue("");
     setInputFocused(false);
     setHomepageSending(true);
+    setShowThinking(true);
+    thinkingRef.current = true;
 
     try {
       // Get course context
@@ -295,15 +923,18 @@ function WelcomeMessage() {
       } catch {}
 
       // Send message to API
+      const baseHistory = homepageMessages.length > 0
+        ? homepageMessages
+        : [{ role: 'assistant' as const, content: welcomeText }];
+      const apiHistory = baseHistory.map((m) => ({ role: m.role, content: m.content }));
+      apiHistory.push(userMessage);
+
       const res = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           context: courseContext,
-          messages: [
-            { role: 'assistant', content: welcomeText },
-            userMessage
-          ],
+          messages: apiHistory,
           path: '/'
         })
       });
@@ -317,13 +948,60 @@ function WelcomeMessage() {
       if (reader) {
         // Add assistant message placeholder
         setHomepageMessages(prev => {
-          const newMessages = [...prev, { role: 'assistant' as const, content: '' }];
+          const newMessages = [...prev, { role: 'assistant' as const, content: '', uiElements: [] }];
           return newMessages;
         });
 
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            if (thinkingRef.current) {
+              setShowThinking(false);
+              thinkingRef.current = false;
+            }
+            // After stream completes, parse final content and execute any remaining actions
+            const { cleanedContent, uiElements, actions } = parseUIElementsAndActions(accumulatedContent);
+            // Execute any remaining actions - pass the user's message
+            if (actions.length > 0) {
+              executeActions(actions, userMessage.content);
+              
+              // If creating a course, show spinner instead of full response
+              const isCreatingCourseAction = actions.some(a => a.name === 'create_course_from_text');
+              if (isCreatingCourseAction) {
+                setHomepageMessages(prev => {
+                  const copy = [...prev];
+                  if (copy.length > 0) {
+                    copy[copy.length - 1] = { 
+                      role: 'assistant', 
+                      content: '', 
+                      uiElements: [] 
+                    };
+                  }
+                  return copy;
+                });
+              } else {
+                // Update final message normally
+                setHomepageMessages(prev => {
+                  const copy = [...prev];
+                  if (copy.length > 0) {
+                    copy[copy.length - 1] = { role: 'assistant', content: cleanedContent, uiElements };
+                  }
+                  return copy;
+                });
+              }
+            } else {
+              // Update final message
+              setHomepageMessages(prev => {
+                const copy = [...prev];
+                if (copy.length > 0) {
+                  copy[copy.length - 1] = { role: 'assistant', content: cleanedContent, uiElements };
+                }
+                return copy;
+              });
+            }
+            
+            break;
+          }
           
           const chunk = decoder.decode(value, { stream: true });
           chunk.split('\n').forEach((line) => {
@@ -334,14 +1012,44 @@ function WelcomeMessage() {
               const obj = JSON.parse(payload);
               if (obj.type === 'text') {
                 accumulatedContent += obj.content;
-                setHomepageMessages(prev => {
-                  const copy = [...prev];
-                  // Update the last message (which is the assistant message)
-                  if (copy.length > 0) {
-                    copy[copy.length - 1] = { role: 'assistant', content: accumulatedContent };
+                if (thinkingRef.current) {
+                  setShowThinking(false);
+                  thinkingRef.current = false;
+                }
+                // Parse UI elements and actions from accumulated content
+                const { cleanedContent, uiElements, actions } = parseUIElementsAndActions(accumulatedContent);
+                const hasActions = actions.length > 0;
+                const isCreatingCourseAction = actions.some(a => a.name === 'create_course_from_text');
+
+                if (hasActions) {
+                  executeActions(actions, userMessage.content);
+
+                  if (isCreatingCourseAction) {
+                    setHomepageMessages(prev => {
+                      const copy = [...prev];
+                      if (copy.length > 0) {
+                        copy[copy.length - 1] = { role: 'assistant', content: '', uiElements: [] };
+                      }
+                      return copy;
+                    });
+                  } else {
+                    setHomepageMessages(prev => {
+                      const copy = [...prev];
+                      if (copy.length > 0) {
+                        copy[copy.length - 1] = { role: 'assistant', content: cleanedContent, uiElements };
+                      }
+                      return copy;
+                    });
                   }
-                  return copy;
-                });
+                } else if (!isCreatingCourse) {
+                  setHomepageMessages(prev => {
+                    const copy = [...prev];
+                    if (copy.length > 0) {
+                      copy[copy.length - 1] = { role: 'assistant', content: cleanedContent, uiElements };
+                    }
+                    return copy;
+                  });
+                }
               }
             } catch {}
           });
@@ -351,14 +1059,29 @@ function WelcomeMessage() {
       setHomepageMessages(prev => [...prev, { role: 'assistant', content: 'Error: ' + (e?.message || 'Failed to send. Please try again.') }]);
     } finally {
       setHomepageSending(false);
+      setShowThinking(false);
+      thinkingRef.current = false;
     }
   };
 
   return (
     <div className="mx-auto mb-6 w-full max-w-3xl">
-      {aiName && (
-        <div className="mb-1.5 text-xs text-[var(--foreground)]/60 font-medium">
-          {aiName}
+      {(aiName || homepageMessages.length > 0) && (
+        <div className="mb-1.5 flex items-center justify-between gap-3">
+          {aiName ? (
+            <div className="text-xs text-[var(--foreground)]/60 font-medium">
+              {aiName}
+            </div>
+          ) : <span />}
+          {homepageMessages.length > 0 && (
+            <button
+              onClick={resetHomepageChat}
+              className="text-xs font-semibold text-[var(--foreground)]/60 hover:text-[var(--foreground)] transition-colors"
+              aria-label="Start a new chat"
+            >
+              New chat
+            </button>
+          )}
         </div>
       )}
       {homepageMessages.length === 0 ? (
@@ -385,12 +1108,13 @@ function WelcomeMessage() {
                     handleSendMessage();
                   }
                 }}
-                placeholder="Type a message..."
+              placeholder={isTutorialActive ? "Use the tutorial controls above" : "Type a message..."}
+              disabled={homepageSending || isTutorialActive}
                 className={`w-full px-3 py-2 rounded-lg border transition-all ${
                   inputFocused
                     ? 'border-[var(--accent-cyan)]/40 bg-[var(--background)]/90 text-[var(--foreground)]'
                     : 'border-[var(--foreground)]/10 bg-[var(--background)]/30 text-[var(--foreground)]/40'
-                } placeholder:text-[var(--foreground)]/20 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/30`}
+              } placeholder:text-[var(--foreground)]/20 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/30 disabled:opacity-60`}
               />
             </div>
           )}
@@ -412,18 +1136,60 @@ function WelcomeMessage() {
                 ) : (
                   <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
                     <div className="text-base text-[var(--foreground)]/90 leading-relaxed">
-                      {isWelcomeMessage ? (
+                      {isCreatingCourse && i === homepageMessages.length - 1 ? (
+                        <div className="flex items-center gap-2">
+                          <span className="inline-block w-2 h-2 bg-[var(--accent-cyan)] rounded-full animate-pulse"></span>
+                          Creating course...
+                        </div>
+                      ) : isWelcomeMessage ? (
                         renderTextWithSynapse(m.content)
                       ) : (
                         <LessonBody body={sanitizeLessonBody(String(m.content || ''))} />
                       )}
                     </div>
+                    {/* Render UI elements */}
+                    {m.uiElements && m.uiElements.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {m.uiElements.map((ui, uiIdx) => {
+                          if (ui.type === 'button') {
+                            return (
+                              <button
+                                key={uiIdx}
+                                onClick={() => handleButtonClick(ui.action, ui.params)}
+                                className="inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
+                                style={{ color: 'white' }}
+                              >
+                                {ui.label || 'Button'}
+                              </button>
+                            );
+                          } else if (ui.type === 'file_upload') {
+                            const files = uploadedFiles[ui.id] || [];
+                            const status = uploadStatus[ui.id] || 'idle';
+                            const buttonLabel = ui.params?.buttonLabel || 'Generate';
+                            return (
+                              <HomepageFileUploadArea
+                                key={uiIdx}
+                                uploadId={ui.id}
+                                message={ui.message}
+                                files={files}
+                                buttonLabel={buttonLabel}
+                                action={ui.action}
+                                status={status}
+                                onFilesChange={(newFiles) => handleFileUpload(ui.id, newFiles)}
+                                onGenerate={() => handleButtonClick(ui.action, ui.params, ui.id)}
+                              />
+                            );
+                          }
+                          return null;
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             );
           })}
-          {homepageSending && (
+          {showThinking && !isCreatingCourse && (
             <div className="flex justify-start">
               <div className="inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
                 <div className="text-base text-[var(--foreground)]/90 leading-relaxed flex items-center gap-2">
@@ -446,13 +1212,13 @@ function WelcomeMessage() {
                   handleSendMessage();
                 }
               }}
-              placeholder="Type a message..."
-              disabled={homepageSending}
+            placeholder={isTutorialActive ? "Use the tutorial controls above" : "Type a message..."}
+            disabled={homepageSending || isTutorialActive}
               className={`w-full px-3 py-2 rounded-lg border transition-all ${
                 inputFocused
                   ? 'border-[var(--accent-cyan)]/40 bg-[var(--background)]/90 text-[var(--foreground)]'
                   : 'border-[var(--foreground)]/10 bg-[var(--background)]/30 text-[var(--foreground)]/40'
-              } placeholder:text-[var(--foreground)]/20 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/30 disabled:opacity-50`}
+            } placeholder:text-[var(--foreground)]/20 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/30 disabled:opacity-50`}
             />
           </div>
         </div>
@@ -478,6 +1244,9 @@ function Home() {
   const [loadingExamHistory, setLoadingExamHistory] = useState(false);
   const [examMenuOpenFor, setExamMenuOpenFor] = useState<string | null>(null);
   const [examDateUpdateTrigger, setExamDateUpdateTrigger] = useState(0); // Force re-render when exam dates change
+  const [surgeButtonHovered, setSurgeButtonHovered] = useState<string | null>(null);
+  const [tutorialSignal, setTutorialSignal] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Check authentication and sync subjects from server
   useEffect(() => {
@@ -501,12 +1270,60 @@ function Home() {
               setSubjects(filteredSubjects);
               
               // Also sync subject data from server
+              // CRITICAL: Merge server data with localStorage, don't overwrite
+              // This preserves edited timestamps in SurgeLog
               for (const subject of subjectsJson.subjects) {
                 try {
                   const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(subject.slug)}`, { credentials: "include" });
                   const dataJson = await dataRes.json().catch(() => ({}));
                   if (dataRes.ok && dataJson?.data) {
-                    localStorage.setItem(`atomicSubjectData:${subject.slug}`, JSON.stringify(dataJson.data));
+                    const serverData = dataJson.data as StoredSubjectData;
+                    const localData = loadSubjectData(subject.slug);
+                    
+                    // If local surgeLog is explicitly empty (was cleared), use that instead of server
+                    // Check if localData exists and surgeLog is explicitly set to empty array (not undefined)
+                    const useLocalSurgeLog = localData && localData.surgeLog !== undefined && Array.isArray(localData.surgeLog) && localData.surgeLog.length === 0;
+                    
+                    // If we have local data, merge intelligently to preserve edited timestamps
+                    if (!useLocalSurgeLog && localData?.surgeLog && serverData?.surgeLog) {
+                      // Create a map of local surgeLog entries by sessionId to preserve edited timestamps
+                      const localSurgeLogMap = new Map<string, any>();
+                      localData.surgeLog.forEach((entry: any) => {
+                        localSurgeLogMap.set(entry.sessionId, entry);
+                      });
+                      
+                      // Merge: use local timestamps if they exist (may have been edited), otherwise use server
+                      const mergedSurgeLog = serverData.surgeLog.map((serverEntry: any) => {
+                        const localEntry = localSurgeLogMap.get(serverEntry.sessionId);
+                        if (localEntry) {
+                          // Preserve local timestamp (may have been edited by user)
+                          return {
+                            ...serverEntry,
+                            timestamp: localEntry.timestamp
+                          };
+                        }
+                        return serverEntry;
+                      });
+                      
+                      // Also add any local entries that don't exist on server
+                      localData.surgeLog.forEach((localEntry: any) => {
+                        if (!serverData.surgeLog || !serverData.surgeLog.find((e: any) => e.sessionId === localEntry.sessionId)) {
+                          mergedSurgeLog.push(localEntry);
+                        }
+                      });
+                      
+                      // Use merged surgeLog
+                      serverData.surgeLog = mergedSurgeLog;
+                    }
+                    
+                    // Merge other fields: prefer local if it exists and is more recent
+                    const mergedData: StoredSubjectData = {
+                      ...serverData,
+                      ...(localData || {}),
+                      surgeLog: useLocalSurgeLog ? [] : (serverData?.surgeLog || localData?.surgeLog || [])
+                    };
+                    
+                    localStorage.setItem(`atomicSubjectData:${subject.slug}`, JSON.stringify(mergedData));
                   }
                 } catch {}
               }
@@ -578,6 +1395,14 @@ function Home() {
       const customEvent = e as CustomEvent;
       const { name, syllabus } = customEvent.detail || {};
       if (name) {
+        // NEVER open modal on homepage - homepage should only use create_course_from_text
+        // Check if we're on homepage by checking if path is '/'
+        const isHomepage = typeof window !== 'undefined' && window.location.pathname === '/';
+        if (isHomepage) {
+          // On homepage, ignore create_course action - it should use create_course_from_text instead
+          console.warn('create_course action ignored on homepage - should use create_course_from_text');
+          return;
+        }
         setCreateOpen(true);
         // Store the course details to pre-fill the modal
         (window as any).__pendingCourseCreate = { name, syllabus };
@@ -595,17 +1420,30 @@ function Home() {
       }
     };
 
+    const handleCreateCourseWithText = async (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { name, syllabus, topics } = customEvent.detail || {};
+      if (name && syllabus) {
+        // Store course data to be processed when createCourse is available
+        (window as any).__pendingCourseFromText = { name, syllabus, topics: topics || [] };
+        // Trigger a custom event that will be handled after createCourse is defined
+        document.dispatchEvent(new CustomEvent('synapse:process-pending-course-from-text'));
+      }
+    };
+
     const handleOpenCourseModal = () => {
       setCreateOpen(true);
     };
 
     document.addEventListener('synapse:create-course', handleCreateCourse as EventListener);
     document.addEventListener('synapse:create-course-with-files', handleCreateCourseWithFiles as EventListener);
+    document.addEventListener('synapse:create-course-with-text', handleCreateCourseWithText as EventListener);
     document.addEventListener('synapse:open-course-modal', handleOpenCourseModal);
     
     return () => {
       document.removeEventListener('synapse:create-course', handleCreateCourse as EventListener);
       document.removeEventListener('synapse:create-course-with-files', handleCreateCourseWithFiles as EventListener);
+      document.removeEventListener('synapse:create-course-with-text', handleCreateCourseWithText as EventListener);
       document.removeEventListener('synapse:open-course-modal', handleOpenCourseModal);
     };
   }, []);
@@ -691,9 +1529,31 @@ function Home() {
       }
     };
 
+    const handleProcessPendingCourseFromText = async () => {
+      const pending = (window as any).__pendingCourseFromText;
+      if (pending && pending.name && pending.syllabus) {
+        delete (window as any).__pendingCourseFromText;
+        // Use the ref to call createCourse with empty files array
+        if (createCourseRef.current) {
+          try {
+            // Create course with empty files - the syllabus contains the generated course context
+            // createCourse will set preparingSlug immediately at the start
+            await createCourseRef.current(pending.name, pending.syllabus, []);
+            // If topics were provided, we could potentially use them to pre-populate the course structure
+            // For now, the course will be created and topics can be generated later from the context
+          } catch (err) {
+            console.error('Failed to create course from text:', err);
+            alert('Failed to create course. Please try again.');
+          }
+        }
+      }
+    };
+
     document.addEventListener('synapse:process-pending-course-files', handleProcessPendingFiles);
+    document.addEventListener('synapse:process-pending-course-from-text', handleProcessPendingCourseFromText);
     return () => {
       document.removeEventListener('synapse:process-pending-course-files', handleProcessPendingFiles);
+      document.removeEventListener('synapse:process-pending-course-from-text', handleProcessPendingCourseFromText);
     };
   }, []);
 
@@ -808,6 +1668,7 @@ function Home() {
   const createCourse = async (name: string, syllabus: string, files: File[], preferredLanguage?: string) => {
     let effectiveName = name;
     let contextSource: string | null = null;
+    const isTextOnlyCourse = files.length === 0;
     try {
       const slugBase = effectiveName.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-") || "subject";
       const list = readSubjects();
@@ -843,8 +1704,11 @@ function Home() {
         }
       }
       const combinedText = textParts.join("\n\n");
+      
+      // For text-only courses (no files), use syllabus as the text source
+      const effectiveText = files.length > 0 ? combinedText : syllabus;
 
-      const initData: StoredSubjectData = { subject: effectiveName, files: storedFiles, combinedText, tree: null, topics: [], nodes: {}, progress: {}, course_context: syllabus, course_language_name: preferredLanguage || undefined };
+      const initData: StoredSubjectData = { subject: effectiveName, files: storedFiles, combinedText: effectiveText, tree: null, topics: [], nodes: {}, progress: {}, course_context: syllabus, course_language_name: preferredLanguage || undefined };
       saveSubjectData(unique, initData);
 
       let documents: Array<{ name: string; text: string }> = [];
@@ -869,7 +1733,7 @@ function Home() {
           body: JSON.stringify({
             subject: effectiveName,
             syllabus,
-            text: combinedText,
+            text: effectiveText,
             documents,
             preferredLanguage: preferredLanguage || undefined,
           }),
@@ -889,17 +1753,47 @@ function Home() {
 
       if (!contextSource) {
         const latestData = loadSubjectData(unique) as StoredSubjectData | null;
-        contextSource = latestData?.course_context || combinedText;
+        contextSource = latestData?.course_context || effectiveText;
       }
 
       try {
-        if (contextSource) {
-          const renameRes = await fetch('/api/course-detect-name', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ context: contextSource, fallbackTitle: effectiveName, preferredLanguage: preferredLanguage || undefined }),
-          });
-          if (renameRes.ok) {
+        // For text-only courses, always run detection so the name matches the actual subject
+        const hasMeaningfulSyllabus = typeof syllabus === 'string' && syllabus.trim().length > 0;
+        const shouldRename =
+          (isTextOnlyCourse && hasMeaningfulSyllabus) ||
+          effectiveName === 'New Course' ||
+          effectiveName.length < 3;
+        
+        if (shouldRename) {
+          let renameRes: Response | null = null;
+          
+          // Build context for name detection - prefer processed documents, then context source, then raw text
+          let nameDetectionContext = '';
+          
+          if (documents.length > 0) {
+            // Use processed documents (includes PDFs that have been extracted)
+            nameDetectionContext = documents.map(doc => `--- ${doc.name} ---\n${doc.text}`).join('\n\n');
+          } else if (contextSource) {
+            // Use course context if available
+            nameDetectionContext = contextSource;
+          } else if (effectiveText) {
+            // Fall back to raw text from files
+            nameDetectionContext = effectiveText;
+          }
+          
+          if (nameDetectionContext.trim()) {
+            renameRes = await fetch('/api/course-detect-name', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                context: nameDetectionContext,
+                fallbackTitle: hasMeaningfulSyllabus ? syllabus : (files.length > 0 ? files.map(f => f.name).join(', ') : effectiveName),
+                preferredLanguage: preferredLanguage || undefined
+              }),
+            });
+          }
+          
+          if (renameRes?.ok) {
             const renameJson = await renameRes.json().catch(() => ({}));
             if (renameJson?.ok && renameJson.name && renameJson.name !== effectiveName) {
               effectiveName = renameJson.name;
@@ -911,12 +1805,17 @@ function Home() {
 
       // Remove preparing only after naming step is complete
       setPreparingSlug(null);
+      if (typeof document !== 'undefined') {
+        document.dispatchEvent(new CustomEvent('synapse:course-created', {
+          detail: { name: effectiveName, slug: unique }
+        }));
+      }
 
       // Kick off quick summary in the background (non-blocking)
       (async () => {
         try {
           const data = loadSubjectData(unique) as StoredSubjectData | null;
-          const quickContext = data?.course_context || contextSource || combinedText;
+          const quickContext = data?.course_context || contextSource || effectiveText;
           if (!quickContext) return;
           const quickRes = await fetch('/api/course-quick-summary', {
             method: 'POST',
@@ -936,6 +1835,11 @@ function Home() {
       })();
     } catch (error) {
       setPreparingSlug(null);
+      if (typeof document !== 'undefined') {
+        document.dispatchEvent(new CustomEvent('synapse:course-created', {
+          detail: { error: true }
+        }));
+      }
       throw error;
     }
   };
@@ -1057,10 +1961,16 @@ function Home() {
         }}
       />
       <div className="relative z-10">
-      <WelcomeMessage />
+      <WelcomeMessage tutorialSignal={tutorialSignal} />
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
         <h1 className="text-xl font-semibold text-[var(--foreground)]">Your subjects</h1>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setTutorialSignal((prev) => prev + 1)}
+            className="inline-flex items-center rounded-full border border-[var(--accent-cyan)]/40 px-4 py-2 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--accent-cyan)]/60 hover:bg-[var(--accent-cyan)]/10 transition-colors"
+          >
+            Tutorial
+          </button>
           <button
             onClick={() => setCreateOpen(true)}
             className="relative inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--foreground)] bg-[var(--background)]/90 backdrop-blur-md shadow-[0_2px_8px_rgba(0,0,0,0.7)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95 transition-all duration-200 ease-out"
@@ -1078,6 +1988,8 @@ function Home() {
             className={`relative rounded-2xl bg-[var(--background)] p-5 text-[var(--foreground)] transition-all duration-200 shadow-[0_2px_8px_rgba(0,0,0,0.7)] ${
               preparingSlug === s.slug
                 ? 'cursor-not-allowed opacity-75'
+                : surgeButtonHovered === s.slug
+                ? 'cursor-pointer'
                 : 'cursor-pointer hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)]'
             }`}
             role="link"
@@ -1143,6 +2055,42 @@ function Home() {
                 </button>
               </div>
             </div>
+            
+            {/* Surge button - bottom right */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                router.push(`/subjects/${s.slug}/surge`);
+              }}
+              onMouseEnter={(e) => {
+                e.stopPropagation();
+                setSurgeButtonHovered(s.slug);
+              }}
+              onMouseLeave={(e) => {
+                e.stopPropagation();
+                setSurgeButtonHovered(null);
+              }}
+              disabled={preparingSlug === s.slug}
+              className={`absolute bottom-4 right-4 inline-flex items-center justify-center w-8 h-8 rounded-full transition-all z-20 ${
+                preparingSlug === s.slug
+                  ? 'opacity-40 cursor-not-allowed'
+                  : 'cursor-pointer hover:bg-[var(--foreground)]/15'
+              }`}
+              style={{
+                background: preparingSlug === s.slug 
+                  ? 'rgba(229, 231, 235, 0.05)'
+                  : 'rgba(229, 231, 235, 0.08)',
+                boxShadow: surgeButtonHovered === s.slug
+                  ? '0 2px 8px rgba(0, 0, 0, 0.7), 0 0 10px rgba(0, 229, 255, 0.7), 0 0 20px rgba(0, 229, 255, 0.5), 0 0 30px rgba(255, 45, 150, 0.4), 0 0 40px rgba(255, 45, 150, 0.2)'
+                  : undefined,
+                border: 'none',
+                transition: 'box-shadow 0.3s ease, background 0.3s ease'
+              }}
+              aria-label="Start Surge"
+              title="Start Synapse Surge"
+            >
+              <span className={`text-sm ${preparingSlug === s.slug ? 'text-[var(--foreground)]/30' : 'text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)]'}`}>⚡</span>
+            </button>
             
             {preparingSlug === s.slug && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--background)]/80 backdrop-blur-sm rounded-2xl z-10">
@@ -1258,136 +2206,7 @@ function Home() {
         {subjects.length === 0 && null}
       </div>
 
-      {examHistory.length > 0 && (
-        <div className="mx-auto mt-10 w-full max-w-5xl">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-[var(--foreground)]">Sniped exams</h2>
-            <div className="flex items-center gap-2 text-xs text-[var(--foreground)]/55">
-              {loadingExamHistory && <GlowSpinner size={18} padding={0} inline ariaLabel="Loading sniped exams" idSuffix="sniped-home" />}
-              <span>{examHistory.length} saved</span>
-            </div>
-          </div>
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {examHistory.map((record) => {
-              const topConcept =
-                record.results?.concepts?.[0]?.name && typeof record.results.concepts[0].name === "string"
-                  ? String(record.results.concepts[0].name)
-                  : null;
-              const fileCount = record.fileNames.length;
-              return (
-                <div
-                  key={record.id}
-                  className="relative rounded-2xl bg-[var(--background)] p-5 text-[var(--foreground)] transition-all duration-200 shadow-[0_2px_8px_rgba(0,0,0,0.7)] cursor-pointer hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)]"
-                  role="link"
-                  tabIndex={0}
-                  onClick={() => router.push(`/exam-snipe?resume=${encodeURIComponent(record.slug)}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      router.push(`/exam-snipe?resume=${encodeURIComponent(record.slug)}`);
-                    }
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-semibold leading-snug truncate">{record.courseName}</div>
-                      <div className="mt-1 text-xs text-[var(--foreground)]/55">
-                        {new Date(record.createdAt).toLocaleString(undefined, { dateStyle: "medium" })}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-[10px] uppercase tracking-wide text-[var(--foreground)]/45">
-                        Exam Snipe
-                      </div>
-                      <button
-                        data-menu-button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setExamMenuOpenFor((cur) => (cur === record.slug ? null : record.slug));
-                        }}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[var(--foreground)]/60 hover:text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors !shadow-none"
-                        aria-label="More actions"
-                        title="More actions"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <circle cx="5" cy="12" r="2" fill="currentColor" />
-                          <circle cx="12" cy="12" r="2" fill="currentColor" />
-                          <circle cx="19" cy="12" r="2" fill="currentColor" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-3 text-xs text-[var(--foreground)]/60">
-                    {fileCount} exam{fileCount === 1 ? "" : "s"}
-                    {topConcept ? ` • Top concept: ${topConcept}` : ""}
-                  </div>
-                  <div className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-[var(--accent-cyan)]/80">
-                    <span>Open analysis</span>
-                    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M5 12h14M13 6l6 6-6 6" />
-                    </svg>
-                  </div>
-                  {examMenuOpenFor === record.slug && (
-                    <div
-                      data-menu-dropdown
-                      className="absolute right-4 top-14 z-50 w-40 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-lg p-2 space-y-2"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        onClick={() => renameSnipedExam(record.slug, record.courseName)}
-                        className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
-                      >
-                        Rename
-                      </button>
-                      <button
-                        onClick={() => deleteSnipedExam(record.slug)}
-                        className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[#FFC0DA] hover:bg-[#FF2D96]/20 transition-colors"
-                      >
-                        Delete
-                      </button>
-                      <button
-                        onClick={() => exportSnipedExam(record)}
-                        className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
-                      >
-                        Export JSON
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Note from developer and Latest changes */}
-      <div className="mx-auto mt-8 w-full max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Info box */}
-        <div className="relative z-0">
-          {/* Dark box on top */}
-          <div className="relative rounded-2xl bg-[var(--background)] p-6 shadow-[0_2px_8px_rgba(0,0,0,0.7)] z-0">
-            {/* Animated gradient glow shadow behind the box - shorter for info box */}
-            <div className="absolute top-0 left-0 right-0 bottom-0 -m-[0.075rem] rounded-2xl bg-gradient-to-r from-[var(--accent-cyan)]/30 via-[var(--accent-pink)]/30 to-[var(--accent-cyan)]/30 bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] blur-[4.8px] -z-10 pointer-events-none" />
-            {/* Overlay to cover glow, same shape as box - above both glows */}
-            <div className="absolute top-0 left-0 right-0 bottom-0 rounded-2xl bg-[var(--background)] opacity-100 z-50 pointer-events-none" />
-            <div className="relative z-[60] text-sm text-[var(--foreground)] leading-relaxed space-y-2">
-              <p className="font-semibold">Hallo, Det som funkar är:</p>
-              <ul className="list-disc list-inside space-y-1 ml-2">
-                <li>lägga till kurser här.</li>
-                <li>exam snipe sidan om du har tur.</li>
-                <li>quick learn sidan.</li>
-                <li>efter att du genererat en lektion så kan du klicka på valfritt ord för att få en förklaring.</li>
-                <li>Chatta med Lars är liksom meningen att du ska behöva förklara för honom</li>
-              </ul>
-              <p className="mt-3">mycket skit som inte funkar men aja</p>
-              <p className="mt-2">tack, adios</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Latest changes box */}
-        <ChangelogBox />
-      </div>
+      {/* Sniped exams section removed per user request */}
 
       <CourseCreateModal
         open={createOpen}
@@ -1463,7 +2282,6 @@ function Home() {
         const slug = filesModalOpen;
         const data = loadSubjectData(slug) as StoredSubjectData | null;
         const files = data?.files || [];
-        const fileInputRef = useRef<HTMLInputElement>(null);
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setFilesModalOpen(null)}>
@@ -1478,7 +2296,7 @@ function Home() {
                 </button>
               </div>
 
-              <div className="mb-4 space-y-2">
+              <div className="mb-4 space-y-2 max-h-96 overflow-y-auto">
                 {files.length === 0 ? (
                   <div className="text-sm text-[var(--foreground)]/70 py-6 text-center">
                     No files added yet. Click "Add Files" below to upload course materials.
@@ -1497,11 +2315,21 @@ function Home() {
                       </div>
                       <button
                         onClick={() => {
-                          if (!window.confirm(`Remove "${file.name}" from this subject?`)) return;
+                          if (!window.confirm(`Remove "${file.name}" from this course?`)) return;
                           const updatedFiles = files.filter((_, i) => i !== idx);
                           if (data) {
                             data.files = updatedFiles;
+                            // Also update combinedText if needed
                             saveSubjectData(slug, data);
+                            // Sync to server if authenticated
+                            if (isAuthenticated) {
+                              fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify({ data }),
+                              }).catch(() => {});
+                            }
                             setFilesModalOpen(null);
                             setTimeout(() => setFilesModalOpen(slug), 10);
                           }
@@ -1516,27 +2344,63 @@ function Home() {
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-[var(--accent-cyan)]/20">
-                <button
-                  onClick={() => {
-                    const input = document.createElement('input');
-                    input.type = 'file';
-                    input.multiple = true;
-                    input.onchange = async (e) => {
-                      const target = e.target as HTMLInputElement;
-                      const newFiles = Array.from(target.files || []);
-                      if (newFiles.length === 0) return;
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.docx,.txt,.md,.markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const target = e.target as HTMLInputElement;
+                    const newFiles = Array.from(target.files || []);
+                    if (newFiles.length === 0) return;
 
-                      // Add new files to the subject data
-                      const storedFiles = newFiles.map((f) => ({ name: f.name, type: f.type }));
-                      if (data) {
-                        data.files = [...files, ...storedFiles];
-                        saveSubjectData(slug, data);
-                        setFilesModalOpen(null);
-                        setTimeout(() => setFilesModalOpen(slug), 10);
+                    // Process files and extract text
+                    const storedFiles: Array<{ name: string; type: string; data?: string }> = [];
+                    let combinedText = data?.combinedText || '';
+
+                    for (const file of newFiles) {
+                      const lower = file.name.toLowerCase();
+                      let text = '';
+                      
+                      if (file.type.startsWith('text/') || lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.markdown')) {
+                        try {
+                          text = await file.text();
+                          if (text) combinedText += (combinedText ? '\n\n' : '') + `--- ${file.name} ---\n${text}`;
+                        } catch {}
                       }
-                    };
-                    input.click();
+                      
+                      storedFiles.push({ name: file.name, type: file.type, data: text || undefined });
+                    }
+
+                    // Update subject data
+                    if (data) {
+                      data.files = [...files, ...storedFiles];
+                      data.combinedText = combinedText;
+                      saveSubjectData(slug, data);
+                      
+                      // Sync to server if authenticated
+                      if (isAuthenticated) {
+                        fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          credentials: 'include',
+                          body: JSON.stringify({ data }),
+                        }).catch(() => {});
+                      }
+                      
+                      setFilesModalOpen(null);
+                      setTimeout(() => setFilesModalOpen(slug), 10);
+                    }
+                    
+                    // Reset input
+                    if (fileInputRef.current) {
+                      fileInputRef.current.value = '';
+                    }
                   }}
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
                   className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95"
                 >
                   Add Files

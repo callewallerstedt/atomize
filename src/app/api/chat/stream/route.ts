@@ -10,9 +10,27 @@ export async function POST(req: Request) {
       return new Response("Missing OPENAI_API_KEY", { status: 500 });
     }
     const body = await req.json().catch(() => ({}));
-    const messages: Array<{ role: 'user' | 'assistant'; content: string }> = Array.isArray(body.messages) ? body.messages : [];
-    const context: string = String(body.context || "").slice(0, 12000);
+    const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = Array.isArray(body.messages) ? body.messages : [];
+    const rawContext = String(body.context || "");
+    // Increased limit to 50,000 to accommodate full practice logs, course files, and exam analysis
+    // Practice logs, course context, and exam analysis are critical and must be included
+    const context: string = rawContext.slice(0, 50000);
     const path: string = String(body.path || "");
+    
+    // Debug: verify practice logs are in context
+    const hasPracticeLogs = context.includes("COMPLETE PRACTICE LOG HISTORY");
+    if (path.includes("/practice")) {
+      console.log("[API] Practice mode - Context length:", context.length, "Raw length:", rawContext.length);
+      console.log("[API] Contains practice logs:", hasPracticeLogs);
+      if (hasPracticeLogs) {
+        const logIndex = context.indexOf("COMPLETE PRACTICE LOG HISTORY");
+        console.log("[API] Practice logs start at index:", logIndex);
+        console.log("[API] Practice logs preview:", context.substring(logIndex, logIndex + 500));
+      } else if (rawContext.includes("COMPLETE PRACTICE LOG HISTORY")) {
+        console.error("[API] ERROR: Practice logs were in raw context but got truncated!");
+        console.log("[API] Raw context length:", rawContext.length, "Truncated to:", context.length);
+      }
+    }
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -43,12 +61,14 @@ export async function POST(req: Request) {
       "ACTION:action_name|param1:value1|param2:value2",
       "",
       "Available actions:",
-      "- create_course|name:CourseName|syllabus:Optional description (NOTE: When creating courses, the system uses AUTOCREATE - files are automatically processed and the course is created without opening a modal. If you have files to upload, use FILE_UPLOAD with action:generate_course instead)",
+      "- create_course|name:CourseName|syllabus:Optional description (NOTE: DO NOT use this on homepage - use create_course_from_text instead. When creating courses, the system uses AUTOCREATE - files are automatically processed and the course is created without opening a modal. If you have files to upload, use FILE_UPLOAD with action:generate_course instead)",
+      "- create_course_from_text|description:Course description|name:Optional course name (creates a course from a text description when user provides course details without files. USE THIS on homepage instead of create_course)",
       "- request_files|message:Tell user what files you need",
       "- navigate|path:/subjects/slug or /exam-snipe or /quicklearn",
       "- navigate_course|slug:course-slug (navigate to a course page - use the exact slug from the context, e.g., if context shows 'Course: French Revolution (slug: french-revolution)', use 'french-revolution' as the slug)",
       "- navigate_topic|slug:course-slug|topic:TopicName (navigate to a specific topic - use the EXACT topic name from the context's Topics list, and the EXACT slug from 'Course: Name (slug: course-slug)')",
       "- navigate_lesson|slug:course-slug|topic:TopicName|lessonIndex:0 (navigate to a specific lesson, index is 0-based - use EXACT topic name and slug from context)",
+      "- navigate_practice|slug:course-slug (open the /subjects/{slug}/practice page for that course)",
       "- open_course_modal (opens course creation modal)",
       "- open_flashcards|slug:course-slug (opens flashcards modal for a course - use the exact slug from the context)",
       "- open_lesson_flashcards|slug:course-slug|topic:TopicName|lessonIndex:0 (opens flashcards for a specific lesson)",
@@ -63,6 +83,7 @@ export async function POST(req: Request) {
       "Site features you should know about:",
       "- Exam Snipe: Upload old exam PDFs to analyze patterns and create prioritized study plans. Navigate to /exam-snipe",
       "- Course Creation: Users can upload files (PDFs, DOCX, TXT) to create courses with AI-generated lessons. IMPORTANT: The system uses AUTOCREATE - when files are provided, courses are automatically created and processed without requiring manual steps. Use FILE_UPLOAD with action:generate_course when you have files to upload.",
+      "- Practice Mode: Every course has a practice page at /subjects/{slug}/practice. Use ACTION:navigate_practice|slug:course-slug to send them there so they can drill problems.",
       "- Quick Learn: Generate quick lessons on any topic at /quicklearn",
       "- Course Structure: Each course has topics, and each topic has lessons with quizzes",
       "- Routes: /subjects/{slug} for course, /subjects/{slug}/node/{topic} for topic, /subjects/{slug}/node/{topic}/lesson/{index} for lesson",
@@ -93,20 +114,25 @@ export async function POST(req: Request) {
       "- After fetching, the data will be in context and you can answer their question",
       "",
       "IMPORTANT: Exam Date Tracking:",
-      "- When the user mentions an exam date (e.g., 'My French Revolution exam is on March 15th' or 'Math exam on 2024-03-20'),",
+      "- When the user mentions an exam date (e.g., 'My French Revolution exam is on November 10th' or 'Math exam on 2024-03-20'),",
       "- Extract the course name and date from their message",
       "- Match the course name to a course in the context to get the exact slug",
-      "- Use set_exam_date action with the slug and date in ISO format (YYYY-MM-DD)",
-      "- Example: User says 'French Revolution exam is March 15th' -> ACTION:set_exam_date|slug:french-revolution|date:2024-03-15",
+      "- Convert the date to ISO format (YYYY-MM-DD) - if user says 'November 10th' or 'Nov 10', calculate the full date including the year",
       "- If the user mentions a date without a year, assume current year or next year if the date has already passed this year",
+      "- Calculate how many days are left until the exam date from today",
+      "- Use set_exam_date action with the slug and date in ISO format (YYYY-MM-DD)",
+      "- Example: User says 'French Revolution exam is November 10th' -> Calculate: today is 2024-10-15, exam is 2024-11-10, that's 26 days away. 'Setting exam date for French Revolution to November 10th (26 days left). ACTION:set_exam_date|slug:french-revolution|date:2024-11-10'",
       "- Setting a new exam date will OVERWRITE any existing exam dates for that course - it replaces all previous dates with the new one",
-      "- Always confirm what you're doing: 'Setting exam date for French Revolution to March 15th. ACTION:set_exam_date|slug:french-revolution|date:2024-03-15'",
+      "- Always calculate and mention the days left when setting an exam date",
       "",
-      "CRITICAL: When user asks to create a course, you MUST use FILE_UPLOAD - never just tell them to upload files without rendering the upload box:",
-      "- REQUIRED FORMAT: FILE_UPLOAD:upload_id|message:Upload course files|action:generate_course|name:CourseName|syllabus:Description|buttonLabel:Create Course",
-      "- The FILE_UPLOAD will show a file upload area where users can drag and drop or click to upload files",
-      "- When files are uploaded, a button will appear. Clicking that button will create the course with those files",
-      "- Example: 'I'll help you create a new Physics course. Upload your course files below and I'll set it up for you. FILE_UPLOAD:course_upload|message:Upload your course files (PDFs, DOCX, or TXT)|action:generate_course|name:Physics|syllabus:Introduction to Physics|buttonLabel:Create Course'",
+      "COURSE CREATION (keep it brief):",
+      "- Mention it only when the user explicitly asks to make a course.",
+      "- Always render one FILE_UPLOAD box with action:generate_course so they can drop files.",
+      "- If they describe the course in text, run ACTION:create_course_from_text|description:[their exact words]|name:. Say only 'Creating course...' before the action.",
+      "",
+      "HOMEPAGE RULE (path === '/'):",
+      "- Never call ACTION:create_course there—only ACTION:create_course_from_text.",
+      "- Don’t pitch course creation unless they clearly ask for it.",
       "",
       "For Exam Snipe:",
       "- Use: FILE_UPLOAD:upload_id|message:Upload exam PDFs|action:start_exam_snipe|buttonLabel:Snipe Exams",
@@ -142,10 +168,78 @@ export async function POST(req: Request) {
     const todayISO = today.toISOString().split('T')[0]; // YYYY-MM-DD
     const todayFormatted = today.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     
+    // Add explicit homepage instruction if on homepage
+    const homepageWarning = path === '/' 
+      ? "\n\n⚠️ YOU ARE ON THE HOMEPAGE (path is '/') - CRITICAL RULES:\n- NEVER use ACTION:create_course on homepage (it will be ignored)\n- ALWAYS use ACTION:create_course_from_text for course creation on homepage\n- Follow the HOMEPAGE instructions in the system prompt"
+      : "";
+    
+    // Add Surge mode instructions if on surge page
+    const surgeModeInstructions = path.includes('/surge')
+      ? "\n\n⚡ SYNAPSE SURGE MODE ACTIVE:\n" +
+        "- You are running a Synapse Surge session with three phases: REPEAT, LEARN, QUIZ\n" +
+        "- CRITICAL: The CONTEXT includes COURSE CONTEXT (course files, course summary, topics) and EXAM SNIPE ANALYSIS\n" +
+        "- You MUST use ALL of this context for topic suggestions, lesson generation, and explanations\n" +
+        "- When suggesting topics: Use course context to suggest relevant topics. Prioritize exam snipe concepts from THIS course\n" +
+        "- When teaching: Use course files to match terminology, notation, and examples. Use exam analysis to prioritize exam-tested aspects\n" +
+        "- For custom topics: Even if a topic isn't in the course topics list, explain it WITHIN the context of this course\n" +
+        "- CRITICAL FOR LESSON GENERATION: When generating lessons in the LEARN phase, you MUST use H1 headings (#) for chapter titles\n" +
+        "- Each chapter should start with a line like: # Chapter Title (not ## or ###)\n" +
+        "- The lesson will be automatically split into pages based on these H1 headers\n" +
+        "- Use H2 (##) and H3 (###) for sections within chapters, but H1 (#) is required for chapter breaks\n" +
+        "- The CONTEXT will tell you which phase you're in and what to do\n" +
+        "- In REPEAT phase: Ask 2-4 spaced repetition questions about topics from the last Surge session\n" +
+        "- In LEARN phase (topic selection): Output ONLY the 3 TOPIC_SUGGESTION lines, NO other text. Base suggestions on course context and exam snipe\n" +
+        "- In LEARN phase (teaching): If the context says 'TEACHING TOPIC: [topic]', the topic is already selected. Generate the lesson immediately - DO NOT suggest topics, DO NOT ask what to teach. Generate a comprehensive, progressive lesson (3000-6000 words total) structured as 3-6 chapters using H1 headings (# Chapter Title). Within each chapter, use H2 (##) and H3 (###) headings for sections. The lesson body MUST contain AT LEAST 3000 words of explanatory prose. Each chapter should be substantial with multiple paragraphs, worked examples progressing from easy to hard, step-by-step solutions, and thorough explanations. CRITICAL: Organize chapters adaptively based on the topic - do NOT force a rigid structure. Let the topic determine the organization (e.g., procedural topics by steps, conceptual topics by building ideas, tools by use cases, math by techniques). Focus on teaching HOW TO UNDERSTAND and HOW TO USE the topic. CRITICAL: The context includes COURSE CONTEXT and EXAM SNIPE ANALYSIS - you MUST use BOTH throughout the lesson. Use course files to match terminology and examples. Use exam analysis to prioritize exam-tested aspects. Base examples on exam question patterns, emphasize frequently tested concepts, match problem formats to exam styles, and reference exam connections. Write as a single continuous Markdown document with H1 for chapters, H2/H3 for sections. Use LaTeX for math ($...$ for inline, \\[ ... \\] for block). Use markdown formatting (**, *, lists, code blocks with language specified). Include tables, code examples, and both inline and display math. This should match the quality and structure of regular course lesson generation. CRITICAL: Explain for beginners with NO prior knowledge. Start with SIMPLEST language, use everyday analogies, avoid unnecessarily complex vocabulary. Progress gradually from simple to advanced. Use simple words like 'use' not 'utilize', 'help' not 'facilitate'. Define all technical terms immediately in plain language. The difficulty curve must be gradual - never jump from simple to complex without building bridges.\n" +
+        "- In QUIZ phase: Ask 4 easy MC questions followed by 4 harder short-answer questions about the topic just taught\n" +
+        "- CRITICAL: Return ONLY raw JSON with no explanations or additional text\n" +
+        "- Format: {\"mc\": [{\"question\": \"Question text?\", \"options\": [\"A) Option 1\", \"B) Option 2\", \"C) Option 3\", \"D) Option 4\"], \"correctOption\": \"A\", \"explanation\": \"Why it's correct\"}, ...], \"short\": [{\"question\": \"Question text?\", \"modelAnswer\": \"Ideal response\", \"explanation\": \"Step-by-step reasoning\"}, ...]}\n" +
+        "- Be concise, direct, and focused on the current phase's goal\n" +
+        "- CRITICAL: When suggesting topics, your response MUST start with 'TOPIC_SUGGESTION:' - no introductions, no explanations, nothing before it\n" +
+        "- CRITICAL: When teaching (context shows 'TEACHING TOPIC:'), generate the lesson immediately - do NOT suggest topics"
+      : "";
+    
+    // Check if this is a topic suggestion request in Surge Learn phase
+    const isTopicSuggestionRequest = path.includes('/surge') && 
+      messages.length > 0 && 
+      messages[0]?.role === 'system' && 
+      messages[0]?.content?.includes('TOPIC_SUGGESTION');
+    
     const chatMessages: any[] = [
       { role: "system", content: system },
-      { role: "user", content: `Today's date: ${todayFormatted} (ISO: ${todayISO})\nCurrent page: ${path}\n\nCONTEXT:\n${context}` },
-      ...messages.map((m) => ({ role: m.role, content: m.content }))
+      { role: "user", content: `Today's date: ${todayFormatted} (ISO: ${todayISO})\nCurrent page: ${path}${homepageWarning}${surgeModeInstructions}\n\nCONTEXT:\n${context}` },
+      ...messages.map((m) => {
+        // If it's a topic suggestion system message, convert it to a user message with explicit instructions
+        if (isTopicSuggestionRequest && m.role === 'system') {
+          return {
+            role: 'user',
+            content: `Analyze the CONTEXT above carefully. The context includes:
+1. EXAM SNIPE ANALYSIS - shows high-value concepts from past exams (MOST IMPORTANT - prioritize these)
+2. Previously covered topics from all Surge sessions
+3. Course materials and available topics
+
+Based on this analysis, suggest exactly 3 topics that would provide maximum study value.
+
+PRIORITIZATION RULES:
+- If exam snipe analysis exists: Suggest topics that match the exam snipe concepts (especially the first few in the concepts array)
+- Match topic names from the course materials to exam snipe concept names
+- If exam snipe concepts are already covered, suggest related course topics
+- If no exam snipe: suggest uncovered course topics
+
+CRITICAL: Your response must be EXACTLY these 3 lines, nothing else:
+TOPIC_SUGGESTION: [First Topic Name]
+TOPIC_SUGGESTION: [Second Topic Name]
+TOPIC_SUGGESTION: [Third Topic Name]
+
+RULES:
+- Start immediately with TOPIC_SUGGESTION: (no text before it)
+- No dashes, no bullets, no markdown
+- No explanations, no introductions
+- Use actual topic names from the course materials or exam snipe concepts
+- Just copy the format above exactly with your 3 topic names`
+          };
+        }
+        return { role: m.role, content: m.content };
+      })
     ];
 
     const stream = new ReadableStream({
@@ -153,11 +247,11 @@ export async function POST(req: Request) {
         const encoder = new TextEncoder();
         try {
           const completion: any = await client.chat.completions.create({
-            model: "gpt-4o-mini",
-            temperature: 0.3,
+            model: "gpt-4o",
+            temperature: 1,
             messages: chatMessages,
             stream: true,
-            max_tokens: 600,
+            max_tokens: 3000,
           });
 
           // Write SSE headers

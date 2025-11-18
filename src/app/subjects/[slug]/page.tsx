@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { LessonBody } from "@/components/LessonBody";
 import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
 import { loadSubjectData, saveSubjectData, saveSubjectDataAsync, StoredSubjectData, TopicMeta, getLessonsDueForReview, getUpcomingReviews, LessonFlashcard } from "@/utils/storage";
@@ -69,6 +69,10 @@ export default function SubjectPage() {
   const [showOnlyStarred, setShowOnlyStarred] = useState(false);
   const [isShuffleActive, setIsShuffleActive] = useState(false);
   const [examDateUpdateTrigger, setExamDateUpdateTrigger] = useState(0); // Force re-render when exam dates change
+  const [examSnipes, setExamSnipes] = useState<Array<{ id: string; courseName: string; slug: string; createdAt: string; fileNames: string[] }>>([]);
+  const [loadingExamSnipes, setLoadingExamSnipes] = useState(false);
+  const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
+  const [topicInfoOpen, setTopicInfoOpen] = useState<string | null>(null);
 
   function getRandomCardIndex(filteredFlashcards: typeof allFlashcards, currentIndex: number): number {
     if (filteredFlashcards.length <= 1) return currentIndex;
@@ -97,6 +101,18 @@ export default function SubjectPage() {
       window.removeEventListener('synapse:exam-date-updated', handleExamDateUpdate as EventListener);
     };
   }, [slug]);
+
+  // Check subscription level
+  useEffect(() => {
+    fetch("/api/me", { credentials: "include" })
+      .then((r) => r.json().catch(() => ({})))
+      .then((data) => {
+        if (data?.user?.subscriptionLevel) {
+          setSubscriptionLevel(data.user.subscriptionLevel);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const found = readSubjects().find((s) => s.slug === slug);
@@ -177,6 +193,33 @@ export default function SubjectPage() {
     }
   }, [showOnlyStarred, starredFlashcards, allFlashcards, allFlashcardsModalOpen, currentFlashcardIndex]);
 
+  const loadExamSnipes = useCallback(async () => {
+    setLoadingExamSnipes(true);
+    try {
+      console.log(`Loading exam snipes for course: ${slug}`);
+      const res = await fetch(`/api/exam-snipe/history?subjectSlug=${encodeURIComponent(slug)}`, {
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => ({}));
+      console.log(`Exam snipes response for ${slug}:`, { ok: res.ok, count: json?.history?.length || 0, history: json?.history });
+      if (res.ok && Array.isArray(json?.history)) {
+        setExamSnipes(json.history.map((record: any) => ({
+          id: record.id || record.slug,
+          courseName: record.courseName || "Untitled Exam Snipe",
+          slug: record.slug,
+          createdAt: record.createdAt,
+          fileNames: Array.isArray(record.fileNames) ? record.fileNames : [],
+        })));
+      } else {
+        setExamSnipes([]);
+      }
+    } catch {
+      setExamSnipes([]);
+    } finally {
+      setLoadingExamSnipes(false);
+    }
+  }, [slug]);
+
   useEffect(() => {
     const saved = loadSubjectData(slug);
     if (saved?.topics && saved.topics.length) {
@@ -198,7 +241,7 @@ export default function SubjectPage() {
       }
     } else if (saved?.tree) {
       // legacy fallback: flatten top-level names as topics with equal coverage
-      const legacyTopics = (saved.tree?.topics || []).map((t: any) => ({ name: t.name, summary: "", coverage: Math.round(100 / Math.max(1, saved.tree?.topics?.length || 1)) }));
+      const legacyTopics = (saved.tree?.topics || []).map((t: any) => ({ name: t.name, summary: "" }));
       setTopics(legacyTopics);
       setCombinedText(saved.combinedText || "");
       setSavedFiles(saved.files || []);
@@ -210,6 +253,9 @@ export default function SubjectPage() {
     // Load reviews
     setReviewsDue(getLessonsDueForReview(slug));
     setUpcomingReviews(getUpcomingReviews(slug, 7));
+    
+    // Load exam snipes for this course
+    void loadExamSnipes();
     
     // Check if we need to open flashcards after data is loaded
     const pendingFlashcardOpen = typeof window !== 'undefined' ? sessionStorage.getItem('__pendingFlashcardOpen') : null;
@@ -223,7 +269,16 @@ export default function SubjectPage() {
         collectAllFlashcards();
       }, 50);
     }
-  }, [slug]);
+  }, [slug, loadExamSnipes]);
+
+  // Refresh exam snipes when page gains focus (in case user created one in another tab)
+  useEffect(() => {
+    const handleFocus = () => {
+      void loadExamSnipes();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [loadExamSnipes]);
 
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -565,12 +620,22 @@ export default function SubjectPage() {
                     try {
                       setLoading(true);
                       const saved = loadSubjectData(slug) as StoredSubjectData | null;
+                      
+                      // Ensure we have fileIds or fallback to using files/combinedText
+                      const fileIds = saved?.course_file_ids || [];
+                      const contextText = [
+                        saved?.course_context || '', 
+                        saved?.combinedText || ''
+                      ].filter(Boolean).join('\n\n');
+                      
+                      console.log(`[extract-topics] Using ${fileIds.length} file IDs and ${contextText.length} chars of context`);
+                      
                       const res = await fetch('/api/extract-by-ids', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                           subject: subjectName || slug,
-                          fileIds: saved?.course_file_ids || [],
-                          contextText: [saved?.course_context || '', saved?.combinedText || ''].filter(Boolean).join('\n\n')
+                          fileIds: fileIds,
+                          contextText: contextText
                         })
                       });
                       const json = await res.json().catch(() => ({}));
@@ -599,6 +664,36 @@ export default function SubjectPage() {
                 >
                   Extract Topics
                 </button>
+                {subscriptionLevel === "Tester" && tree && tree.topics && tree.topics.length > 0 && (
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm("Are you sure you want to clear all topics? This action cannot be undone.")) return;
+                      const data = loadSubjectData(slug) as StoredSubjectData | null;
+                      if (data) {
+                        data.topics = [];
+                        data.tree = { subject: data.subject || slug, topics: [] };
+                        await saveSubjectDataAsync(slug, data);
+                        setTopics([]);
+                        setTree({ subject: data.subject || slug, topics: [] });
+                        // Sync to server if authenticated
+                        try {
+                          const me = await fetch("/api/me", { credentials: "include" }).then(r => r.json().catch(() => ({})));
+                          if (me?.user) {
+                            await fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              credentials: 'include',
+                              body: JSON.stringify({ data }),
+                            }).catch(() => {});
+                          }
+                        } catch {}
+                      }
+                    }}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+                  >
+                    Clear All Topics (Tester)
+                  </button>
+                )}
               </div>
             </div>
             {tree && tree.topics && tree.topics.length > 0 ? (
@@ -643,6 +738,23 @@ export default function SubjectPage() {
                       )}
                       <span className={`text-sm transition-colors ${isGen ? 'text-[var(--foreground)] hover:opacity-90' : 'text-[var(--foreground)]/70 hover:text-[var(--foreground)]'}`}>{name}</span>
                       <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        {subscriptionLevel === "Tester" && (
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setTopicInfoOpen(topicInfoOpen === name ? null : name);
+                            }}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--background)]/60 border border-[var(--accent-cyan)]/30 text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/10 hover:border-[var(--accent-cyan)]/50 transition-all opacity-0 group-hover:opacity-100"
+                            title="View topic info"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <circle cx="12" cy="12" r="10"></circle>
+                              <path d="M12 16v-4"></path>
+                              <path d="M12 8h.01"></path>
+                            </svg>
+                          </button>
+                        )}
                         {isGen && quizCompleted && (
                           <span className="inline-flex items-center gap-1 rounded-full border border-green-300 bg-green-50 px-2 py-0.5 text-[11px] text-green-700 dark:border-green-500/40 dark:bg-green-500/10 dark:text-green-200">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -745,6 +857,103 @@ export default function SubjectPage() {
             ) : (
               <div className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-6 text-center text-sm text-[var(--foreground)]/70">No topics yet.</div>
             )}
+
+            {/* Topic Info Modal for Testers */}
+            {subscriptionLevel === "Tester" && topicInfoOpen && (() => {
+              const topicData = (topics || []).find((t: TopicMeta) => t.name === topicInfoOpen);
+              if (!topicData) return null;
+              
+              return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setTopicInfoOpen(null)}>
+                  <div className="w-full max-w-lg rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/95 backdrop-blur-sm p-6" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-[var(--foreground)]">Topic Information</h3>
+                      <button
+                        onClick={() => setTopicInfoOpen(null)}
+                        className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] text-xl"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <div className="text-xs font-medium text-[var(--foreground)]/70 mb-1">Topic Name</div>
+                        <div className="text-base font-semibold text-[var(--foreground)]">{topicData.name}</div>
+                      </div>
+
+                      {topicData.summary && (
+                        <div>
+                          <div className="text-xs font-medium text-[var(--foreground)]/70 mb-1">Summary</div>
+                          <div className="text-sm text-[var(--foreground)]/90">{topicData.summary}</div>
+                        </div>
+                      )}
+
+
+                      <div className="pt-4 border-t border-[var(--foreground)]/10">
+                        <div className="text-xs font-medium text-[var(--foreground)]/70 mb-2">Raw Data (JSON)</div>
+                        <pre className="text-xs bg-[var(--background)]/60 border border-[var(--foreground)]/10 rounded-lg p-3 overflow-auto max-h-48 text-[var(--foreground)]/80">
+                          {JSON.stringify(topicData, null, 2)}
+                        </pre>
+                      </div>
+                    </div>
+
+                    <div className="mt-6 flex justify-end">
+                      <button
+                        onClick={() => setTopicInfoOpen(null)}
+                        className="rounded-lg border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/80"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+            
+            {/* Exam Snipes Section - shown under topics in tree view */}
+            {examSnipes.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Saved Exam Snipes</h3>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {examSnipes.map((examSnipe) => {
+                    return (
+                      <div
+                        key={examSnipe.id}
+                        className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 cursor-pointer hover:border-[var(--accent-cyan)]/40 transition-colors"
+                        role="link"
+                        tabIndex={0}
+                        onClick={() => router.push(`/subjects/${slug}/examsnipe`)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            router.push(`/subjects/${slug}/examsnipe`);
+                          }
+                        }}
+                      >
+                        <div className="flex flex-col gap-2">
+                          <div className="text-sm font-semibold text-[var(--foreground)] line-clamp-2">
+                            {examSnipe.courseName}
+                          </div>
+                          <div className="text-xs text-[var(--foreground)]/60">
+                            {new Date(examSnipe.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" })}
+                          </div>
+                          <div className="text-xs text-[var(--foreground)]/50">
+                            {examSnipe.fileNames.length} exam{examSnipe.fileNames.length !== 1 ? "s" : ""}
+                          </div>
+                          <div className="mt-2 inline-flex items-center gap-2 text-xs font-medium text-[var(--accent-cyan)]/80">
+                            <span>Open analysis</span>
+                            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M5 12h14M13 6l6 6-6 6" />
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -815,6 +1024,50 @@ export default function SubjectPage() {
                   );
                 })}
             </div>
+            
+            {/* Exam Snipes Section */}
+            {examSnipes.length > 0 && (
+              <div className="mt-8">
+                <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Saved Exam Snipes</h3>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {examSnipes.map((examSnipe) => {
+                    return (
+                      <div
+                        key={examSnipe.id}
+                        className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 cursor-pointer hover:border-[var(--accent-cyan)]/40 transition-colors"
+                        role="link"
+                        tabIndex={0}
+                        onClick={() => router.push(`/subjects/${slug}/examsnipe`)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            router.push(`/subjects/${slug}/examsnipe`);
+                          }
+                        }}
+                      >
+                        <div className="flex flex-col gap-2">
+                          <div className="text-sm font-semibold text-[var(--foreground)] line-clamp-2">
+                            {examSnipe.courseName}
+                          </div>
+                          <div className="text-xs text-[var(--foreground)]/60">
+                            {new Date(examSnipe.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" })}
+                          </div>
+                          <div className="text-xs text-[var(--foreground)]/50">
+                            {examSnipe.fileNames.length} exam{examSnipe.fileNames.length !== 1 ? "s" : ""}
+                          </div>
+                          <div className="mt-2 inline-flex items-center gap-2 text-xs font-medium text-[var(--accent-cyan)]/80">
+                            <span>Open analysis</span>
+                            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M5 12h14M13 6l6 6-6 6" />
+                            </svg>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </>
             ) : (
               <div className="mt-4 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-6 text-center text-sm text-[var(--foreground)]/70">
@@ -1007,7 +1260,7 @@ export default function SubjectPage() {
                     const data = loadSubjectData(slug) as StoredSubjectData | null;
                     if (data) {
                       data.tree = nextTree;
-                      data.topics = Array.isArray(data.topics) ? [...data.topics, { name, summary: overview?.slice(0, 140) || '', coverage: 0 }] : [{ name, summary: overview?.slice(0, 140) || '', coverage: 0 }];
+                      data.topics = Array.isArray(data.topics) ? [...data.topics, { name, summary: overview?.slice(0, 140) || '' }] : [{ name, summary: overview?.slice(0, 140) || '' }];
                       data.nodes = data.nodes || {};
                       data.nodes[name] = { overview: overview || '', symbols: [], lessons: [], lessonsMeta: [] } as any;
                       saveSubjectData(slug, data);

@@ -8,7 +8,6 @@ export const maxDuration = 60;
 type TopicMeta = {
   name: string;
   summary: string;
-  coverage: number; // 0-100
 };
 
 async function extractTextFromPdf(buffer: Buffer): Promise<string> {
@@ -65,12 +64,27 @@ export async function POST(req: Request) {
     const files = form.getAll("files") as unknown as File[];
 
     const texts: { name: string; text: string }[] = [];
+    console.log(`[extract] Processing ${files.length} files...`);
     for (const file of files) {
-      const txt = await readFileAsText(file);
-      if (txt && txt.trim()) texts.push({ name: file.name, text: txt });
+      try {
+        console.log(`[extract] Reading file: ${file.name} (${file.size} bytes)`);
+        const txt = await readFileAsText(file);
+        if (txt && txt.trim()) {
+          texts.push({ name: file.name, text: txt });
+          console.log(`[extract] Successfully extracted ${txt.length} characters from ${file.name}`);
+        } else {
+          console.warn(`[extract] No text extracted from ${file.name}`);
+        }
+      } catch (err: any) {
+        console.error(`[extract] Error processing ${file.name}:`, err?.message);
+      }
     }
+    console.log(`[extract] Total files processed: ${texts.length}/${files.length}`);
 
-    const combined = texts.map((t) => `# ${t.name}\n\n${t.text}`).join("\n\n\n").slice(0, 300_000); // modest cap for token safety
+    // Combine all files - NO TRUNCATION to ensure full content is used
+    // We'll use OpenAI's file upload API for large content instead of truncating
+    const combined = texts.map((t) => `# ${t.name}\n\n${t.text}`).join("\n\n\n");
+    console.log(`[extract] Combined text length: ${combined.length} characters`);
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -103,30 +117,112 @@ export async function POST(req: Request) {
     const lang = await detectLanguage(combined || texts.map(t => t.name).join("\n"));
 
     const system = [
-      "Extract main topics from the course material. If material is minimal or only a course name is provided, generate comprehensive topics based on the subject name.",
+      "You are a topic extraction system. Your ONLY job is to extract EVERY topic, concept, method, and technique that appears in the provided course material.",
       "Return STRICT JSON with this exact shape:",
-      "{ subject: string; topics: { name: string; summary: string; coverage: number }[] }",
-      "CRITICAL RULES:",
-      "- ALWAYS generate AT LEAST 6 topics, ideally 8-12 topics. Never generate fewer than 6 topics.",
-      "- If course material is minimal or only a course name/subject is provided, use your knowledge of that subject to generate 6-12 well-structured, comprehensive topics that would typically be covered in such a course.",
-      "- Each topic name should be concise (2-5 words).",
-      "- summary: 1-2 sentences describing what the topic covers. If material is minimal, write summaries based on standard coverage of this topic in the subject area.",
-      "- coverage: integer 0-100 estimating how much of the total material this topic covers; topics should roughly sum to ~100 but do not exceed.",
-      "- No subtopics, no markdown, no code fences, JSON only.",
-      "- Structure topics logically and comprehensively to cover the subject area well.",
+      "{ subject: string; topics: { name: string; summary: string }[] }",
+      "",
+      "CRITICAL RULES - EXTRACT EVERYTHING FROM THE FILES:",
+      "- Extract EVERY single topic, concept, method, technique, theory, formula, algorithm, procedure, and subject area that appears in the provided material.",
+      "- You MUST extract 20-50+ topics if the material contains that many. Do NOT limit yourself to a small number.",
+      "- Include BOTH major topics AND subtopics as separate entries.",
+      "- Include ALL methods, techniques, formulas, theories, algorithms, procedures, and specific concepts mentioned in the files.",
+      "- Include ALL chapter headings, section titles, subsection titles, and major concepts from the material.",
+      "- If a topic appears multiple times or in different contexts, include it.",
+      "- Extract topics at multiple levels of granularity - both broad concepts AND specific details.",
+      "- Each topic name should be specific and concise (2-6 words), taken directly from the material.",
+      "",
+      "CRITICAL RULES - ONLY EXTRACT FROM PROVIDED MATERIAL:",
+      "- ONLY extract topics that are EXPLICITLY mentioned or clearly present in the provided files.",
+      "- DO NOT invent, assume, or add topics that are not in the material.",
+      "- DO NOT use external knowledge to add topics not found in the files.",
+      "- If a topic is not in the files, DO NOT include it.",
+      "",
+      "Summary format:",
+      "- summary: A compact, comma-separated list of exactly what the student should learn in this topic, based ONLY on what's in the material.",
+      "- Focus on learning outcomes, concepts, skills, and knowledge found in the files.",
+      "- Ignore exam questions, old tests, or administrative content.",
+      "- Use commas to separate different learning points.",
+      "- Example: 'Understanding heat transfer mechanisms, calculating thermal efficiency, analyzing energy balance equations, applying conservation laws'.",
+      "",
+      "Output requirements:",
+      "- No markdown, no code fences, JSON only.",
+      "- Extract ALL topics from the material - be exhaustive, not selective.",
       `- Write summaries in ${lang.name}.`,
     ].join("\n");
 
     let data: { subject: string; topics: TopicMeta[] } = { subject, topics: [] };
     if (combined && combined.trim().length >= 50) {
-      // Primary path: use extracted text
-      const user = [
-        `Subject: ${subject}`,
-        "Material (truncated):",
-        combined,
-        "",
-        "IMPORTANT: Generate 6-12 comprehensive topics. If the material above is minimal, use the subject name to generate well-structured topics that would typically be covered in this course.",
-      ].join("\n\n");
+      // For large content, upload files to OpenAI and use file IDs instead of truncating
+      // This ensures ALL content is processed, not just the first 300k chars
+      let useFileIds = false;
+      const fileIds: string[] = [];
+      
+      // If combined text is very large (>500k chars), upload files to OpenAI
+      if (combined.length > 500_000 && files.length > 0) {
+        console.log(`[extract] Large content detected (${combined.length} chars), uploading files to OpenAI...`);
+        try {
+          for (const file of files) {
+            try {
+              const uploaded = await client.files.create({ 
+                file: file as any, 
+                purpose: "assistants" 
+              });
+              fileIds.push(uploaded.id);
+              console.log(`[extract] Uploaded ${file.name} to OpenAI: ${uploaded.id}`);
+            } catch (err: any) {
+              console.error(`[extract] Failed to upload ${file.name}:`, err?.message);
+            }
+          }
+          if (fileIds.length > 0) {
+            useFileIds = true;
+            console.log(`[extract] Using ${fileIds.length} uploaded files for extraction`);
+          }
+        } catch (err: any) {
+          console.error(`[extract] File upload failed, falling back to text:`, err?.message);
+        }
+      }
+      
+      if (useFileIds && fileIds.length > 0) {
+        // Use file IDs for large content
+        const inputContent: any[] = [
+          { type: "input_text", text: `Subject: ${subject}\n\nCRITICAL INSTRUCTIONS:\n1. Read through ALL attached files completely and thoroughly.\n2. Extract EVERY topic, concept, method, technique, theory, formula, algorithm, and procedure that appears in the files.\n3. Extract 20-50+ topics if the material contains that many. Do NOT limit yourself.\n4. Include ALL major topics, subtopics, chapter headings, section titles, and specific concepts.\n5. Extract at multiple levels - both broad concepts AND specific details.\n6. ONLY extract topics that are EXPLICITLY in the attached files. Do NOT add topics that aren't there.\n7. Do NOT use external knowledge to invent topics not found in the files.\n\nFor each topic's summary: Create a compact, comma-separated list of learning outcomes, concepts, skills, and knowledge found in the files. Focus on what the student should LEARN based on what's actually in the material.` },
+          ...fileIds.map((id) => ({ type: "input_file", file_id: id })),
+        ];
+        
+        const resp = await client.responses.create({
+          model: "gpt-4o-mini",
+          instructions: system,
+          input: [{ role: "user", content: inputContent as any }],
+          temperature: 0.2,
+        });
+        
+        const out = (resp as any).output_text || "{}";
+        try {
+          data = JSON.parse(out);
+        } catch {
+          const start = out.indexOf("{");
+          const end = out.lastIndexOf("}");
+          if (start >= 0 && end > start) data = JSON.parse(out.slice(start, end + 1));
+        }
+      } else {
+        // Primary path: use extracted text (for smaller content or if upload failed)
+        const user = [
+          `Subject: ${subject}`,
+          "",
+          "Material (ALL files combined - read EVERYTHING):",
+          combined,
+          "",
+          "CRITICAL INSTRUCTIONS:",
+          "1. Read through ALL of the material above completely and thoroughly.",
+          "2. Extract EVERY topic, concept, method, technique, theory, formula, algorithm, and procedure that appears in the material.",
+          "3. Extract 20-50+ topics if the material contains that many. Do NOT limit yourself.",
+          "4. Include ALL major topics, subtopics, chapter headings, section titles, and specific concepts.",
+          "5. Extract at multiple levels - both broad concepts AND specific details.",
+          "6. ONLY extract topics that are EXPLICITLY in the material above. Do NOT add topics that aren't there.",
+          "7. Do NOT use external knowledge to invent topics not found in the files.",
+          "",
+          "For each topic's summary: Create a compact, comma-separated list of learning outcomes, concepts, skills, and knowledge found in the material. Focus on what the student should LEARN based on what's actually in the files, not exam questions or old tests.",
+        ].join("\n\n");
 
       const completion = await client.chat.completions.create({
         model: "gpt-4o-mini",
@@ -147,9 +243,8 @@ export async function POST(req: Request) {
                     properties: {
                       name: { type: "string" },
                       summary: { type: "string" },
-                      coverage: { type: "number" },
                     },
-                    required: ["name", "summary", "coverage"],
+                    required: ["name", "summary"],
                   },
                 },
               },
@@ -200,9 +295,8 @@ export async function POST(req: Request) {
                     properties: {
                       name: { type: "string" },
                       summary: { type: "string" },
-                      coverage: { type: "number" },
                     },
-                    required: ["name", "summary", "coverage"],
+                    required: ["name", "summary"],
                   },
                 },
               },
@@ -234,7 +328,7 @@ export async function POST(req: Request) {
         } catch {}
       }
       const inputContent: any[] = [
-          { type: "input_text", text: `Subject: ${subject}\n\nIMPORTANT: Generate 6-12 comprehensive topics. If the attached files contain minimal material, use the subject name to generate well-structured topics that would typically be covered in this course. Return JSON only.` },
+          { type: "input_text", text: `Subject: ${subject}\n\nCRITICAL INSTRUCTIONS:\n1. Read through ALL attached files completely and thoroughly.\n2. Extract EVERY topic, concept, method, technique, theory, formula, algorithm, and procedure that appears in the files.\n3. Extract 20-50+ topics if the material contains that many. Do NOT limit yourself.\n4. Include ALL major topics, subtopics, chapter headings, section titles, and specific concepts.\n5. Extract at multiple levels - both broad concepts AND specific details.\n6. ONLY extract topics that are EXPLICITLY in the attached files. Do NOT add topics that aren't there.\n7. Do NOT use external knowledge to invent topics not found in the files.\n\nFor each topic's summary: Create a compact, comma-separated list of learning outcomes, concepts, skills, and knowledge found in the files. Focus on what the student should LEARN based on what's actually in the material.` },
         ...uploads.map((id) => ({ type: "input_file", file_id: id })),
       ];
       const resp = await client.responses.create({
@@ -255,25 +349,26 @@ export async function POST(req: Request) {
       }
     }
 
-    // Normalize coverage
+    // Normalize topics (remove coverage)
     if (Array.isArray(data.topics)) {
       data.topics = data.topics.map((t) => ({
         name: String(t.name || "Topic"),
         summary: String(t.summary || ""),
-        coverage: Math.max(0, Math.min(100, Math.round(Number((t as any).coverage) || 0))),
       }));
     }
 
-    // Ensure we always have at least 6 topics - regenerate if needed
-    if (!Array.isArray(data.topics) || data.topics.length < 6) {
+    // If we got very few topics, try to extract more comprehensively
+    // Check if we got fewer than expected - if material is substantial, we should have many topics
+    const expectedMinTopics = combined.length > 100000 ? 20 : combined.length > 50000 ? 15 : 10;
+    if (!Array.isArray(data.topics) || data.topics.length < expectedMinTopics) {
       try {
         const regenerateUser = [
           `Subject: ${subject}`,
           combined && combined.trim().length >= 50 
-            ? `Material: ${combined.slice(0, 50000)}`
-            : "No material provided - generate topics based on subject knowledge.",
+            ? `Material (read ALL of it): ${combined}`
+            : "No material provided - cannot extract topics without material.",
           "",
-          "CRITICAL: You must generate AT LEAST 6 topics (ideally 8-12). Previous attempt returned fewer than 6. Generate a comprehensive set of 6-12 well-structured topics for this subject.",
+          "CRITICAL: Previous attempt returned too few topics. You MUST extract EVERY topic, concept, method, technique, theory, formula, algorithm, and procedure that appears in the material above. Extract 20-50+ topics if the material contains that many. Include ALL major topics, subtopics, chapter headings, section titles, and specific concepts. Extract at multiple levels. ONLY extract topics that are in the material - do NOT invent topics. Be exhaustive, not selective. Read through the ENTIRE material and extract everything.",
         ].join("\n\n");
 
         const regenerateCompletion = await client.chat.completions.create({
@@ -295,9 +390,8 @@ export async function POST(req: Request) {
                       properties: {
                         name: { type: "string" },
                         summary: { type: "string" },
-                        coverage: { type: "number" },
                       },
-                      required: ["name", "summary", "coverage"],
+                      required: ["name", "summary"],
                     },
                   },
                 },
@@ -316,7 +410,12 @@ export async function POST(req: Request) {
         const regenerateContent = regenerateCompletion.choices[0]?.message?.content || "{}";
         try {
           const regenerated = JSON.parse(regenerateContent);
-          if (Array.isArray(regenerated.topics) && regenerated.topics.length >= 6) {
+          // Accept regeneration if it has more topics than the original
+          if (Array.isArray(regenerated.topics) && regenerated.topics.length > (data.topics?.length || 0)) {
+            console.log(`[extract] Regeneration improved: ${data.topics?.length || 0} -> ${regenerated.topics.length} topics`);
+            data = regenerated;
+          } else if (Array.isArray(regenerated.topics) && regenerated.topics.length >= expectedMinTopics) {
+            console.log(`[extract] Regeneration met minimum: ${regenerated.topics.length} topics`);
             data = regenerated;
           }
         } catch {}

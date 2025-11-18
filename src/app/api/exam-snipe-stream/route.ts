@@ -209,7 +209,7 @@ ANALYSIS APPROACH:
    - Focus on concepts that are: (1) frequently tested, (2) high point-value, or (3) foundational to solving multiple question types.
    - Each concept should be specific enough to be actionable (not overly broad), but wide enough to cover a family of related exam questions.
    - Think in terms of "methods" or "techniques" that can be mastered to tackle multiple question variations.
-   - You MUST identify AT LEAST 5 main concepts (more if the exams cover diverse topics). This is critical for exam coverage.
+   - You MUST identify AT LEAST 7-10 main concepts (more if the exams cover diverse topics). Aim for comprehensive coverage - extract all significant methods, techniques, and concept families that appear across the exams. This is critical for exam coverage.
    - Order concepts by value: highest-value first (most frequently tested, highest point potential), then descending. This prioritizes the most impactful study areas.
 
 FOR EACH MAIN CONCEPT:
@@ -224,7 +224,7 @@ FOR EACH MAIN CONCEPT:
     - "objectives": array of 3-5 concrete, action-oriented objectives that build toward deep understanding.
 
 REQUIREMENTS:
-- You MUST provide AT LEAST 5 main concepts (more if needed to cover all exam content). This is non-negotiable.
+- You MUST provide AT LEAST 7-10 main concepts (more if needed to cover all exam content). Aim for comprehensive coverage - don't limit yourself to just the top 5. Extract all significant methods, techniques, and concept families that appear across the exams. This is non-negotiable.
 - Order concepts by value: highest-value (most frequent/highest points) first, then descending.
 - Prioritize concepts that appear most frequently or carry the most point value across exams.
 - Concepts should be specific methods/techniques, not overly broad topics.

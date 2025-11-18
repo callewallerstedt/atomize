@@ -431,6 +431,8 @@ function ExamSnipeInner() {
   const [loadingExamHistory, setLoadingExamHistory] = useState(false);
   const [examMenuOpenFor, setExamMenuOpenFor] = useState<string | null>(null);
   const [loadingResume, setLoadingResume] = useState(false);
+  const [selectedSubjectSlug, setSelectedSubjectSlug] = useState<string>("");
+  const [subjects, setSubjects] = useState<Array<{ name: string; slug: string }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamContainerRef = useRef<HTMLDivElement>(null);
 
@@ -468,6 +470,19 @@ function ExamSnipeInner() {
 
   useEffect(() => {
     setIsClient(true);
+    
+    // Load subjects from localStorage
+    if (typeof window !== "undefined") {
+      try {
+        const raw = localStorage.getItem("atomicSubjects");
+        const loadedSubjects = raw ? (JSON.parse(raw) as Array<{ name: string; slug: string }>) : [];
+        // Filter out quicklearn
+        const filtered = loadedSubjects.filter((s) => s.slug !== "quicklearn");
+        setSubjects(filtered);
+      } catch {
+        setSubjects([]);
+      }
+    }
     
     // Check for pending exam files from chat
     const pendingFiles = (window as any).__pendingExamFiles;
@@ -573,15 +588,21 @@ function ExamSnipeInner() {
     
     (async () => {
       try {
-        const res = await fetch("/api/exam-snipe/history", { credentials: "include" });
+        console.log("Loading exam snipe for resume:", resumeSlug);
+        // Fetch the specific record by slug (more efficient than fetching all)
+        const res = await fetch(`/api/exam-snipe/history?slug=${encodeURIComponent(resumeSlug)}`, { 
+          credentials: "include" 
+        });
         const json = await res.json().catch(() => ({}));
         if (cancelled) return;
         
-        if (res.ok && Array.isArray(json?.history)) {
-          const normalized = (json.history as any[]).map((record) => normalizeHistoryRecord(record));
-          const record = normalized.find((item) => item.slug === resumeSlug);
+        if (res.ok && json?.record) {
+          const record = normalizeHistoryRecord(json.record);
+          console.log("Loaded exam snipe record:", record.slug, "Course:", record.courseName);
+          console.log("Record has results:", !!record.results, "Concepts:", record.results?.concepts?.length || 0);
           
-          if (record && !cancelled) {
+          if (!cancelled) {
+            // Set all the state FIRST before any navigation
             setExamResults(record.results);
             setActiveHistoryMeta(record);
             setExpandedConcept(null);
@@ -589,12 +610,39 @@ function ExamSnipeInner() {
             setStreamingText("");
             setExamFiles([]);
             setCurrentFileNames(record.fileNames);
-            setHistory(normalized.slice(0, MAX_HISTORY_ITEMS));
+            
+            // Also load full history for the history sidebar
+            try {
+              const historyRes = await fetch("/api/exam-snipe/history", { credentials: "include" });
+              const historyJson = await historyRes.json().catch(() => ({}));
+              if (historyRes.ok && Array.isArray(historyJson?.history)) {
+                const normalized = (historyJson.history as any[]).map((r) => normalizeHistoryRecord(r));
+                setHistory(normalized.slice(0, MAX_HISTORY_ITEMS));
+                console.log(`Loaded ${normalized.length} exam snipes in history sidebar`);
+              }
+            } catch (historyErr) {
+              console.warn("Failed to load full history, continuing with single record:", historyErr);
+            }
+            
+            // Use setTimeout to ensure state is set before URL change
+            setTimeout(() => {
+              if (!cancelled) {
+                // Remove the resume query param to clean up URL, but keep the state
+                router.replace("/exam-snipe", { scroll: false });
+                console.log("Navigation complete, analysis should be visible");
+              }
+            }, 100);
+          }
+        } else {
+          console.error("Failed to load resume record:", json?.error || "Record not found");
+          // If record not found, redirect back to exam snipe page
+          if (!cancelled) {
             router.replace("/exam-snipe");
           }
         }
       } catch (err) {
         console.error("Failed to load resume record:", err);
+        router.replace("/exam-snipe");
       } finally {
         if (!cancelled) {
           setLoadingResume(false);
@@ -612,6 +660,25 @@ function ExamSnipeInner() {
       streamContainerRef.current.scrollTop = streamContainerRef.current.scrollHeight;
     }
   }, [streamingText]);
+
+  // Debug: Log current state to verify analysis is loaded
+  // NOTE: This must be before any early returns to maintain hook order
+  useEffect(() => {
+    if (examResults && activeHistoryMeta) {
+      console.log("✅ Analysis loaded and ready to display:", {
+        courseName: activeHistoryMeta.courseName,
+        slug: activeHistoryMeta.slug,
+        conceptsCount: examResults.concepts?.length || 0,
+        hasResults: !!examResults
+      });
+    } else if (resumeSlug && !loadingResume) {
+      console.warn("⚠️ Resume slug exists but analysis not loaded:", {
+        resumeSlug,
+        hasExamResults: !!examResults,
+        hasActiveHistoryMeta: !!activeHistoryMeta
+      });
+    }
+  }, [examResults, activeHistoryMeta, resumeSlug, loadingResume]);
 
   // Prevent SSR to avoid PDF.js DOMMatrix issues
   if (!isClient) {
@@ -652,6 +719,15 @@ function ExamSnipeInner() {
 
   async function handleExamSnipe() {
     if (examFiles.length === 0) return;
+    
+    // CRITICAL: Capture the selectedSubjectSlug at the START of the function
+    // This ensures we have the correct value even after async operations
+    const capturedSubjectSlug = selectedSubjectSlug || null;
+    
+    // Log the selected course before starting analysis
+    console.log('=== STARTING EXAM SNIPE ANALYSIS ===');
+    console.log('Selected course (subjectSlug):', capturedSubjectSlug || 'none');
+    console.log('Available subjects:', subjects.length);
     
     let animationId: number | null = null;
     let shimmerAnimation: number | null = null;
@@ -825,27 +901,34 @@ function ExamSnipeInner() {
                     generatedLessons,
                     detectedLanguage,
                   };
-                  let record: ExamSnipeRecord = {
-                    id: slug,
-                    courseName,
-                    slug,
-                    createdAt: new Date(timestamp).toISOString(),
-                    fileNames,
-                    results: result,
-                  };
+                  // Save exam snipe with selected course
+                  // Use the capturedSubjectSlug from the start of handleExamSnipe
+                  let record: ExamSnipeRecord | null = null;
                   try {
+                    // Use the captured value from the start of the function
+                    // This ensures we have the correct value even after async streaming
+                    const subjectSlugToSave = capturedSubjectSlug;
+                    console.log('=== SAVING EXAM SNIPE ===');
+                    console.log('Captured subject slug (from start):', subjectSlugToSave);
+                    console.log('Current state value:', selectedSubjectSlug);
+                    console.log('Will save with:', subjectSlugToSave);
+                    const savePayload = {
+                      courseName,
+                      slug,
+                      subjectSlug: subjectSlugToSave,
+                      fileNames,
+                      results: result,
+                    };
+                    console.log('Save payload:', JSON.stringify(savePayload, null, 2));
                     const saveRes = await fetch('/api/exam-snipe/history', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       credentials: 'include',
-                      body: JSON.stringify({
-                        courseName,
-                        slug,
-                        fileNames,
-                        results: result,
-                      }),
+                      body: JSON.stringify(savePayload),
                     });
                     const saveJson = await saveRes.json().catch(() => ({}));
+                    console.log('Save response:', { ok: saveRes.ok, status: saveRes.status, json: saveJson });
+                    
                     if (saveRes.ok && saveJson?.record) {
                       const saved = saveJson.record;
                       const savedResults = saved?.results ?? {};
@@ -895,23 +978,40 @@ function ExamSnipeInner() {
                           detectedLanguage: savedResults?.detectedLanguage || result.detectedLanguage,
                         },
                       };
-                    } else if (!saveRes.ok && saveRes.status !== 401) {
-                      console.warn('Failed to persist exam snipe history', saveJson?.error);
+                      console.log('Exam snipe saved successfully to database');
+                    } else {
+                      const errorMsg = saveJson?.error || `HTTP ${saveRes.status}`;
+                      console.error('Failed to persist exam snipe history:', errorMsg, saveJson);
+                      throw new Error(errorMsg);
                     }
-                  } catch (persistErr) {
-                    console.warn('Error saving exam snipe history', persistErr);
+                  } catch (persistErr: any) {
+                    console.error('Error saving exam snipe history:', persistErr);
+                    const errorMessage = persistErr?.message || 'Unknown error';
+                    alert(`Failed to save exam snipe to database: ${errorMessage}\n\nThe analysis completed, but it was not saved. Please try again.`);
+                    // Create a local record anyway so user can see the results, but it won't be persisted
+                    record = {
+                      id: slug,
+                      courseName,
+                      slug,
+                      createdAt: new Date(timestamp).toISOString(),
+                      fileNames,
+                      results: result,
+                    };
                   }
-                  setExamResults(record.results);
-                  setActiveHistoryMeta(record);
-                  setCurrentFileNames(record.fileNames);
-                  setExpandedConcept(null);
-                  setSelectedConceptIndex(null);
-                  setExamFiles([]);
-                  setHistory((prev) => {
-                    const filtered = prev.filter((item) => item.slug !== record.slug);
-                    const next = [record, ...filtered].slice(0, MAX_HISTORY_ITEMS);
-                    return next;
-                  });
+                  
+                  if (record) {
+                    setExamResults(record.results);
+                    setActiveHistoryMeta(record);
+                    setCurrentFileNames(record.fileNames);
+                    setExpandedConcept(null);
+                    setSelectedConceptIndex(null);
+                    setExamFiles([]);
+                    setHistory((prev) => {
+                      const filtered = prev.filter((item) => item.slug !== record!.slug);
+                      const next = [record!, ...filtered].slice(0, MAX_HISTORY_ITEMS);
+                      return next;
+                    });
+                  }
                   setProgress(100);
                 } else if (parsed.type === 'error') {
                   console.error('AI returned error:', parsed.error);
@@ -1094,6 +1194,31 @@ function ExamSnipeInner() {
                     </div>
                   )}
                 </div>
+
+                {/* Course Selection Dropdown */}
+                {subjects.length > 0 && (
+                  <div className="w-full max-w-2xl">
+                    <label className="block text-sm font-medium text-[var(--foreground)]/70 mb-2">
+                      Link to course (optional)
+                    </label>
+                    <select
+                      value={selectedSubjectSlug}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        console.log('Course selected:', value);
+                        setSelectedSubjectSlug(value);
+                      }}
+                      className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-3 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                    >
+                      <option value="">No course selected</option>
+                      {subjects.map((subject) => (
+                        <option key={subject.slug} value={subject.slug}>
+                          {subject.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <button
                   onClick={handleExamSnipe}

@@ -20,9 +20,9 @@ export async function POST(req: Request) {
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const system = [
       "Extract topics and core concepts strictly from the provided text blocks.",
-      "If insufficient, return the single word INSUFFICIENT and list what is missing.",
       "Return JSON only: { subject: string; topics: { name: string; summary: string; coverage: number }[] }",
       "8–16 concise topics. coverage sums ≈ 100 and never exceeds it. No external knowledge.",
+      "Always extract topics from the provided text, even if it's brief. Work with what you have.",
       preferredLanguage
         ? `CRITICAL: Write all names and summaries in ${preferredLanguage}.`
         : "IMPORTANT: Use the SAME LANGUAGE as the provided text for all names and summaries.",
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
     // Build input_text blocks by inlining text from provided documents (preferred path)
     const blocks: Array<{ type: "input_text"; text: string }> = [
       { type: "input_text", text: `Subject: ${subject}` },
-      { type: "input_text", text: "Read only the provided text below. If insufficient, return INSUFFICIENT and list what is missing." },
+      { type: "input_text", text: "Read the provided text below and extract topics from it." },
     ];
 
     let budget = 180_000; // overall character cap per request

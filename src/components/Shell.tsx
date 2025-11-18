@@ -239,51 +239,103 @@ function PomodoroTimer() {
   };
 
   return (
-    <div className="relative pomodoro-timer w-full md:w-auto">
-      {/* Main Timer Display */}
-      <div
-        className="inline-block rounded-xl transition-all duration-300"
-        style={{
-          padding: '1.5px',
-          background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-          e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-          e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-        }}
-      >
-        <button
-          onClick={() => setShowSettings(!showSettings)}
-          className="relative inline-flex w-full md:w-auto items-center justify-between md:justify-center gap-1 px-1.5 py-1.5 min-w-[100px]
-                     text-white bg-[var(--background)]/90 backdrop-blur-md
-                     transition-all duration-300 ease-out"
+    <div className="relative pomodoro-timer">
+      {/* Icon mode when not running */}
+      {!isRunning && (
+        <div
+          className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
           style={{
-            borderRadius: 'calc(0.75rem - 1.5px)',
+            padding: '1.5px',
+            background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+            e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
           }}
         >
-          <div className="flex items-center gap-1.5">
-            <span className="font-mono text-lg sm:text-xl font-bold leading-none">
-              {formatTime(timeLeft)}
-            </span>
-            <span className="text-[10px] sm:text-xs opacity-75">
-              {isBreak ? 'BREAK' : 'STUDY'}
-            </span>
-          </div>
-          <svg
-            className={`h-3 w-3 transition-transform duration-200 ${showSettings ? 'rotate-180' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.currentTarget.blur();
+            }}
+            className="relative inline-flex items-center justify-center px-1.5 py-1.5
+                       text-white
+                       bg-[var(--background)]/90 backdrop-blur-md
+                       focus:outline-none focus:ring-0 focus-visible:outline-none
+                       transition-all duration-300 ease-out"
+            style={{ 
+              outline: 'none', 
+              WebkitTapHighlightColor: 'transparent', 
+              transform: 'none !important',
+              borderRadius: '10.5px',
+              margin: 0,
+              display: 'flex',
+              height: '32px',
+              width: '32px',
+            }}
+            aria-label="Pomodoro Timer"
+            title="Pomodoro Timer"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-      </div>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
+              <path d="M12 6v6l4 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </button>
+        </div>
+      )}
+      
+      {/* Expanded mode when running */}
+      {isRunning && (
+        <div
+          className="inline-block rounded-xl transition-all duration-300"
+          style={{
+            padding: '1.5px',
+            background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+            e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+          }}
+        >
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="relative inline-flex items-center justify-between gap-1 px-1.5 py-1.5 min-w-[100px]
+                       text-white bg-[var(--background)]/90 backdrop-blur-md
+                       transition-all duration-300 ease-out"
+            style={{
+              borderRadius: 'calc(0.75rem - 1.5px)',
+            }}
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-lg sm:text-xl font-bold leading-none">
+                {formatTime(timeLeft)}
+              </span>
+              <span className="text-[10px] sm:text-xs opacity-75">
+                {isBreak ? 'BREAK' : 'STUDY'}
+              </span>
+            </div>
+            <svg
+              className={`h-3 w-3 transition-transform duration-200 ${showSettings ? 'rotate-180' : ''}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* Next Timer Play Button */}
       {showPlayButton && (
@@ -572,7 +624,6 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
   const lastMessageContentRef = useRef<string>('');
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const chatDropdownRef = useRef<HTMLDivElement>(null);
-  const chatButtonRef = useRef<HTMLButtonElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
@@ -594,9 +645,22 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
   useEffect(() => {
     const handleOpenChat = () => {
       setOpen(true);
+      setMinimized(false);
       requestAnimationFrame(() => {
         chatInputRef.current?.focus();
       });
+    };
+
+    const handleToggleChat = () => {
+      if (open) {
+        setOpen(false);
+      } else {
+        setOpen(true);
+        setMinimized(false);
+        requestAnimationFrame(() => {
+          chatInputRef.current?.focus();
+        });
+      }
     };
 
     const handleOpenChatWithMessage = (e: Event) => {
@@ -621,12 +685,14 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
     };
 
     document.addEventListener('synapse:open-chat', handleOpenChat as EventListener);
+    document.addEventListener('synapse:toggle-chat', handleToggleChat as EventListener);
     document.addEventListener('synapse:open-chat-with-message', handleOpenChatWithMessage as EventListener);
     return () => {
       document.removeEventListener('synapse:open-chat', handleOpenChat as EventListener);
+      document.removeEventListener('synapse:toggle-chat', handleToggleChat as EventListener);
       document.removeEventListener('synapse:open-chat-with-message', handleOpenChatWithMessage as EventListener);
     };
-  }, []);
+  }, [open]);
 
   // ESC key handler - always active when chat is open
   useEffect(() => {
@@ -1071,6 +1137,31 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
             router.push(`/subjects/${slug}`);
           }
         }
+      } else if (action.name === 'navigate_practice') {
+        let slug = action.params.slug;
+        if (slug && typeof window !== 'undefined') {
+          if (!slug.match(/^[a-z0-9\-_]+$/)) {
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                const exactMatch = subjects.find(s => s.name.toLowerCase() === slug.toLowerCase());
+                if (exactMatch) {
+                  slug = exactMatch.slug;
+                } else {
+                  const partialMatch = subjects.find(s => s.name.toLowerCase().includes(slug.toLowerCase()) || slug.toLowerCase().includes(s.name.toLowerCase()));
+                  if (partialMatch) {
+                    slug = partialMatch.slug;
+                  }
+                }
+              }
+            } catch {}
+          }
+          slug = slug.trim().replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+          if (slug) {
+            router.push(`/subjects/${slug}/practice`);
+          }
+        }
       } else if (action.name === 'navigate_topic') {
         let slug = action.params.slug?.trim();
         const topic = action.params.topic?.trim();
@@ -1214,6 +1305,70 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
       } else if (action.name === 'generate_course') {
         // Open course creation modal
         document.dispatchEvent(new CustomEvent('synapse:open-course-modal'));
+      } else if (action.name === 'create_course_from_text') {
+        // Create course from text description
+        const description = action.params.description || '';
+        const courseName = action.params.name || '';
+        if (!description.trim()) {
+          setMessages((m) => [...m, { role: 'assistant', content: 'Please provide a description of the course you want to create.' }]);
+          return;
+        }
+        // Show loading message
+        setMessages((m) => [...m, { role: 'assistant', content: '', isLoading: true }]);
+        // Call API to generate course from text
+        (async () => {
+          try {
+            const res = await fetch('/api/course-from-text', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ description, courseName }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (res.ok && json?.ok) {
+              // Remove loading message
+              setMessages((m) => {
+                const copy = [...m];
+                const lastIdx = copy.length - 1;
+                if (lastIdx >= 0 && copy[lastIdx].isLoading) {
+                  copy.pop();
+                }
+                return copy;
+              });
+              // Create course with the generated context
+              const finalName = json.courseName || courseName || 'New Course';
+              const courseContext = json.courseContext || description;
+              // Create empty files array and use the generated context as syllabus
+              document.dispatchEvent(new CustomEvent('synapse:create-course-with-text', { 
+                detail: { 
+                  name: finalName, 
+                  syllabus: courseContext,
+                  topics: json.topics || []
+                } 
+              }));
+            } else {
+              // Remove loading message and show error
+              setMessages((m) => {
+                const copy = [...m];
+                const lastIdx = copy.length - 1;
+                if (lastIdx >= 0 && copy[lastIdx].isLoading) {
+                  copy.pop();
+                }
+                copy.push({ role: 'assistant', content: `Failed to create course: ${json?.error || 'Unknown error'}` });
+                return copy;
+              });
+            }
+          } catch (err: any) {
+            setMessages((m) => {
+              const copy = [...m];
+              const lastIdx = copy.length - 1;
+              if (lastIdx >= 0 && copy[lastIdx].isLoading) {
+                copy.pop();
+              }
+              copy.push({ role: 'assistant', content: `Error creating course: ${err?.message || 'Unknown error'}` });
+              return copy;
+            });
+          }
+        })();
       } else if (action.name === 'set_exam_date') {
         let slug = action.params.slug?.trim();
         const dateStr = action.params.date?.trim();
@@ -1844,9 +1999,62 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
       // Gather page context (lesson content or visible text)
       let pageContext = '';
       try {
-        const el = document.querySelector('.lesson-content');
-        pageContext = el ? (el as HTMLElement).innerText : document.body.innerText;
-        pageContext = pageContext.slice(0, 8000);
+        const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+        const isSurgeLearnPhase = pathname.includes('/surge');
+        
+        // Check for Surge learn phase lesson content
+        if (isSurgeLearnPhase) {
+          // Try to find the Surge lesson card
+          const surgeLessonCard = document.querySelector('.surge-lesson-card, [data-topic]');
+          const lessonContentDiv = document.querySelector('.lesson-content');
+          
+          if (surgeLessonCard) {
+            // Extract structured lesson information
+            const currentTopic = surgeLessonCard.getAttribute('data-topic') || '';
+            const partIndex = surgeLessonCard.getAttribute('data-part-index') || '';
+            const totalParts = surgeLessonCard.getAttribute('data-total-parts') || '';
+            
+            // Get lesson header
+            const headerEl = surgeLessonCard.querySelector('h2');
+            const header = headerEl?.textContent?.trim() || '';
+            
+            // Get lesson content
+            const contentEl = lessonContentDiv || surgeLessonCard.querySelector('.lesson-content') || surgeLessonCard;
+            const content = contentEl?.innerText || contentEl?.textContent || '';
+            
+            // Build structured context for Chad
+            const surgeContext: string[] = [];
+            surgeContext.push('=== CURRENT SURGE LEARN PHASE CONTENT ===');
+            if (currentTopic) {
+              surgeContext.push(`Topic Being Learned: ${currentTopic}`);
+            }
+            if (header) {
+              surgeContext.push(`Current Lesson Part: ${header}`);
+            }
+            if (partIndex && totalParts) {
+              surgeContext.push(`Progress: Part ${parseInt(partIndex) + 1} of ${totalParts}`);
+            }
+            surgeContext.push('');
+            surgeContext.push('LESSON CONTENT:');
+            surgeContext.push(content);
+            surgeContext.push('=== END SURGE CONTENT ===');
+            
+            pageContext = surgeContext.join('\n\n');
+          } else {
+            // Fallback: try to get any visible lesson text from the page
+            const allText = document.body.innerText;
+            if (allText) {
+              pageContext = `=== SURGE LEARN PHASE ===\n${allText}`;
+            }
+          }
+        } else {
+          // For other pages, use existing logic
+          const el = document.querySelector('.lesson-content');
+          pageContext = el ? (el as HTMLElement).innerText : document.body.innerText;
+        }
+        
+        // Limit size but allow more for Surge content
+        pageContext = pageContext.slice(0, 12000);
       } catch {}
       
       // Extract system messages (context data) from messages
@@ -2030,12 +2238,10 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
     
     function handleClickOutside(event: MouseEvent) {
       const target = event.target as Node;
-      // Check if click is outside both the chat button and dropdown
+      // Check if click is outside the dropdown
       if (
         chatDropdownRef.current &&
-        chatButtonRef.current &&
-        !chatDropdownRef.current.contains(target) &&
-        !chatButtonRef.current.contains(target)
+        !chatDropdownRef.current.contains(target)
       ) {
         setOpen(false);
       }
@@ -2196,50 +2402,6 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
 
   return (
     <>
-      {/* Half-moon chat button */}
-      <div className="relative">
-         <button
-           ref={chatButtonRef}
-           onClick={() => {
-             if (!open) {
-               setOpen(true);
-               setMinimized(false);
-             } else {
-               setOpen(false);
-             }
-           }}
-           onMouseDown={(e) => {
-             e.preventDefault();
-             e.currentTarget.blur();
-           }}
-          className="relative inline-flex items-center justify-center
-                     text-white
-                     focus:outline-none focus:ring-0 focus-visible:outline-none
-                     transition-all duration-300 ease-out"
-          style={{ 
-            outline: 'none', 
-            WebkitTapHighlightColor: 'transparent',
-            width: '22.4px',
-            height: '11.2px',
-            borderRadius: '0 0 11.2px 11.2px',
-            background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-            border: 'none',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-            e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-          }}
-          aria-label="Chat"
-          title="Chat"
-        >
-        </button>
-      </div>
-
       {typeof document !== 'undefined' ? createPortal(
         <>
           <div
@@ -2552,6 +2714,15 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [authPassword, setAuthPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [surgeLogModalOpen, setSurgeLogModalOpen] = useState(false);
+  const [surgeLogRefreshKey, setSurgeLogRefreshKey] = useState(0); // Force re-render when data changes
+  const [surgeLogData, setSurgeLogData] = useState<any[]>([]); // Store surge log data in state
+  const [expandedSurgeTopics, setExpandedSurgeTopics] = useState<Set<string>>(new Set());
+  const [expandedSurgeQuestionTypes, setExpandedSurgeQuestionTypes] = useState<Set<string>>(new Set());
+  const [expandedSurgeQuestions, setExpandedSurgeQuestions] = useState<Set<string>>(new Set());
+  const [editingDate, setEditingDate] = useState<{ sessionId: string; type: 'topic' | 'question'; questionId?: string } | null>(null);
+  const [editingDateValue, setEditingDateValue] = useState<string>("");
   const infoMarkdown = `
   # Welcome to Synapse
   
@@ -2663,6 +2834,43 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('resize', updateLayout);
   }, [isIOSStandalone]);
 
+  // Load surge log data when modal opens or refresh key changes
+  useEffect(() => {
+    if (!surgeLogModalOpen) {
+      setSurgeLogData([]);
+      return;
+    }
+
+    const slugMatch = pathname?.match(/\/subjects\/([^\/]+)\/surge/);
+    if (!slugMatch) {
+      setSurgeLogData([]);
+      return;
+    }
+    const slug = slugMatch[1];
+
+    try {
+      const stored = localStorage.getItem(`atomicSubjectData:${slug}`);
+      if (stored) {
+        const data = JSON.parse(stored);
+        const surgeLog = data?.surgeLog || [];
+        console.log("SurgeLog loaded into state:", {
+          entryCount: surgeLog.length,
+          timestamps: surgeLog.map((e: any) => ({
+            sessionId: e.sessionId,
+            timestamp: e.timestamp,
+            date: new Date(e.timestamp).toISOString()
+          }))
+        });
+        setSurgeLogData(surgeLog);
+      } else {
+        setSurgeLogData([]);
+      }
+    } catch (e) {
+      console.error("Failed to load surge log:", e);
+      setSurgeLogData([]);
+    }
+  }, [surgeLogModalOpen, surgeLogRefreshKey, pathname]);
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -2751,6 +2959,32 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     window.location.href = "/";
   }
 
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().then(() => {
+        setIsFullscreen(true);
+      }).catch((err) => {
+        console.error("Error attempting to enable fullscreen:", err);
+      });
+    } else {
+      document.exitFullscreen().then(() => {
+        setIsFullscreen(false);
+      }).catch((err) => {
+        console.error("Error attempting to exit fullscreen:", err);
+      });
+    }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
   const crumbs = useMemo(() => {
     const parts = (pathname || "/").split("/").filter(Boolean);
     const items: { label: string; href: string }[] = [];
@@ -2793,7 +3027,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       {/* Main content */}
       <div className="flex min-h-screen w-full flex-col">
         {authChecked && isAuthenticated && (
-        <header className="sticky top-0 z-50 backdrop-blur supports-[backdrop-filter]:bg-[var(--background)]/70 bg-[var(--background)]" style={{ paddingTop: 'max(3px, calc(env(safe-area-inset-top, 0px) / 2))' }}>
+        <header className="sticky top-0 z-50" style={{ paddingTop: 0, backgroundColor: 'rgba(15, 18, 22, 0.92)', backdropFilter: 'blur(10px) saturate(180%)', WebkitBackdropFilter: 'blur(10px) saturate(180%)', isolation: 'isolate' }}>
           <nav className="relative flex h-14 items-center px-3 sm:px-4 gap-2">
             <div className="flex items-center gap-3 min-w-0 flex-shrink-0">
               <button
@@ -2919,14 +3153,181 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
 
-            {!isMobile && (
-              <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2 items-center gap-3">
-                <PomodoroTimer />
+            {/* Center: SURGE text on surge page */}
+            {pathname?.includes('/surge') && (
+              <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2 items-center">
+                <h1 
+                  className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider" 
+                  style={{ 
+                    fontFamily: 'var(--font-orbitron), sans-serif',
+                    fontWeight: 700,
+                    textShadow: '0 0 20px rgba(0, 229, 255, 0.4), 0 0 40px rgba(255, 45, 150, 0.2)',
+                    letterSpacing: '0.15em'
+                  }}
+                >
+                  SURGE
+                </h1>
               </div>
             )}
 
             <div className="flex items-center gap-2 ml-auto">
+              {!isMobile && (
+                <>
+                  {/* Chat button */}
+                  <div
+                    className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                    style={{
+                      padding: '1.5px',
+                      background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                    }}
+                  >
+                    <button
+                      onClick={() => {
+                        document.dispatchEvent(new CustomEvent('synapse:toggle-chat'));
+                      }}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.blur();
+                      }}
+                      className="relative inline-flex items-center justify-center px-1.5 py-1.5
+                                 text-white
+                                 bg-[var(--background)]/90 backdrop-blur-md
+                                 focus:outline-none focus:ring-0 focus-visible:outline-none
+                                 transition-all duration-300 ease-out"
+                      style={{ 
+                        outline: 'none', 
+                        WebkitTapHighlightColor: 'transparent', 
+                        transform: 'none !important',
+                        borderRadius: '10.5px',
+                        margin: 0,
+                        display: 'flex',
+                        height: '32px',
+                        width: '32px',
+                      }}
+                      aria-label="Toggle chat"
+                      title="Toggle chat"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      </svg>
+                    </button>
+                  </div>
+                  {/* SurgeLog button - only for Tester subscription on surge page */}
+                  {subscriptionLevel === "Tester" && pathname?.includes('/surge') && (
+                    <div
+                      className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                      style={{
+                        padding: '1.5px',
+                        background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                        e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                      }}
+                    >
+                      <button
+                        onClick={() => {
+                          setSurgeLogModalOpen(true);
+                        }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.currentTarget.blur();
+                        }}
+                        className="relative inline-flex items-center justify-center px-1.5 py-1.5
+                                   text-white
+                                   bg-[var(--background)]/90 backdrop-blur-md
+                                   focus:outline-none focus:ring-0 focus-visible:outline-none
+                                   transition-all duration-300 ease-out"
+                        style={{ 
+                          outline: 'none', 
+                          WebkitTapHighlightColor: 'transparent', 
+                          transform: 'none !important',
+                          borderRadius: '10.5px',
+                          margin: 0,
+                          display: 'flex',
+                          height: '32px',
+                          width: '32px',
+                        }}
+                        aria-label="Surge Log"
+                        title="Surge Log"
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+                  {/* Pomodoro Timer */}
+                  <PomodoroTimer />
+                </>
+              )}
               <div className="hidden md:flex items-center gap-2">
+                {/* Fullscreen button */}
+                <div
+                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
+                  style={{
+                    padding: '1.5px',
+                    background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
+                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
+                  }}
+                >
+                  <button
+                    onClick={toggleFullscreen}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.currentTarget.blur();
+                    }}
+                    className="relative inline-flex items-center justify-center px-1.5 py-1.5
+                               text-white
+                               bg-[var(--background)]/90 backdrop-blur-md
+                               focus:outline-none focus:ring-0 focus-visible:outline-none
+                               transition-all duration-300 ease-out"
+                    style={{ 
+                      outline: 'none', 
+                      WebkitTapHighlightColor: 'transparent', 
+                      transform: 'none !important',
+                      borderRadius: '10.5px',
+                      margin: 0,
+                      display: 'flex',
+                      height: '32px',
+                      width: '32px',
+                    }}
+                    aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                    title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+                  >
+                    {isFullscreen ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+                      </svg>
+                    ) : (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
                 {/* Info button */}
                 <div
                   className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
@@ -3292,6 +3693,797 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <LessonBody body={sanitizeLessonBody(infoMarkdown)} />
         </div>
       </Modal>
+
+      {/* SurgeLog Modal */}
+      {surgeLogModalOpen && (() => {
+        // Extract slug from pathname
+        const slugMatch = pathname?.match(/\/subjects\/([^\/]+)\/surge/);
+        if (!slugMatch) return null;
+        const slug = slugMatch[1];
+        
+        // Use the surgeLogData state (loaded via useEffect)
+        const surgeLog = surgeLogData;
+
+        // Group all quiz results by topic across all sessions
+        const allQuizResults: Array<{ entry: any; result: any; sessionDate: string }> = [];
+        surgeLog.forEach((entry: any) => {
+          if (entry.quizResults && Array.isArray(entry.quizResults) && entry.quizResults.length > 0) {
+            entry.quizResults.forEach((result: any) => {
+              allQuizResults.push({
+                entry,
+                result,
+                sessionDate: new Date(entry.timestamp).toLocaleDateString(),
+              });
+            });
+          }
+        });
+
+        // Group by topic
+        const groupedByTopic: Record<string, Array<{ entry: any; result: any; sessionDate: string }>> = {};
+        allQuizResults.forEach((item) => {
+          const topic = item.result.topic || item.entry.newTopic || "Unknown";
+          if (!groupedByTopic[topic]) {
+            groupedByTopic[topic] = [];
+          }
+          groupedByTopic[topic].push(item);
+        });
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6">
+            <div className="w-full max-w-2xl rounded-2xl border border-[var(--foreground)]/30 bg-[var(--background)]/95 p-6 shadow-2xl">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-[var(--foreground)]">
+                    Surge Log
+                  </h2>
+                  <p className="text-xs text-[var(--foreground)]/60">
+                    Your Surge session history with quiz results. Entries persist per course.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      const slugMatch = pathname?.match(/\/subjects\/([^\/]+)\/surge/);
+                      if (!slugMatch) return;
+                      const slug = slugMatch[1];
+                      
+                      if (confirm("Are you sure you want to clear all Surge logs for this course? This action cannot be undone.")) {
+                        try {
+                          const stored = localStorage.getItem(`atomicSubjectData:${slug}`);
+                          if (stored) {
+                            const data = JSON.parse(stored);
+                            data.surgeLog = [];
+                            localStorage.setItem(`atomicSubjectData:${slug}`, JSON.stringify(data));
+                            
+                            // Also sync to server if authenticated
+                            if (isAuthenticated) {
+                              try {
+                                await fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  credentials: 'include',
+                                  body: JSON.stringify({ data })
+                                });
+                              } catch (serverError) {
+                                console.warn("Failed to sync cleared surge log to server:", serverError);
+                                // Continue anyway - local clear is done
+                              }
+                            }
+                            
+                            setSurgeLogModalOpen(false);
+                            // Refresh the page to update the UI
+                            window.location.reload();
+                          }
+                        } catch (e) {
+                          console.error("Failed to clear surge log:", e);
+                          alert("Failed to clear surge log. Check console for details.");
+                        }
+                      }
+                    }}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+                    aria-label="Clear surge logs"
+                  >
+                    Clear Logs
+                  </button>
+                  <button
+                    onClick={() => setSurgeLogModalOpen(false)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors"
+                    aria-label="Close surge log"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+              <div className="mt-4 max-h-[60vh] overflow-y-auto rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4 text-sm leading-relaxed text-[var(--foreground)] space-y-2">
+                {Object.keys(groupedByTopic).length > 0 ? (
+                  Object.entries(groupedByTopic)
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([topicName, items]) => {
+                      const isExpanded = expandedSurgeTopics.has(topicName);
+                      const avgGrade = items.reduce((sum, item) => sum + (item.result.grade || 0), 0) / items.length;
+                      const latestItem = items.sort((a, b) => b.entry.timestamp - a.entry.timestamp)[0];
+
+                      return (
+                        <div
+                          key={topicName}
+                          className="rounded-lg border border-[var(--foreground)]/15 bg-[var(--background)]/80 overflow-hidden"
+                        >
+                          {/* Topic Header - Clickable */}
+                          <button
+                            onClick={() => {
+                              setExpandedSurgeTopics(prev => {
+                                const next = new Set(prev);
+                                if (next.has(topicName)) {
+                                  next.delete(topicName);
+                                } else {
+                                  next.add(topicName);
+                                }
+                                return next;
+                              });
+                            }}
+                            className="w-full flex items-center justify-between p-4 hover:bg-[var(--background)]/60 transition-colors"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className={`text-base font-semibold text-[var(--foreground)]`}>
+                                {topicName}
+                              </div>
+                              <div className="px-2 py-1 rounded-full text-xs font-medium bg-[var(--accent-cyan)]/20 text-[var(--accent-cyan)]">
+                                {items.length} question{items.length !== 1 ? 's' : ''}
+                              </div>
+                              <div className={`px-2 py-1 rounded text-xs font-bold ${
+                                avgGrade >= 8 ? 'bg-green-500/20 text-green-400' :
+                                avgGrade >= 6 ? 'bg-yellow-500/20 text-yellow-400' :
+                                'bg-red-500/20 text-red-400'
+                              }`}>
+                                Avg: {avgGrade.toFixed(1)}/10
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {subscriptionLevel === "Tester" && editingDate?.sessionId === latestItem.entry.sessionId && editingDate?.type === 'topic' ? (
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="date"
+                                    value={editingDateValue}
+                                    onChange={(e) => setEditingDateValue(e.target.value)}
+                                    onBlur={() => {
+                                      if (editingDateValue) {
+                                        // Parse date string (YYYY-MM-DD) and create UTC date at midnight
+                                        const [year, month, day] = editingDateValue.split('-').map(Number);
+                                        const newTimestamp = new Date(Date.UTC(year, month - 1, day)).getTime();
+                                        const slugMatch = pathname?.match(/\/subjects\/([^\/]+)\/surge/);
+                                        if (slugMatch) {
+                                          const slug = slugMatch[1];
+                                          try {
+                                            const stored = localStorage.getItem(`atomicSubjectData:${slug}`);
+                                            if (stored) {
+                                              const data = JSON.parse(stored);
+                                              const surgeLog = data?.surgeLog || [];
+                                              // Update ALL entries with this sessionId (in case there are duplicates)
+                                              let updated = false;
+                                              surgeLog.forEach((e: any, idx: number) => {
+                                                if (e.sessionId === latestItem.entry.sessionId) {
+                                                  surgeLog[idx].timestamp = newTimestamp;
+                                                  updated = true;
+                                                }
+                                              });
+                                              
+                                              if (updated) {
+                                                console.log("=== DATE UPDATE DEBUG START ===");
+                                                console.log("Editing sessionId:", latestItem.entry.sessionId);
+                                                console.log("New timestamp:", newTimestamp, "New date:", new Date(newTimestamp).toISOString());
+                                                console.log("1. Before save - surgeLog entries:", JSON.stringify(surgeLog.map((e: any) => ({
+                                                  sessionId: e.sessionId,
+                                                  timestamp: e.timestamp,
+                                                  date: new Date(e.timestamp).toISOString()
+                                                })), null, 2));
+                                                
+                                                localStorage.setItem(`atomicSubjectData:${slug}`, JSON.stringify(data));
+                                                
+                                                // Verify the save by reading it back immediately
+                                                const verify = localStorage.getItem(`atomicSubjectData:${slug}`);
+                                                if (verify) {
+                                                  const verifyData = JSON.parse(verify);
+                                                  console.log("2. After save - localStorage contains:", JSON.stringify(verifyData?.surgeLog?.map((e: any) => ({
+                                                    sessionId: e.sessionId,
+                                                    timestamp: e.timestamp,
+                                                    date: new Date(e.timestamp).toISOString()
+                                                  })), null, 2));
+                                                  
+                                                  const verifyEntry = verifyData?.surgeLog?.find((e: any) => e.sessionId === latestItem.entry.sessionId);
+                                                  console.log("3. Verified entry:", {
+                                                    sessionId: latestItem.entry.sessionId,
+                                                    newTimestamp,
+                                                    newDate: new Date(newTimestamp).toISOString(),
+                                                    verifiedTimestamp: verifyEntry?.timestamp,
+                                                    verifiedDate: verifyEntry ? new Date(verifyEntry.timestamp).toISOString() : "not found",
+                                                    match: verifyEntry?.timestamp === newTimestamp
+                                                  });
+                                                  
+                                                  // Also check all entries to see if any were affected
+                                                  const allEntries = verifyData?.surgeLog || [];
+                                                  console.log("4. All entries after save:", JSON.stringify(allEntries.map((e: any, idx: number) => ({
+                                                    index: idx,
+                                                    sessionId: e.sessionId,
+                                                    timestamp: e.timestamp,
+                                                    date: new Date(e.timestamp).toISOString(),
+                                                    isEdited: e.sessionId === latestItem.entry.sessionId
+                                                  })), null, 2));
+                                                  
+                                                  // Check what getLastSurgeSession would return
+                                                  const latest = allEntries.reduce((latest: any, entry: any) => {
+                                                    return entry.timestamp > latest.timestamp ? entry : latest;
+                                                  }, allEntries[0]);
+                                                  console.log("5. What getLastSurgeSession would return:", {
+                                                    sessionId: latest?.sessionId,
+                                                    timestamp: latest?.timestamp,
+                                                    date: latest ? new Date(latest.timestamp).toISOString() : "none",
+                                                    isEdited: latest?.sessionId === latestItem.entry.sessionId
+                                                  });
+                                                } else {
+                                                  console.error("5. Failed to read back from localStorage!");
+                                                }
+                                                
+                                                console.log("=== DATE UPDATE DEBUG END ===");
+                                                
+                                                // Dispatch event to notify surge page to reload lastSurge
+                                                window.dispatchEvent(new CustomEvent('surgeLogDateUpdated', { detail: { slug } }));
+                                                // Force a re-render by incrementing the refresh key
+                                                setSurgeLogRefreshKey(prev => prev + 1);
+                                              } else {
+                                                console.error("Failed to find entry with sessionId:", latestItem.entry.sessionId);
+                                              }
+                                            }
+                                          } catch (e) {
+                                            console.error("Failed to update date:", e);
+                                          }
+                                        }
+                                        setEditingDate(null);
+                                        setEditingDateValue("");
+                                      }
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.currentTarget.blur();
+                                      } else if (e.key === "Escape") {
+                                        setEditingDate(null);
+                                        setEditingDateValue("");
+                                      }
+                                    }}
+                                    className="text-xs px-2 py-1 rounded border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-cyan)]"
+                                    autoFocus
+                                  />
+                                </div>
+                              ) : (
+                                <div 
+                                  className={`text-xs text-[var(--foreground)]/50 ${subscriptionLevel === "Tester" ? "cursor-pointer hover:text-[var(--accent-cyan)]/70 transition-colors" : ""}`}
+                                  onClick={() => {
+                                    if (subscriptionLevel === "Tester") {
+                                      const dateValue = new Date(latestItem.entry.timestamp).toISOString().split('T')[0];
+                                      setEditingDate({ sessionId: latestItem.entry.sessionId, type: 'topic' });
+                                      setEditingDateValue(dateValue);
+                                    }
+                                  }}
+                                  title={subscriptionLevel === "Tester" ? "Click to edit date" : ""}
+                                >
+                                  {latestItem.sessionDate}
+                                </div>
+                              )}
+                              <svg
+                                className={`w-4 h-4 text-[var(--foreground)]/60 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
+                            </div>
+                          </button>
+
+                          {/* Questions List - Grouped by Type */}
+                          {isExpanded && (() => {
+                            // Group items by question type (MC vs Harder)
+                            const mcQuestions = items.filter(item => item.result.stage === "mc");
+                            const harderQuestions = items.filter(item => item.result.stage === "harder");
+                            
+                            return (
+                              <div className="border-t border-[var(--foreground)]/10 p-4 space-y-3">
+                                {/* Multiple Choice Questions */}
+                                {mcQuestions.length > 0 && (() => {
+                                  const questionTypeKey = `${topicName}-mc`;
+                                  const isTypeExpanded = expandedSurgeQuestionTypes.has(questionTypeKey);
+                                  const mcAvgGrade = mcQuestions.reduce((sum, item) => sum + (item.result.grade || 0), 0) / mcQuestions.length;
+                                  
+                                  return (
+                                    <div className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/60 overflow-hidden">
+                                      <button
+                                        onClick={() => {
+                                          setExpandedSurgeQuestionTypes(prev => {
+                                            const next = new Set(prev);
+                                            if (next.has(questionTypeKey)) {
+                                              next.delete(questionTypeKey);
+                                            } else {
+                                              next.add(questionTypeKey);
+                                            }
+                                            return next;
+                                          });
+                                        }}
+                                        className="w-full flex items-center justify-between p-3 hover:bg-[var(--background)]/80 transition-colors text-left"
+                                      >
+                                        <div className="flex items-center gap-3">
+                                          <div className="text-sm font-semibold text-[var(--foreground)]">
+                                            Multiple Choice Questions
+                                          </div>
+                                          <div className="px-2 py-1 rounded-full text-xs font-medium bg-[var(--accent-cyan)]/20 text-[var(--accent-cyan)]">
+                                            {mcQuestions.length} question{mcQuestions.length !== 1 ? 's' : ''}
+                                          </div>
+                                          <div className={`px-2 py-1 rounded text-xs font-bold ${
+                                            mcAvgGrade >= 8 ? 'bg-green-500/20 text-green-400' :
+                                            mcAvgGrade >= 6 ? 'bg-yellow-500/20 text-yellow-400' :
+                                            'bg-red-500/20 text-red-400'
+                                          }`}>
+                                            Avg: {mcAvgGrade.toFixed(1)}/10
+                                          </div>
+                                        </div>
+                                        <svg
+                                          className={`w-4 h-4 text-[var(--foreground)]/60 transition-transform ${isTypeExpanded ? 'rotate-180' : ''}`}
+                                          fill="none"
+                                          viewBox="0 0 24 24"
+                                          stroke="currentColor"
+                                        >
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                      </button>
+                                      
+                                      {isTypeExpanded && (
+                                        <div className="border-t border-[var(--foreground)]/10 p-3 space-y-2">
+                                          {mcQuestions
+                                            .sort((a, b) => b.entry.timestamp - a.entry.timestamp)
+                                            .map((item, idx) => {
+                                              const questionId = `${topicName}-mc-${idx}-${item.result.question}`;
+                                              const isQuestionExpanded = expandedSurgeQuestions.has(questionId);
+                                              const questionPreview = item.result.question
+                                                ? item.result.question
+                                                    .replace(/◊/g, '')
+                                                    .replace(/<[^>]*>/g, '')
+                                                    .replace(/\*\*/g, '')
+                                                    .replace(/#{1,6}\s/g, '')
+                                                    .trim()
+                                                    .slice(0, 100)
+                                                : 'No question recorded';
+                                              
+                                              return (
+                                                <div
+                                                  key={questionId}
+                                                  className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/50 overflow-hidden"
+                                                >
+                                                  <button
+                                                    onClick={() => {
+                                                      setExpandedSurgeQuestions(prev => {
+                                                        const next = new Set(prev);
+                                                        if (next.has(questionId)) {
+                                                          next.delete(questionId);
+                                                        } else {
+                                                          next.add(questionId);
+                                                        }
+                                                        return next;
+                                                      });
+                                                    }}
+                                                    className="w-full flex items-center justify-between p-3 hover:bg-[var(--background)]/70 transition-colors text-left"
+                                                  >
+                                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                      <div className={`px-2 py-1 rounded text-xs font-bold flex-shrink-0 ${
+                                                        (item.result.grade || 0) >= 8 ? 'bg-green-500/20 text-green-400' :
+                                                        (item.result.grade || 0) >= 6 ? 'bg-yellow-500/20 text-yellow-400' :
+                                                        'bg-red-500/20 text-red-400'
+                                                      }`}>
+                                                        {(item.result.grade || 0)}/10
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                        <div className="text-sm text-[var(--foreground)]/90 truncate">
+                                                          {questionPreview}
+                                                          {questionPreview.length >= 100 && '...'}
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                                      {subscriptionLevel === "Tester" && editingDate?.sessionId === item.entry.sessionId && editingDate?.type === 'question' && editingDate?.questionId === questionId ? (
+                                                        <div className="flex items-center gap-1">
+                                                          <input
+                                                            type="date"
+                                                            value={editingDateValue}
+                                                            onChange={(e) => setEditingDateValue(e.target.value)}
+                                                            onBlur={() => {
+                                                              if (editingDateValue) {
+                                                                // Parse date string (YYYY-MM-DD) and create UTC date at midnight
+                                        const [year, month, day] = editingDateValue.split('-').map(Number);
+                                        const newTimestamp = new Date(Date.UTC(year, month - 1, day)).getTime();
+                                                                const slugMatch = pathname?.match(/\/subjects\/([^\/]+)\/surge/);
+                                                                if (slugMatch) {
+                                                                  const slug = slugMatch[1];
+                                                                  try {
+                                                                    const stored = localStorage.getItem(`atomicSubjectData:${slug}`);
+                                                                    if (stored) {
+                                                                      const data = JSON.parse(stored);
+                                                                      const surgeLog = data?.surgeLog || [];
+                                                                      // Update ALL entries with this sessionId
+                                                                      let updated = false;
+                                                                      surgeLog.forEach((e: any, idx: number) => {
+                                                                        if (e.sessionId === item.entry.sessionId) {
+                                                                          surgeLog[idx].timestamp = newTimestamp;
+                                                                          updated = true;
+                                                                        }
+                                                                      });
+                                                                      
+                                                                      if (updated) {
+                                                                        localStorage.setItem(`atomicSubjectData:${slug}`, JSON.stringify(data));
+                                                                        // Dispatch event to notify surge page to reload lastSurge
+                                                                        window.dispatchEvent(new CustomEvent('surgeLogDateUpdated', { detail: { slug } }));
+                                                                        // Force a re-render by incrementing the refresh key
+                                                                        setSurgeLogRefreshKey(prev => prev + 1);
+                                                                      }
+                                                                    }
+                                                                  } catch (e) {
+                                                                    console.error("Failed to update date:", e);
+                                                                  }
+                                                                }
+                                                                setEditingDate(null);
+                                                                setEditingDateValue("");
+                                                              }
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                              if (e.key === "Enter") {
+                                                                e.currentTarget.blur();
+                                                              } else if (e.key === "Escape") {
+                                                                setEditingDate(null);
+                                                                setEditingDateValue("");
+                                                              }
+                                                            }}
+                                                            className="text-xs px-2 py-1 rounded border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-cyan)]"
+                                                            autoFocus
+                                                          />
+                                                        </div>
+                                                      ) : (
+                                                        <div 
+                                                          className={`text-xs text-[var(--foreground)]/50 ${subscriptionLevel === "Tester" ? "cursor-pointer hover:text-[var(--accent-cyan)]/70 transition-colors" : ""}`}
+                                                          onClick={() => {
+                                                            if (subscriptionLevel === "Tester") {
+                                                              const dateValue = new Date(item.entry.timestamp).toISOString().split('T')[0];
+                                                              setEditingDate({ sessionId: item.entry.sessionId, type: 'question', questionId });
+                                                              setEditingDateValue(dateValue);
+                                                            }
+                                                          }}
+                                                          title={subscriptionLevel === "Tester" ? "Click to edit date" : ""}
+                                                        >
+                                                          {item.sessionDate}
+                                                        </div>
+                                                      )}
+                                                      <svg
+                                                        className={`w-4 h-4 text-[var(--foreground)]/60 transition-transform flex-shrink-0 ${isQuestionExpanded ? 'rotate-180' : ''}`}
+                                                        fill="none"
+                                                        viewBox="0 0 24 24"
+                                                        stroke="currentColor"
+                                                      >
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                      </svg>
+                                                    </div>
+                                                  </button>
+                                                  
+                                                  {isQuestionExpanded && (
+                                                    <div className="border-t border-[var(--foreground)]/10 p-4 space-y-3">
+                                                      {item.result.question && (
+                                                        <div>
+                                                          <div className="text-xs font-medium text-[var(--foreground)]/70 uppercase tracking-wide mb-2">
+                                                            Question
+                                                          </div>
+                                                          <div className="text-sm bg-[var(--background)]/80 p-3 rounded border border-[var(--foreground)]/5">
+                                                            <LessonBody body={sanitizeLessonBody(item.result.question)} />
+                                                          </div>
+                                                        </div>
+                                                      )}
+                                                      {item.result.explanation && (
+                                                        <div className="pt-2 border-t border-[var(--foreground)]/10">
+                                                          <div className="text-xs font-medium text-[var(--foreground)]/70 uppercase tracking-wide mb-2">
+                                                            Explanation
+                                                          </div>
+                                                          <div className="text-sm bg-[var(--background)]/80 p-3 rounded border border-[var(--foreground)]/5">
+                                                            <LessonBody body={sanitizeLessonBody(item.result.explanation)} />
+                                                          </div>
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              );
+                                            })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                                
+                                {/* Harder/Quiz Questions */}
+                                {harderQuestions.length > 0 && (() => {
+                                  const questionTypeKey = `${topicName}-harder`;
+                                  const isTypeExpanded = expandedSurgeQuestionTypes.has(questionTypeKey);
+                                  const harderAvgGrade = harderQuestions.reduce((sum, item) => sum + (item.result.grade || 0), 0) / harderQuestions.length;
+                                  
+                                  return (
+                                    <div className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/60 overflow-hidden">
+                                      <button
+                                        onClick={() => {
+                                          setExpandedSurgeQuestionTypes(prev => {
+                                            const next = new Set(prev);
+                                            if (next.has(questionTypeKey)) {
+                                              next.delete(questionTypeKey);
+                                            } else {
+                                              next.add(questionTypeKey);
+                                            }
+                                            return next;
+                                          });
+                                        }}
+                                        className="w-full flex items-center justify-between p-3 hover:bg-[var(--background)]/80 transition-colors text-left"
+                                      >
+                                        <div className="flex items-center gap-3">
+                                          <div className="text-sm font-semibold text-[var(--foreground)]">
+                                            Quiz Questions
+                                          </div>
+                                          <div className="px-2 py-1 rounded-full text-xs font-medium bg-[var(--accent-pink)]/20 text-[var(--accent-pink)]">
+                                            {harderQuestions.length} question{harderQuestions.length !== 1 ? 's' : ''}
+                                          </div>
+                                          <div className={`px-2 py-1 rounded text-xs font-bold ${
+                                            harderAvgGrade >= 8 ? 'bg-green-500/20 text-green-400' :
+                                            harderAvgGrade >= 6 ? 'bg-yellow-500/20 text-yellow-400' :
+                                            'bg-red-500/20 text-red-400'
+                                          }`}>
+                                            Avg: {harderAvgGrade.toFixed(1)}/10
+                                          </div>
+                                        </div>
+                                        <svg
+                                          className={`w-4 h-4 text-[var(--foreground)]/60 transition-transform ${isTypeExpanded ? 'rotate-180' : ''}`}
+                                          fill="none"
+                                          viewBox="0 0 24 24"
+                                          stroke="currentColor"
+                                        >
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                      </button>
+                                      
+                                      {isTypeExpanded && (
+                                        <div className="border-t border-[var(--foreground)]/10 p-3 space-y-2">
+                                          {harderQuestions
+                                            .sort((a, b) => b.entry.timestamp - a.entry.timestamp)
+                                            .map((item, idx) => {
+                                              const questionId = `${topicName}-harder-${idx}-${item.result.question}`;
+                                              const isQuestionExpanded = expandedSurgeQuestions.has(questionId);
+                                              const questionPreview = item.result.question
+                                                ? item.result.question
+                                                    .replace(/◊/g, '')
+                                                    .replace(/<[^>]*>/g, '')
+                                                    .replace(/\*\*/g, '')
+                                                    .replace(/#{1,6}\s/g, '')
+                                                    .trim()
+                                                    .slice(0, 100)
+                                                : 'No question recorded';
+                                              
+                                              return (
+                                                <div
+                                                  key={questionId}
+                                                  className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/50 overflow-hidden"
+                                                >
+                                                  <button
+                                                    onClick={() => {
+                                                      setExpandedSurgeQuestions(prev => {
+                                                        const next = new Set(prev);
+                                                        if (next.has(questionId)) {
+                                                          next.delete(questionId);
+                                                        } else {
+                                                          next.add(questionId);
+                                                        }
+                                                        return next;
+                                                      });
+                                                    }}
+                                                    className="w-full flex items-center justify-between p-3 hover:bg-[var(--background)]/70 transition-colors text-left"
+                                                  >
+                                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                      <div className={`px-2 py-1 rounded text-xs font-bold flex-shrink-0 ${
+                                                        (item.result.grade || 0) >= 8 ? 'bg-green-500/20 text-green-400' :
+                                                        (item.result.grade || 0) >= 6 ? 'bg-yellow-500/20 text-yellow-400' :
+                                                        'bg-red-500/20 text-red-400'
+                                                      }`}>
+                                                        {(item.result.grade || 0)}/10
+                                                      </div>
+                                                      <div className="flex-1 min-w-0">
+                                                        <div className="text-sm text-[var(--foreground)]/90 truncate">
+                                                          {questionPreview}
+                                                          {questionPreview.length >= 100 && '...'}
+                                                        </div>
+                                                      </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                                      {subscriptionLevel === "Tester" && editingDate?.sessionId === item.entry.sessionId && editingDate?.type === 'question' && editingDate?.questionId === questionId ? (
+                                                        <div className="flex items-center gap-1">
+                                                          <input
+                                                            type="date"
+                                                            value={editingDateValue}
+                                                            onChange={(e) => setEditingDateValue(e.target.value)}
+                                                            onBlur={() => {
+                                                              if (editingDateValue) {
+                                                                // Parse date string (YYYY-MM-DD) and create UTC date at midnight
+                                        const [year, month, day] = editingDateValue.split('-').map(Number);
+                                        const newTimestamp = new Date(Date.UTC(year, month - 1, day)).getTime();
+                                                                const slugMatch = pathname?.match(/\/subjects\/([^\/]+)\/surge/);
+                                                                if (slugMatch) {
+                                                                  const slug = slugMatch[1];
+                                                                  try {
+                                                                    const stored = localStorage.getItem(`atomicSubjectData:${slug}`);
+                                                                    if (stored) {
+                                                                      const data = JSON.parse(stored);
+                                                                      const surgeLog = data?.surgeLog || [];
+                                                                      // Update ALL entries with this sessionId
+                                                                      let updated = false;
+                                                                      surgeLog.forEach((e: any, idx: number) => {
+                                                                        if (e.sessionId === item.entry.sessionId) {
+                                                                          surgeLog[idx].timestamp = newTimestamp;
+                                                                          updated = true;
+                                                                        }
+                                                                      });
+                                                                      
+                                                                      if (updated) {
+                                                                        localStorage.setItem(`atomicSubjectData:${slug}`, JSON.stringify(data));
+                                                                        // Dispatch event to notify surge page to reload lastSurge
+                                                                        window.dispatchEvent(new CustomEvent('surgeLogDateUpdated', { detail: { slug } }));
+                                                                        // Force a re-render by incrementing the refresh key
+                                                                        setSurgeLogRefreshKey(prev => prev + 1);
+                                                                      }
+                                                                    }
+                                                                  } catch (e) {
+                                                                    console.error("Failed to update date:", e);
+                                                                  }
+                                                                }
+                                                                setEditingDate(null);
+                                                                setEditingDateValue("");
+                                                              }
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                              if (e.key === "Enter") {
+                                                                e.currentTarget.blur();
+                                                              } else if (e.key === "Escape") {
+                                                                setEditingDate(null);
+                                                                setEditingDateValue("");
+                                                              }
+                                                            }}
+                                                            className="text-xs px-2 py-1 rounded border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-cyan)]"
+                                                            autoFocus
+                                                          />
+                                                        </div>
+                                                      ) : (
+                                                        <div 
+                                                          className={`text-xs text-[var(--foreground)]/50 ${subscriptionLevel === "Tester" ? "cursor-pointer hover:text-[var(--accent-cyan)]/70 transition-colors" : ""}`}
+                                                          onClick={() => {
+                                                            if (subscriptionLevel === "Tester") {
+                                                              const dateValue = new Date(item.entry.timestamp).toISOString().split('T')[0];
+                                                              setEditingDate({ sessionId: item.entry.sessionId, type: 'question', questionId });
+                                                              setEditingDateValue(dateValue);
+                                                            }
+                                                          }}
+                                                          title={subscriptionLevel === "Tester" ? "Click to edit date" : ""}
+                                                        >
+                                                          {item.sessionDate}
+                                                        </div>
+                                                      )}
+                                                      <svg
+                                                        className={`w-4 h-4 text-[var(--foreground)]/60 transition-transform flex-shrink-0 ${isQuestionExpanded ? 'rotate-180' : ''}`}
+                                                        fill="none"
+                                                        viewBox="0 0 24 24"
+                                                        stroke="currentColor"
+                                                      >
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                      </svg>
+                                                    </div>
+                                                  </button>
+                                                  
+                                                  {isQuestionExpanded && (
+                                                    <div className="border-t border-[var(--foreground)]/10 p-4 space-y-3">
+                                                      {item.result.question && (
+                                                        <div>
+                                                          <div className="text-xs font-medium text-[var(--foreground)]/70 uppercase tracking-wide mb-2">
+                                                            Question
+                                                          </div>
+                                                          <div className="text-sm bg-[var(--background)]/80 p-3 rounded border border-[var(--foreground)]/5">
+                                                            <LessonBody body={sanitizeLessonBody(item.result.question)} />
+                                                          </div>
+                                                        </div>
+                                                      )}
+                                                      {item.result.answer && (
+                                                        <div>
+                                                          <div className="text-xs font-medium text-[var(--foreground)]/70 uppercase tracking-wide mb-2">
+                                                            Your Answer
+                                                          </div>
+                                                          <div className="text-sm bg-[var(--background)]/80 p-3 rounded border border-[var(--foreground)]/5 italic">
+                                                            {item.result.answer}
+                                                          </div>
+                                                        </div>
+                                                      )}
+                                                      {item.result.correctAnswer && (
+                                                        <div>
+                                                          <div className="text-xs font-medium text-[var(--foreground)]/70 uppercase tracking-wide mb-2">
+                                                            Correct Answer
+                                                          </div>
+                                                          <div className="text-sm bg-[var(--background)]/80 p-3 rounded border border-[var(--foreground)]/5">
+                                                            {item.result.correctAnswer}
+                                                          </div>
+                                                        </div>
+                                                      )}
+                                                      {item.result.explanation && (
+                                                        <div className="pt-2 border-t border-[var(--foreground)]/10">
+                                                          <div className="text-xs font-medium text-[var(--foreground)]/70 uppercase tracking-wide mb-2">
+                                                            Explanation
+                                                          </div>
+                                                          <div className="text-sm bg-[var(--background)]/80 p-3 rounded border border-[var(--foreground)]/5">
+                                                            <LessonBody body={sanitizeLessonBody(item.result.explanation)} />
+                                                          </div>
+                                                        </div>
+                                                      )}
+                                                      {item.result.assessment && (
+                                                        <div className="pt-2 border-t border-[var(--foreground)]/10">
+                                                          <div className="text-xs font-medium text-[var(--foreground)]/70 uppercase tracking-wide mb-2">
+                                                            Assessment
+                                                          </div>
+                                                          <div className="text-sm text-[var(--foreground)]/80">
+                                                            {item.result.assessment}
+                                                          </div>
+                                                        </div>
+                                                      )}
+                                                      {item.result.whatsGood && (
+                                                        <div className="pt-2 border-t border-[var(--foreground)]/10">
+                                                          <div className="text-xs font-medium text-[var(--foreground)]/70 uppercase tracking-wide mb-2">
+                                                            What's Good
+                                                          </div>
+                                                          <div className="text-sm text-green-400/80">
+                                                            {item.result.whatsGood}
+                                                          </div>
+                                                        </div>
+                                                      )}
+                                                      {item.result.whatsBad && (
+                                                        <div className="pt-2 border-t border-[var(--foreground)]/10">
+                                                          <div className="text-xs font-medium text-[var(--foreground)]/70 uppercase tracking-wide mb-2">
+                                                            What Needs Improvement
+                                                          </div>
+                                                          <div className="text-sm text-red-400/80">
+                                                            {item.result.whatsBad}
+                                                          </div>
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              );
+                                            })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })
+                ) : (
+                  <div className="text-center py-8 text-[var(--foreground)]/60">
+                    <div className="text-lg mb-2">🧠</div>
+                    <div className="font-medium mb-1">No Surge Data Yet</div>
+                    <div className="text-sm">
+                      Complete a Surge session to see your quiz results and history here.
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
     </>

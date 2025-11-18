@@ -1,6 +1,6 @@
 import type { LessonMetadata } from "@/types/lesson";
 
-export type TopicMeta = { name: string; summary: string; coverage: number };
+export type TopicMeta = { name: string; summary: string };
 export type QuizResult = { correct: boolean; explanation: string; hint?: string; fullSolution?: string };
 export type LessonFlashcard = {
   prompt: string;
@@ -39,6 +39,35 @@ export type ReviewSchedule = {
   reviews: number; // count of reviews
 };
 
+export type SurgeLogEntry = {
+  sessionId: string;
+  timestamp: number;
+  repeatedTopics: Array<{
+    topic: string;
+    questions: Array<{ question: string; answer: string; grade: number }>;
+    averageScore: number;
+  }>;
+  newTopic: string;
+  newTopicLesson: string; // The lesson content generated
+  quizResults: Array<{
+    question: string;
+    answer: string;
+    grade: number;
+    topic: string;
+    correctAnswer?: string;
+    explanation?: string;
+    stage?: "mc" | "harder";
+  }>;
+  quizStageTransitions?: Array<{
+    from: string;
+    to: string;
+    timestamp: number;
+    topic: string;
+  }>;
+  mcStageCompletedAt?: number;
+  summary: string; // AI-generated summary for next session
+};
+
 export type StoredSubjectData = {
   subject: string;
   files: { name: string; type?: string; data?: string }[];
@@ -58,6 +87,7 @@ export type StoredSubjectData = {
   course_quick_summary?: string; // fast AI read of course context
   reviewSchedules?: { [key: string]: ReviewSchedule }; // key: "topicName-lessonIndex"
   examDates?: Array<{ date: string; name?: string }>; // ISO date strings, e.g., "2024-03-15"
+  surgeLog?: SurgeLogEntry[]; // History of Synapse Surge sessions
 };
 
 const PREFIX = "atomicSubjectData:";
@@ -138,7 +168,30 @@ export function saveSubjectData(slug: string, data: StoredSubjectData) {
 export async function saveSubjectDataAsync(slug: string, data: StoredSubjectData): Promise<void> {
   if (typeof window === "undefined") return;
   try {
+    console.log("=== saveSubjectDataAsync DEBUG ===");
+    console.log("Saving for slug:", slug);
+    console.log("SurgeLog entries to save:", data?.surgeLog?.map((e: any, idx: number) => ({
+      index: idx,
+      sessionId: e.sessionId,
+      timestamp: e.timestamp,
+      date: new Date(e.timestamp).toISOString()
+    })) || "no surgeLog");
+    
     localStorage.setItem(PREFIX + slug, JSON.stringify(data));
+    
+    // Verify immediately after save
+    const verify = localStorage.getItem(PREFIX + slug);
+    if (verify) {
+      const verifyData = JSON.parse(verify);
+      console.log("Verified after localStorage.setItem:", verifyData?.surgeLog?.map((e: any, idx: number) => ({
+        index: idx,
+        sessionId: e.sessionId,
+        timestamp: e.timestamp,
+        date: new Date(e.timestamp).toISOString()
+      })) || "no surgeLog");
+    }
+    console.log("=== saveSubjectDataAsync DEBUG END ===");
+    
     await syncSubjectDataToServer(slug, data);
   } catch (err) {
     try {
@@ -275,4 +328,97 @@ export function getUpcomingReviews(slug: string, days: number = 7): ReviewSchedu
   return Object.values(data.reviewSchedules).filter(
     schedule => schedule.nextReview > now && schedule.nextReview <= future
   ).sort((a, b) => a.nextReview - b.nextReview);
+}
+
+// Surge Log Functions
+
+export function getSurgeLog(slug: string): SurgeLogEntry[] {
+  const data = loadSubjectData(slug);
+  if (!data || !data.surgeLog) return [];
+  return data.surgeLog;
+}
+
+export function getLastSurgeSession(slug: string): SurgeLogEntry | null {
+  const log = getSurgeLog(slug);
+  if (log.length === 0) return null;
+  // Return session with the most recent timestamp (not just last in array)
+  // This ensures that if dates are edited, we get the chronologically most recent session
+  const latest = log.reduce((latest, entry) => {
+    return entry.timestamp > latest.timestamp ? entry : latest;
+  }, log[0]);
+  
+  console.log("getLastSurgeSession:", {
+    totalEntries: log.length,
+    selectedSessionId: latest.sessionId,
+    selectedTimestamp: latest.timestamp,
+    selectedDate: new Date(latest.timestamp).toISOString(),
+    allTimestamps: JSON.stringify(log.map(e => ({
+      sessionId: e.sessionId,
+      timestamp: e.timestamp,
+      date: new Date(e.timestamp).toISOString()
+    })), null, 2)
+  });
+  
+  return latest;
+}
+
+export function addSurgeLogEntry(slug: string, entry: SurgeLogEntry): void {
+  const data = loadSubjectData(slug);
+  if (!data) return;
+  
+  if (!data.surgeLog) {
+    data.surgeLog = [];
+  }
+  
+  data.surgeLog.push(entry);
+  // Keep only last 50 sessions to prevent storage bloat
+  if (data.surgeLog.length > 50) {
+    data.surgeLog = data.surgeLog.slice(-50);
+  }
+  
+  saveSubjectData(slug, data);
+}
+
+export async function addSurgeLogEntryAsync(slug: string, entry: SurgeLogEntry): Promise<void> {
+  const data = loadSubjectData(slug);
+  if (!data) return;
+  
+  if (!data.surgeLog) {
+    data.surgeLog = [];
+  }
+  
+  data.surgeLog.push(entry);
+  // Keep only last 50 sessions to prevent storage bloat
+  if (data.surgeLog.length > 50) {
+    data.surgeLog = data.surgeLog.slice(-50);
+  }
+  
+  await saveSubjectDataAsync(slug, data);
+}
+
+export async function updateOrAddSurgeLogEntryAsync(slug: string, entry: SurgeLogEntry): Promise<void> {
+  const data = loadSubjectData(slug);
+  if (!data) return;
+  
+  if (!data.surgeLog) {
+    data.surgeLog = [];
+  }
+  
+  // Find existing entry with same sessionId
+  const existingIndex = data.surgeLog.findIndex(e => e.sessionId === entry.sessionId);
+  
+  if (existingIndex !== -1) {
+    // Update existing entry
+    data.surgeLog[existingIndex] = entry;
+  } else {
+    // Add new entry
+    data.surgeLog.push(entry);
+  }
+  
+  // Keep only last 50 sessions to prevent storage bloat
+  if (data.surgeLog.length > 50) {
+    data.surgeLog = data.surgeLog.slice(-50);
+  }
+  
+  await saveSubjectDataAsync(slug, data);
 }

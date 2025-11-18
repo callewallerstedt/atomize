@@ -1,35 +1,48 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-export default function LoginPage() {
-  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+type LoginPageProps = {
+  defaultMode?: "login" | "signup";
+  defaultShowCode?: boolean;
+  defaultCode?: string;
+};
+
+export default function LoginPage({
+  defaultMode = "login",
+  defaultShowCode = false,
+  defaultCode = "",
+}: LoginPageProps = {}) {
+  const [authMode, setAuthMode] = useState<"login" | "signup">(defaultMode);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [showCodeInput, setShowCodeInput] = useState(false);
-  const [code, setCode] = useState("");
+  const [showCodeInput, setShowCodeInput] = useState(defaultShowCode);
+  const [code, setCode] = useState(defaultCode);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const router = useRouter();
 
-  // Disable body/html scrolling when login page is shown
+  // Ensure scrolling is enabled when login page is active
   useEffect(() => {
-    const originalStyle = {
-      overflow: document.body.style.overflow,
-      overflowX: document.body.style.overflowX,
-      overflowY: document.body.style.overflowY,
+    if (typeof document === "undefined") return;
+    const previous = {
+      bodyOverflow: document.body.style.overflow,
+      bodyPosition: document.body.style.position,
+      bodyTop: document.body.style.top,
+      htmlOverflow: document.documentElement.style.overflow,
     };
-    document.body.style.overflow = 'hidden';
-    document.documentElement.style.overflow = 'hidden';
-    
+    document.body.style.overflow = "auto";
+    document.body.style.position = "";
+    document.body.style.top = "";
+    document.documentElement.style.overflow = "auto";
     return () => {
-      document.body.style.overflow = originalStyle.overflow;
-      document.body.style.overflowX = originalStyle.overflowX;
-      document.body.style.overflowY = originalStyle.overflowY;
-      document.documentElement.style.overflow = '';
+      document.body.style.overflow = previous.bodyOverflow;
+      document.body.style.position = previous.bodyPosition;
+      document.body.style.top = previous.bodyTop;
+      document.documentElement.style.overflow = previous.htmlOverflow;
     };
   }, []);
 
@@ -167,9 +180,9 @@ export default function LoginPage() {
 
   if (checkingAuth) {
     return (
-      <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--background)]">
+      <div className="relative min-h-screen w-full flex flex-col items-center justify-center bg-[var(--background)] overflow-hidden">
         {/* Animated background dots */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none -z-10">
           {checkingDots.map((dot) => (
             <div
               key={dot.key}
@@ -203,28 +216,50 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-start overflow-y-auto overflow-x-hidden bg-[var(--background)] login-page-scroll desktop-scale" style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none', minHeight: '100dvh' }}>
+    <div 
+      className="fixed z-[10000] overflow-y-auto" 
+      style={{ 
+        WebkitOverflowScrolling: 'touch', 
+        margin: 0, 
+        padding: 0, 
+        border: 'none',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100%',
+        height: '100%',
+        backgroundColor: 'var(--background)',
+        background: 'var(--background)',
+      }}
+    >
+      <div
+        className="relative min-h-screen w-full flex flex-col items-center justify-start pb-12 px-4"
+        style={{
+          paddingBottom: 'max(25vh, 180px)',
+          paddingTop: 0,
+          marginTop: 0,
+          margin: 0,
+          transform: 'scale(0.75)',
+          transformOrigin: 'top center',
+          top: 0,
+          backgroundColor: 'var(--background)',
+        }}
+      >
       <style dangerouslySetInnerHTML={{__html: `
-        html, body {
-          overflow: hidden !important;
+        body {
+          overflow: auto !important;
         }
-        html::-webkit-scrollbar, body::-webkit-scrollbar {
-          display: none !important;
+        html {
+          overflow: auto !important;
         }
-        .login-page-scroll::-webkit-scrollbar {
-          display: none;
+        .spinner-scale-wrapper {
+          transform: scale(0.9) !important;
         }
-        @media (min-width: 768px) {
-          .desktop-scale {
-            transform: scale(0.8) !important;
-            transform-origin: center top !important;
-          }
-          .spinner-scale-wrapper {
-            transform: scale(0.9) !important;
-          }
-          .logo-wrap {
-            margin-top: -20px !important;
-          }
+        .logo-wrap {
+          margin-top: 0 !important;
+          padding-top: 0 !important;
+          top: 0 !important;
         }
         @media (max-width: 767px) {
           .logo-wrap {
@@ -246,7 +281,7 @@ export default function LoginPage() {
         }
       `}} />
       {/* Animated background dots */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      <div className="absolute inset-0 overflow-hidden pointer-events-none -z-10">
         {loginDots.map((dot) => (
           <div
             key={dot.key}
@@ -266,7 +301,7 @@ export default function LoginPage() {
       </div>
 
       {/* Spinning gradient ring */}
-      <div className="logo-wrap pt-8 md:pt-2 -mb-[100px]" style={{ width: 240, aspectRatio: "1 / 0.8", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+      <div className="logo-wrap -mb-[100px] pointer-events-none" style={{ width: 240, aspectRatio: "1 / 0.8", overflow: "visible", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", marginTop: 0, paddingTop: 0 }}>
         <div style={{ transform: "scale(1.3)", transformOrigin: "center" }} className="spinner-scale-wrapper">
           <img
             src="/spinner.png"
@@ -291,7 +326,7 @@ export default function LoginPage() {
       </div>
 
       {/* Login form */}
-      <div className="w-full max-w-md px-6 pb-8 mb-20">
+      <div className="w-full max-w-md px-6 pb-32 relative z-10">
         <h2 className="text-2xl font-semibold text-[var(--foreground)] mb-2 text-center">
           {authMode === "login" ? "Sign in" : "Sign up"}
         </h2>
@@ -422,6 +457,7 @@ export default function LoginPage() {
             Your data will be saved securely to your account.
           </div>
         </form>
+      </div>
       </div>
     </div>
   );

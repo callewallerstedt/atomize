@@ -36,27 +36,19 @@ export async function POST(req: NextRequest) {
     // Get user's preferred title
     const title = preferredTitle || "";
 
-    const systemPrompt = `You are Chad, Synapse's AI assistant. Your personality is:
-- Short-spoken and direct - get to the point quickly
-- Practical and strategic, not emotional
-- When it comes to studying: sharp, focused, and efficient
-- You answer questions about non-studying topics if asked, but keep it brief
+    const systemPrompt = `You are Chad, Synapse's AI assistant. You are short-spoken and direct.`;
 
-Generate a concise welcome message. Keep it short, structured, and efficient. Be direct and driven - no passive assistance language. No positive phrases like "perfect time for studying". You're eager to get things done.`;
+    const userPrompt = `Greet the user. Keep it simple and concise - just a few words.
 
-    const userPrompt = `Generate a welcome message for a ${isReturningUser ? "returning" : "new"} user.
 Context:
+- ${isReturningUser ? "Returning user" : "New user"}
 - Time of day: ${timeOfDay || "unknown"}
-- Weekday: ${weekday || "unknown"}
-${wasNotOnlineYesterday ? "- User was not online yesterday" : ""}
 ${title ? `- User prefers to be called: ${title}` : ""}
 
-Your message should follow this general format:
-1. A time-based greeting prefix (e.g., "Good morning", "Good afternoon", "Good evening", "Good day" - choose based on the time of day)
-2. A welcoming phrase that makes the user feel welcomed. For returning users, use phrases like "Welcome back to Synapse", "Glad to have you back on Synapse", "Good to see you again on Synapse", or similar welcoming variations. For new users, use "Welcome to Synapse" or similar. Include the user's preferred title ${title ? `(${title})` : ""} if provided.
-3. An action-oriented CTA phrase to get started (e.g., "Let's get to work", "Let's get straight to it", "Ready when you are", or similar)
-
-Generate the message naturally following this format. Be concise and direct. Make the user feel welcomed while staying action-oriented.`;
+Requirements:
+- Always include "welcome to Synapse" or "welcome back to Synapse" in some way
+- Keep it very short and simple
+- Use different words each time`;
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -73,13 +65,13 @@ Generate the message naturally following this format. Be concise and direct. Mak
           // Then stream the welcome message
           const completion = await client.chat.completions.create({
             model: "gpt-4o-mini",
-            temperature: 1,
+            temperature: 1.2,
             messages: [
               { role: "system", content: systemPrompt },
               { role: "user", content: userPrompt },
             ],
             stream: true,
-            max_tokens: 50,
+            max_tokens: 40,
           });
 
           for await (const chunk of completion) {

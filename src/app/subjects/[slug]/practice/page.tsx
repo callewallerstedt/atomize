@@ -71,7 +71,7 @@ type ParsedAssistantContent = {
   uiElements: ParsedUIElement[];
 };
 
-const MAX_CONTEXT_CHARS = 11_500; // leave room for API preamble
+const MAX_CONTEXT_CHARS = 25_000; // leave room for API preamble and full practice logs
 const PRACTICE_LOG_PREFIX = "atomicPracticeLog:";
 // FileUploadArea component
 function FileUploadArea({
@@ -184,7 +184,11 @@ function FileUploadArea({
   );
 }
 
-function renderPracticeContent(content: string): React.JSX.Element {
+function renderPracticeContent(
+  content: string,
+  onOpenLesson?: (questionText: string) => void,
+  generatingLessonFor?: string | null
+): React.JSX.Element {
   // Parse ◊ (lozenge) delimiters for practice questions - allows multiline content
   // Also handles incomplete questions (opening ◊ without closing ◊) for streaming
   const parts: (string | { type: 'question'; content: string })[] = [];
@@ -243,11 +247,34 @@ function renderPracticeContent(content: string): React.JSX.Element {
               key={index}
               className="rounded-lg bg-gradient-to-r from-[#00E5FF]/20 via-[#FF2D96]/10 to-[#00E5FF]/20 border border-[#00E5FF]/30 p-4 my-2 shadow-sm"
             >
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-2 h-2 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"></div>
-                <span className="text-xs font-semibold uppercase tracking-wide text-[#00E5FF] opacity-80">
-                  Practice Question
-                </span>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"></div>
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#00E5FF] opacity-80">
+                    Practice Question
+                  </span>
+                </div>
+                {onOpenLesson && (
+                  <button
+                    onClick={() => onOpenLesson(part.content)}
+                    disabled={generatingLessonFor === part.content}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[#00E5FF]/40 bg-[#00E5FF]/10 hover:bg-[#00E5FF]/20 px-3 py-1 text-xs font-medium text-[#00E5FF] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {generatingLessonFor === part.content ? (
+                      <>
+                        <GlowSpinner size={12} ariaLabel="Generating lesson" idSuffix={`lesson-gen-${index}`} />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                        </svg>
+                        Open lesson
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
               <div className="text-base font-medium leading-relaxed">
                 <LessonBody body={sanitizeLessonBody(part.content)} />
@@ -330,6 +357,55 @@ function formatPracticeLogSummary(entries: PracticeLogEntry[]): string {
   });
 
   return `PRACTICE INSIGHTS (based on ${entries.length} actual practice entries):\n${insights.join("\n")}\n\nRECENT SESSIONS (last ${recent.length} entries):\n${recentDetails.join("\n")}`;
+}
+
+function formatFullPracticeLogs(entries: PracticeLogEntry[]): string {
+  if (!entries.length) return "";
+
+  // Sort by timestamp (most recent first)
+  const sorted = [...entries].sort((a, b) => b.timestamp - a.timestamp);
+
+  const formattedEntries = sorted.map((entry, idx) => {
+    const timestamp = new Date(entry.timestamp).toLocaleString();
+    const parts: string[] = [];
+
+    parts.push(`--- Entry ${idx + 1} of ${sorted.length} (${timestamp}) ---`);
+    
+    // Always show ID for tracking
+    if (entry.id) parts.push(`ID: ${entry.id}`);
+    
+    if (entry.topic) parts.push(`Topic: ${entry.topic}`);
+    if (entry.concept) parts.push(`Concept: ${entry.concept}`);
+    if (entry.skill) parts.push(`Skill: ${entry.skill}`);
+    
+    if (entry.question) parts.push(`Question: ${entry.question}`);
+    if (entry.answer) parts.push(`Answer: ${entry.answer}`);
+    
+    if (typeof entry.grade === "number") parts.push(`Grade/Points: ${entry.grade}/10`);
+    if (typeof entry.rating === "number") parts.push(`Rating: ${entry.rating}`);
+    if (typeof entry.confidence === "number") parts.push(`Confidence: ${entry.confidence}`);
+    
+    if (entry.assessment) parts.push(`Assessment: ${entry.assessment}`);
+    if (entry.result) parts.push(`Result: ${entry.result}`);
+    if (entry.difficulty) parts.push(`Difficulty: ${entry.difficulty}`);
+    
+    if (entry.strengths && Array.isArray(entry.strengths) && entry.strengths.length > 0) {
+      parts.push(`Strengths: ${entry.strengths.join(", ")}`);
+    }
+    if (entry.weaknesses && Array.isArray(entry.weaknesses) && entry.weaknesses.length > 0) {
+      parts.push(`Weaknesses: ${entry.weaknesses.join(", ")}`);
+    }
+    
+    if (entry.recommendation) parts.push(`Recommendation: ${entry.recommendation}`);
+    if (typeof entry.questions === "number") parts.push(`Questions in session: ${entry.questions}`);
+    if (entry.raw) parts.push(`Raw data: ${entry.raw}`);
+
+    // Ensure at least something is shown
+    const result = parts.join("\n");
+    return result || `--- Entry ${idx + 1} of ${sorted.length} (${timestamp}) - No additional data ---`;
+  });
+
+  return `COMPLETE PRACTICE LOG HISTORY (${entries.length} total entries, most recent first):\n\n${formattedEntries.join("\n\n")}`;
 }
 
 function parseAssistantContent(raw: string): Omit<ParsedAssistantContent, 'logUpdates'> {
@@ -492,8 +568,13 @@ function getTopicSummaryLines(
 function buildPracticeContext(
   slug: string,
   data: StoredSubjectData | null,
-  practiceLog: PracticeLogEntry[]
+  practiceLog: PracticeLogEntry[],
+  examSnipeData?: string | null,
+  availableExamSnipes?: Array<{ slug: string; courseName: string; createdAt: string }>
 ): string {
+  // Debug: log practice log state
+  console.log("[buildPracticeContext] practiceLog length:", practiceLog.length, "entries:", practiceLog);
+  
   if (!data) {
     return [
       `PRACTICE MODE ACTIVE`,
@@ -506,6 +587,11 @@ function buildPracticeContext(
 
   const lines: string[] = [];
   const courseName = data.subject || slug;
+  const basicTopics = extractBasicTopics(data);
+  const basicTopicBullets =
+    basicTopics.length > 0
+      ? basicTopics.map((topic) => `• ${topic}`).join("\n")
+      : "• Ask the learner which fundamental concept feels rustiest and build from there.";
 
   lines.push(`PRACTICE MODE ACTIVE FOR COURSE "${courseName}" (slug: ${slug})`);
   lines.push(
@@ -521,7 +607,10 @@ function buildPracticeContext(
     "CRITICAL: Only analyze and reference the actual PRACTICE LOG DATA provided in context. Do NOT invent, assume, or hallucinate any practice history, performance data, or study patterns. If no practice log entries exist, explicitly state 'you haven't practiced this course yet' and suggest starting with fundamental topics. Never suggest topics or difficulties based on assumptions - only use the concrete data provided."
   );
   lines.push(
-    "Startup protocol: immediately greet the learner, then say 'Based on your previous practice sessions, I suggest we focus on...' followed by 3-5 specific recommendations drawn ONLY from the practice log insights. If no previous practice data exists, suggest starting with the most fundamental topics from the course. Always be explicit about what's based on actual data vs general recommendations. Wait for their choice before drilling. Once a focus is chosen, push straight into targeted questions."
+    "PRACTICE LOG ACCESS: You have access to the COMPLETE practice log history with full details for every entry including: topic, concept, skill, question, answer, grade/points (0-10 scale), assessment, result, difficulty, strengths, weaknesses, recommendations, confidence scores, and timestamps. Use this complete history to understand patterns, identify weak areas, track progress on specific topics, and make informed recommendations. Reference specific past questions and answers when relevant."
+  );
+  lines.push(
+    "Startup protocol: Keep your opening message concise (2-3 sentences max). Greet briefly, then offer 3-4 clear focus options: (1) Start with basics/fundamentals, (2) Continue where we left off (reference practice log for weak areas or topics needing review), (3) Focus on exam patterns (if exam snipe data exists, highlight high-frequency concepts/questions that appear repeatedly), (4) Target specific topics. Wait for their choice, then dive straight into questions. Be specific about what each option covers."
   );
   lines.push(
     "Continuously reference the practice log to detect weak areas, time since last review, and repetition counts. Prioritize spaced coverage while doubling down on trouble spots."
@@ -552,11 +641,12 @@ function buildPracticeContext(
   lines.push("- navigate_course|slug:course-slug (navigate to a course page - use the exact slug from the context, e.g., if context shows 'Course: French Revolution (slug: french-revolution)', use 'french-revolution' as the slug)");
   lines.push("- navigate_topic|slug:course-slug|topic:TopicName (navigate to a specific topic - use the EXACT topic name from the Topics list, and the EXACT slug from 'Course: Name (slug: course-slug)')");
   lines.push("- navigate_lesson|slug:course-slug|topic:TopicName|lessonIndex:0 (navigate to a specific lesson, index is 0-based - use EXACT topic name and slug from context)");
+  lines.push("- navigate_exam_snipe (navigate to the exam snipe analysis page for the current course - opens the full analysis results showing concepts, patterns, and study recommendations. Use this when user asks to view exam analysis, exam patterns, or exam snipe results for the current course.)");
   lines.push("- open_course_modal (opens course creation modal)");
   lines.push("- open_flashcards|slug:course-slug (opens flashcards modal for a course - use the exact slug from the context)");
   lines.push("- open_lesson_flashcards|slug:course-slug|topic:TopicName|lessonIndex:0 (opens flashcards for a specific lesson)");
   lines.push("- set_exam_date|slug:course-slug|date:YYYY-MM-DD|name:Optional exam name (set or update exam date for a course - date must be in ISO format YYYY-MM-DD, use exact slug from context)");
-  lines.push("- fetch_exam_snipe_data|slug:course-name-or-slug (fetch detailed exam snipe data for a course - use the EXACT course name the user mentioned, NOT the course slug. Exam snipe data is stored separately and matched by course name. Shows loading spinner, fetches the data, adds it to chat context, then you should respond naturally about what you found. The data will stay in context for all future messages in this chat)");
+  lines.push("- fetch_exam_snipe_data|slug:course-name-or-slug (fetch detailed exam snipe data for a course - use the EXACT course name the user mentioned, NOT the course slug. Exam snipe data is stored separately and matched by course name. Shows loading spinner, fetches the data, adds it to chat context, then you should respond naturally about what you found. The data will stay in context for all future messages in this chat. NOTE: In practice mode, exam snipe data for the current course is already loaded in your context - you don't need to fetch it again. Just reference the existing EXAM SNIPE ANALYSIS DATA that's already available.)");
   lines.push("");
   lines.push("You can also render interactive UI elements in your messages using:");
   lines.push("BUTTON:button_id|label:Button Text|action:action_name|param1:value1");
@@ -585,21 +675,25 @@ function buildPracticeContext(
   lines.push("- Recommend using the Pomodoro timer (visible in the header) for focused study sessions - it helps maintain focus and track study time");
   lines.push("");
   lines.push("MANDATORY: Exam Snipe Data - If user asks about exam snipe, exam results, study order, common questions, or exam patterns:");
-  lines.push("- You MUST immediately use fetch_exam_snipe_data action - do NOT say you don't have the data, ALWAYS fetch it first");
+  lines.push("- IMPORTANT: In practice mode, exam snipe data for the current course is ALREADY loaded in your context. Check if EXAM SNIPE ANALYSIS DATA is present in the context first.");
+  lines.push("- If EXAM SNIPE ANALYSIS DATA is already in context, use it directly - do NOT fetch again. Just reference the existing data and answer the user's question.");
+  lines.push("- Only use fetch_exam_snipe_data action if the data is NOT already in context (e.g., user asks about a different course)");
   lines.push("- Examples: 'What are the top concepts?', 'Show exam snipe results', 'What questions appear most?', 'What's the study order?', 'Tell me about exam patterns', 'What did exam snipe find?'");
   lines.push("- CRITICAL: Use the EXACT course name the user mentioned in the slug parameter - do NOT resolve it to a course slug. Exam snipe data is stored separately and matched by course name, not course slug.");
   lines.push("- Example: User says 'What are the top concepts for Signaler och System?' -> ACTION:fetch_exam_snipe_data|slug:Signaler och System (use the exact name, not the course slug)");
   lines.push("- After fetching, the data will be in context and you can answer their question");
   lines.push("");
-  lines.push("IMPORTANT: Exam Date Tracking:");
-  lines.push("- When the user mentions an exam date (e.g., 'My French Revolution exam is on March 15th' or 'Math exam on 2024-03-20'),");
-  lines.push("- Extract the course name and date from their message");
-  lines.push("- Match the course name to a course in the context to get the exact slug");
-  lines.push("- Use set_exam_date action with the slug and date in ISO format (YYYY-MM-DD)");
-  lines.push("- Example: User says 'French Revolution exam is March 15th' -> ACTION:set_exam_date|slug:french-revolution|date:2024-03-15");
-  lines.push("- If the user mentions a date without a year, assume current year or next year if the date has already passed this year");
-  lines.push("- Setting a new exam date will OVERWRITE any existing exam dates for that course - it replaces all previous dates with the new one");
-  lines.push("- Always confirm what you're doing: 'Setting exam date for French Revolution to March 15th. ACTION:set_exam_date|slug:french-revolution|date:2024-03-15'");
+    lines.push("IMPORTANT: Exam Date Tracking:");
+    lines.push("- When the user mentions an exam date (e.g., 'My French Revolution exam is on November 10th' or 'Math exam on 2024-03-20'),");
+    lines.push("- Extract the course name and date from their message");
+    lines.push("- Match the course name to a course in the context to get the exact slug");
+    lines.push("- Convert the date to ISO format (YYYY-MM-DD) - if user says 'November 10th' or 'Nov 10', calculate the full date including the year");
+    lines.push("- If the user mentions a date without a year, assume current year or next year if the date has already passed this year");
+    lines.push("- Calculate how many days are left until the exam date from today");
+    lines.push("- Use set_exam_date action with the slug and date in ISO format (YYYY-MM-DD)");
+    lines.push("- Example: User says 'French Revolution exam is November 10th' -> Calculate: today is 2024-10-15, exam is 2024-11-10, that's 26 days away. 'Setting exam date for French Revolution to November 10th (26 days left). ACTION:set_exam_date|slug:french-revolution|date:2024-11-10'");
+    lines.push("- Setting a new exam date will OVERWRITE any existing exam dates for that course - it replaces all previous dates with the new one");
+    lines.push("- Always calculate and mention the days left when setting an exam date");
   lines.push("");
   lines.push("CRITICAL RULE: When using ACTION commands:");
   lines.push("1. ACTION commands are ALWAYS optional - you can respond normally without any actions");
@@ -688,13 +782,17 @@ function buildPracticeContext(
   }
 
   if (practiceLog.length > 0) {
-    const summary = formatPracticeLogSummary(practiceLog);
-    if (summary) {
+    const fullLogs = formatFullPracticeLogs(practiceLog);
+    console.log("[buildPracticeContext] formatFullPracticeLogs result length:", fullLogs?.length || 0);
+    console.log("[buildPracticeContext] formatFullPracticeLogs preview:", fullLogs?.substring(0, 500) || "EMPTY");
+    if (fullLogs) {
+      lines.push(fullLogs);
+      console.log("[buildPracticeContext] Added full logs to context, total lines so far:", lines.length);
+    } else {
+      // Debug: log if formatFullPracticeLogs returned empty despite having entries
+      console.warn("formatFullPracticeLogs returned empty for", practiceLog.length, "entries");
       lines.push(
-        `PRACTICE LOG DATA (${practiceLog.length} total entries):\n${summary.slice(
-          0,
-          3500
-        )}`
+        `PRACTICE LOG DATA: ${practiceLog.length} entries found but formatting failed. Raw count: ${practiceLog.length}`
       );
     }
   } else {
@@ -703,8 +801,132 @@ function buildPracticeContext(
     );
   }
 
-  const joined = lines.join("\n\n");
-  return joined.slice(0, MAX_CONTEXT_CHARS);
+  // Add available exam snipes list
+  if (availableExamSnipes && availableExamSnipes.length > 0) {
+    lines.push(`\n\nAVAILABLE EXAM SNIPES (${availableExamSnipes.length} total):`);
+    lines.push(`For the current course "${courseName}" (slug: ${slug}), use ACTION:navigate_exam_snipe to view its exam analysis at /subjects/${slug}/examsnipe`);
+    lines.push("Format: Course Name (slug: exam-snipe-slug) - Created: date");
+    availableExamSnipes.forEach((exam) => {
+      const date = new Date(exam.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" });
+      lines.push(`- ${exam.courseName} (slug: ${exam.slug}) - Created: ${date}`);
+    });
+    lines.push(`\nWhen user asks to view exam analysis, exam patterns, or exam snipe results for the current course, use ACTION:navigate_exam_snipe to open /subjects/${slug}/examsnipe`);
+  }
+
+  // Add exam snipe data if available
+  if (examSnipeData) {
+    lines.push(`\n\nEXAM SNIPE ANALYSIS DATA:\n${examSnipeData}\n\nUse this exam analysis to prioritize topics and focus on high-frequency concepts and questions. Reference specific patterns and common questions when relevant.`);
+  }
+
+  if (practiceLog.length === 0) {
+    const hasExamSnipe = examSnipeData ? "You also have exam snipe analysis showing high-frequency exam topics." : "";
+    lines.push(
+      `FIRST SESSION DIRECTIVE: No practice history yet. Keep your opening message concise. Offer these focus options: (1) Start with basics - cover fundamental topics like ${basicTopics.slice(0, 3).join(", ") || "core concepts"}, (2) Focus on exam patterns${examSnipeData ? " - target concepts and questions that appear most frequently on exams" : ""}, (3) Jump into specific topics. ${hasExamSnipe} Wait for their choice, then start drilling immediately.`
+    );
+  } else if (practiceLog.length < Math.max(3, basicTopics.length || 3)) {
+    const hasExamSnipe = examSnipeData ? " You also have exam snipe data showing exam patterns." : "";
+    lines.push(
+      `LOW PRACTICE COVERAGE: Only ${practiceLog.length} practice entries. Offer focus options: (1) Continue where we left off - review weak areas from practice log, (2) Build fundamentals - cover ${basicTopics.slice(0, 3).join(", ") || "core topics"}, (3) Target exam patterns${examSnipeData ? " - focus on high-frequency exam topics" : ""}.${hasExamSnipe} Be concise and wait for their choice.`
+    );
+  } else {
+    const hasExamSnipe = examSnipeData ? " You also have exam snipe analysis available." : "";
+    const weakAreas = practiceLog.filter((entry: PracticeLogEntry) => (entry.grade || 0) < 6).length > 0 
+      ? " Review weak areas from your practice history" 
+      : "";
+    lines.push(
+      `PRACTICE HISTORY AVAILABLE: You have ${practiceLog.length} practice entries. Offer focus options: (1) Continue where we left off${weakAreas}, (2) Strengthen fundamentals - revisit ${basicTopics.slice(0, 2).join(" and ") || "core concepts"}, (3) Focus on exam patterns${examSnipeData ? " - target recurring exam topics and questions" : ""}, (4) Explore new topics.${hasExamSnipe} Keep it concise and wait for their choice.`
+    );
+  }
+
+  // Separate practice logs from other content to ensure they're always included
+  const practiceLogIndex = lines.findIndex(line => line.includes("COMPLETE PRACTICE LOG HISTORY"));
+  let practiceLogsContent = "";
+  let otherLines = lines;
+  
+  if (practiceLogIndex >= 0) {
+    practiceLogsContent = lines[practiceLogIndex];
+    otherLines = lines.filter((_, idx) => idx !== practiceLogIndex);
+  }
+  
+  // Build context without practice logs first
+  let baseContext = otherLines.join("\n\n");
+  
+  // Reserve space for practice logs (at least 5000 chars, or more if available)
+  const reservedForLogs = Math.max(5000, Math.min(10000, practiceLogsContent.length + 1000));
+  const maxBaseContext = MAX_CONTEXT_CHARS - reservedForLogs;
+  
+  if (baseContext.length > maxBaseContext) {
+    baseContext = baseContext.slice(0, maxBaseContext);
+    console.warn("[buildPracticeContext] Truncated base context to make room for practice logs");
+  }
+  
+  // Combine base context with practice logs
+  const finalContext = practiceLogsContent 
+    ? `${baseContext}\n\n${practiceLogsContent}`.slice(0, MAX_CONTEXT_CHARS)
+    : baseContext.slice(0, MAX_CONTEXT_CHARS);
+  
+  // Debug: verify practice logs are in final context
+  const hasPracticeLogs = finalContext.includes("COMPLETE PRACTICE LOG HISTORY");
+  console.log("[buildPracticeContext] Final context length:", finalContext.length);
+  console.log("[buildPracticeContext] Base context length:", baseContext.length);
+  console.log("[buildPracticeContext] Practice logs length:", practiceLogsContent.length);
+  console.log("[buildPracticeContext] Contains practice logs:", hasPracticeLogs);
+  if (hasPracticeLogs) {
+    const logStartIndex = finalContext.indexOf("COMPLETE PRACTICE LOG HISTORY");
+    console.log("[buildPracticeContext] Practice logs start at index:", logStartIndex);
+    console.log("[buildPracticeContext] Practice logs preview:", finalContext.substring(logStartIndex, logStartIndex + 1000));
+  } else if (practiceLogsContent) {
+    console.error("[buildPracticeContext] ERROR: Practice logs were formatted but NOT found in final context!");
+    console.log("[buildPracticeContext] Practice logs content length:", practiceLogsContent.length);
+    console.log("[buildPracticeContext] Context preview (last 2000 chars):", finalContext.substring(Math.max(0, finalContext.length - 2000)));
+  }
+  
+  return finalContext;
+}
+
+function extractBasicTopics(data: StoredSubjectData | null): string[] {
+  if (!data) return [];
+
+  const normalizeName = (value: any): string =>
+    typeof value === "string"
+      ? value.trim()
+      : typeof value?.name === "string"
+      ? value.name.trim()
+      : "";
+
+  const topicsFromMeta =
+    Array.isArray(data.topics) && data.topics.length > 0
+      ? data.topics
+          .map((topic) => ({
+            name: normalizeName(topic),
+            coverage:
+              typeof topic === "object" && topic && typeof topic.coverage === "number"
+                ? topic.coverage
+                : 0,
+          }))
+          .filter((topic) => topic.name)
+          .sort((a, b) => b.coverage - a.coverage)
+          .map((topic) => topic.name)
+      : [];
+
+  if (topicsFromMeta.length > 0) {
+    return topicsFromMeta.slice(0, 4);
+  }
+
+  if (Array.isArray(data.tree?.topics) && data.tree.topics.length > 0) {
+    const legacyTopics = data.tree.topics
+      .map((topic: any) => normalizeName(topic))
+      .filter(Boolean);
+    if (legacyTopics.length > 0) {
+      return legacyTopics.slice(0, 4);
+    }
+  }
+
+  const nodeTopics = Object.keys(data.nodes || {})
+    .filter((key) => key && !key.startsWith("__"))
+    .slice(0, 4);
+
+  return nodeTopics;
 }
 
 export default function PracticePage() {
@@ -720,6 +942,7 @@ export default function PracticePage() {
   const [error, setError] = useState<string | null>(null);
   const [initialPromptSent, setInitialPromptSent] = useState(false);
   const [practiceLog, setPracticeLog] = useState<PracticeLogEntry[]>([]);
+  const [practiceLogLoaded, setPracticeLogLoaded] = useState(false);
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [rawLogModalOpen, setRawLogModalOpen] = useState(false);
   const [expandedTopics, setExpandedTopics] = useState<Set<string>>(new Set());
@@ -731,12 +954,46 @@ export default function PracticePage() {
   const [fetchingContext, setFetchingContext] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, File[]>>({});
   const [uploadStatus, setUploadStatus] = useState<Record<string, 'idle' | 'ready' | 'processing' | 'success'>>({});
+  const [examSnipeData, setExamSnipeData] = useState<string | null>(null);
+  const [examSnipeMatching, setExamSnipeMatching] = useState(false);
+  const [examSnipeMatched, setExamSnipeMatched] = useState(false);
+  const [availableExamSnipes, setAvailableExamSnipes] = useState<Array<{ slug: string; courseName: string; createdAt: string }>>([]);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const conversationRef = useRef<Array<Omit<ChatMessage, "hidden">>>([]);
+  
+  // QR Code feature state
+  const [showQrDropdown, setShowQrDropdown] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [qrSessionId, setQrSessionId] = useState<string | null>(null);
+  const [qrUrl, setQrUrl] = useState<string | null>(null);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+  const [qrImages, setQrImages] = useState<Array<{ id: string; data: string }>>([]);
+  const qrPollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const applyPracticeLogUpdates = (updates: PracticeLogEntry[]) => {
     if (!updates.length) return;
     setPracticeLog((prev) => {
+      // Verify localStorage is in sync - if it's empty but prev has entries, something was cleared
+      if (typeof window !== "undefined") {
+        try {
+          const stored = localStorage.getItem(`${PRACTICE_LOG_PREFIX}${slug}`);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed) && parsed.length === 0 && prev.length > 0) {
+              // localStorage was cleared but state wasn't - respect the clear
+              console.log("Practice logs were cleared, ignoring update");
+              return [];
+            }
+          } else if (prev.length > 0) {
+            // localStorage was removed but state wasn't - respect the clear
+            console.log("Practice logs were cleared, ignoring update");
+            return [];
+          }
+        } catch (err) {
+          // If we can't read localStorage, proceed normally
+        }
+      }
+      
       const existingIds = new Set(prev.map((entry) => entry.id));
       const nextEntries = updates
         .filter((entry) => entry && entry.id)
@@ -759,6 +1016,25 @@ export default function PracticePage() {
         }
       }
       return combined;
+    });
+  };
+
+  // Remove a practice log entry by ID
+  const removePracticeLogEntry = (entryId: string) => {
+    setPracticeLog((prev) => {
+      const filtered = prev.filter((entry) => entry.id !== entryId);
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(
+            `${PRACTICE_LOG_PREFIX}${slug}`,
+            JSON.stringify(filtered)
+          );
+          console.log(`Removed practice log entry: ${entryId}`);
+        } catch (err) {
+          console.warn("Failed to persist practice log removal:", err);
+        }
+      }
+      return filtered;
     });
   };
 
@@ -787,6 +1063,19 @@ export default function PracticePage() {
     try {
       setSending(true);
       setError(null);
+
+      // Debug: verify context being sent
+      const contextHasLogs = practiceContext.includes("COMPLETE PRACTICE LOG HISTORY");
+      console.log("[sendMessage] practiceContext length:", practiceContext.length);
+      console.log("[sendMessage] Context contains practice logs:", contextHasLogs);
+      if (contextHasLogs) {
+        const logIndex = practiceContext.indexOf("COMPLETE PRACTICE LOG HISTORY");
+        console.log("[sendMessage] Practice logs start at index:", logIndex);
+        console.log("[sendMessage] Practice logs preview in context:", practiceContext.substring(logIndex, logIndex + 500));
+      } else {
+        console.warn("[sendMessage] WARNING: practiceContext does NOT contain practice logs!");
+        console.log("[sendMessage] Context preview (last 1000 chars):", practiceContext.substring(Math.max(0, practiceContext.length - 1000)));
+      }
 
       const res = await fetch("/api/chat/stream", {
         method: "POST",
@@ -969,6 +1258,13 @@ export default function PracticePage() {
       }
 
       const result = await response.json();
+      
+      // Handle skipped logs (not an answer attempt)
+      if (result.skipped) {
+        console.log("⏭️ Practice log skipped:", result.reason);
+        return;
+      }
+      
       if (result.success && result.logEntry) {
         const logEntry: PracticeLogEntry = result.logEntry;
 
@@ -988,6 +1284,146 @@ export default function PracticePage() {
       console.error('Error calling practice logger:', error);
     }
   };
+
+  // QR Code functions
+  const createQrSession = async () => {
+    try {
+      const response = await fetch("/api/qr-session/create", {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("Failed to create session");
+      const data = await response.json();
+      setQrSessionId(data.sessionId);
+      setQrUrl(data.qrUrl);
+      
+      // Generate QR code via API (server-side)
+      try {
+        const qrResponse = await fetch("/api/qr-session/generate-qr", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: data.qrUrl }),
+        });
+        if (!qrResponse.ok) throw new Error("Failed to generate QR code");
+        const qrData = await qrResponse.json();
+        setQrCodeDataUrl(qrData.qrDataUrl);
+      } catch (qrError) {
+        console.error("Error generating QR code:", qrError);
+        setError("Failed to generate QR code");
+        return;
+      }
+      
+      setShowQrModal(true);
+      setShowQrDropdown(false);
+      startPollingForImages(data.sessionId);
+    } catch (error) {
+      console.error("Error creating QR session:", error);
+      setError("Failed to create QR session");
+    }
+  };
+
+  const startPollingForImages = (sessionId: string) => {
+    // Clear any existing polling
+    if (qrPollIntervalRef.current) {
+      clearInterval(qrPollIntervalRef.current);
+    }
+
+    // Poll every 1 second
+    qrPollIntervalRef.current = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/qr-session/${sessionId}/images`);
+        if (!response.ok) {
+          if (response.status === 404 || response.status === 410) {
+            // Session expired or not found, stop polling
+            if (qrPollIntervalRef.current) {
+              clearInterval(qrPollIntervalRef.current);
+              qrPollIntervalRef.current = null;
+            }
+            return;
+          }
+          return;
+        }
+        const data = await response.json();
+        if (data.images && data.images.length > 0) {
+          const newImages = data.images.filter(
+            (img: { id: string; data: string }) =>
+              !qrImages.some((existing) => existing.id === img.id)
+          );
+          if (newImages.length > 0) {
+            setQrImages((prev) => [...prev, ...newImages]);
+            insertImagesIntoInput(newImages);
+            // Close modal when images are received
+            setShowQrModal(false);
+            // Stop polling
+            if (qrPollIntervalRef.current) {
+              clearInterval(qrPollIntervalRef.current);
+              qrPollIntervalRef.current = null;
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error polling for images:", error);
+      }
+    }, 1000);
+  };
+
+  const insertImagesIntoInput = (images: Array<{ id: string; data: string }>) => {
+    // Insert images as markdown image syntax
+    const imageMarkdown = images
+      .map((img) => `![photo](${img.data})`)
+      .join("\n");
+    
+    // Insert at cursor position or append
+    const textarea = document.querySelector(
+      'textarea[placeholder*="Respond with your work"]'
+    ) as HTMLTextAreaElement;
+    if (textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const currentValue = input;
+      const newValue =
+        currentValue.substring(0, start) +
+        (currentValue.substring(start, end) ? "" : "\n") +
+        imageMarkdown +
+        "\n" +
+        currentValue.substring(end);
+      setInput(newValue);
+      
+      // Set cursor position after inserted images
+      setTimeout(() => {
+        const newPosition = start + imageMarkdown.length + 2;
+        textarea.setSelectionRange(newPosition, newPosition);
+        textarea.focus();
+      }, 0);
+    } else {
+      // Fallback: append to input
+      setInput((prev) => prev + (prev ? "\n" : "") + imageMarkdown + "\n");
+    }
+  };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (qrPollIntervalRef.current) {
+        clearInterval(qrPollIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showQrDropdown) {
+        const target = event.target as HTMLElement;
+        if (!target.closest('[data-qr-dropdown]')) {
+          setShowQrDropdown(false);
+        }
+      }
+    };
+    if (showQrDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showQrDropdown]);
 
   // Handle button clicks for UI elements
   const handleButtonClick = (action: string | undefined, params: Record<string, string> | undefined, uploadId?: string) => {
@@ -1037,6 +1473,12 @@ export default function PracticePage() {
         const path = action.params.path;
         if (path && typeof window !== "undefined") {
           router.push(path);
+        }
+      } else if (action.name === "navigate_exam_snipe") {
+        // Navigate to exam snipe for current course
+        if (slug && typeof window !== "undefined") {
+          console.log("Navigating to exam snipe for course:", slug);
+          router.push(`/subjects/${slug}/examsnipe`);
         }
       } else if (action.name === "navigate_course") {
         let slug = action.params.slug;
@@ -1264,6 +1706,25 @@ export default function PracticePage() {
         let slug = action.params.slug?.trim();
         const originalInput = slug; // Store original input for name matching
         if (slug && typeof window !== "undefined") {
+          // In practice mode, exam snipe data is already loaded at the start
+          // If we already have it, just tell Chad to use the existing data
+          if (examSnipeData) {
+            setMessages((m) => {
+              const copy = [...m];
+              // Add system message with existing exam snipe data
+              const systemEntry: ChatMessage = { role: "system", content: examSnipeData, hidden: true };
+              const updated: ChatMessage[] = [...copy, systemEntry];
+              
+              // Automatically have Chad respond using the existing data
+              setTimeout(() => {
+                sendMessageWithExistingMessages(updated);
+              }, 50);
+              
+              return updated;
+            });
+            return; // Skip fetching, we already have it
+          }
+          
           // For exam snipe data, we match by course name, not slug
           // Don't try to resolve course names to slugs - exam snipe data is stored separately
           // Only clean if it looks like a slug (alphanumeric with hyphens/underscores)
@@ -1339,25 +1800,25 @@ export default function PracticePage() {
 
                     const contextText = contextData.join("\n\n");
 
-                    // Remove loading message and add context as system message (hidden from user, but included in API context)
+                    // Remove loading message immediately and automatically have Chad respond
                     setMessages((m) => {
                       const copy = [...m];
-                      // Remove the loading message
+                      // Remove the loading message immediately
                       const lastIdx = copy.length - 1;
                       if (lastIdx >= 0 && copy[lastIdx].isLoading) {
                         copy.pop();
                       }
                       // Add context as system message (hidden from user, but included in API context)
-                      const systemEntry: ChatMessage = { role: "system", content: contextText };
+                      const systemEntry: ChatMessage = { role: "system", content: contextText, hidden: true };
                       const updated: ChatMessage[] = [...copy, systemEntry];
 
-                      // Then automatically send a message from Chad about what he found
-                      // Add a user message to trigger Chad's response, then include system context
-                      const triggerEntry: ChatMessage = { role: "user", content: "What did you find?" };
-                      const messagesWithTrigger: ChatMessage[] = [...updated, triggerEntry];
+                      // Automatically have Chad respond about what he found
+                      // The system message with exam data will be included in the API context
+                      // Don't add placeholder here - sendMessageWithExistingMessages will add it
+                      // This ensures the spinner stops immediately and streaming starts cleanly
                       setTimeout(() => {
-                        sendMessageWithExistingMessages(messagesWithTrigger);
-                      }, 100);
+                        sendMessageWithExistingMessages(updated);
+                      }, 50);
 
                       return updated;
                     });
@@ -1418,90 +1879,299 @@ export default function PracticePage() {
     }
   }, [slug]);
 
+  // AI function to match exam snipe entry to course - returns the slug of the matching entry
+  const matchExamSnipeWithAI = async (courseName: string, courseSlug: string, examHistory: any[]): Promise<string | null> => {
+    if (!examHistory || examHistory.length === 0) return null;
+
+    try {
+      // Create a prompt for AI to match - only show names and slugs, not full results
+      const examList = examHistory.map((exam, idx) => {
+        return `${idx + 1}. Course Name: "${exam.courseName || 'Unknown'}", Slug: "${exam.slug || 'Unknown'}"`;
+      }).join('\n');
+
+      const matchingPrompt = `You are a course matching assistant. Your task is to determine which exam snipe entry matches the given course.
+
+Current Course:
+- Name: "${courseName}"
+- Slug: "${courseSlug}"
+
+Available Exam Snipe Entries:
+${examList}
+
+Analyze the course names and determine which exam snipe entry (if any) corresponds to the same course. Consider:
+- Exact name matches
+- Abbreviations (e.g., "Signals & Systems" vs "Signaler och System")
+- Different languages (e.g., Swedish vs English course names)
+- Course codes (e.g., "TMA123" vs "TMA 123")
+- Common variations in naming
+
+Respond with ONLY the slug of the matching entry (e.g., "signals-systems" or "tma123"), or "NONE" if no match is found. Do not include any explanation, just the slug or "NONE".`;
+
+      const res = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: "You are a course matching assistant. Match exam snipe entries to courses based on course names, considering variations, abbreviations, and different languages. Return only the slug of the matching entry.",
+          messages: [
+            { role: "user", content: matchingPrompt }
+          ],
+          path: `/subjects/${courseSlug}/practice`,
+        }),
+      });
+
+      if (!res.ok || !res.body) {
+        console.error("Failed to get AI match for exam snipe");
+        return null;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let response = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+
+        const chunk = decoder.decode(value, { stream: true });
+        chunk.split("\n").forEach((line) => {
+          if (!line.startsWith("data: ")) return;
+          const payload = line.slice(6);
+          if (!payload) return;
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed.type === "text") {
+              response += parsed.content;
+            }
+          } catch (e) {
+            // Ignore parse errors
+          }
+        });
+      }
+
+      // Parse the response - should be a slug or "NONE"
+      const trimmed = response.trim().toUpperCase();
+      if (trimmed === "NONE" || trimmed === "") {
+        return null;
+      }
+
+      // Try to find the slug in the response (it might have extra text)
+      const matchedEntry = examHistory.find((exam) => {
+        const examSlug = (exam.slug || "").toLowerCase().trim();
+        return response.toLowerCase().includes(examSlug);
+      });
+
+      return matchedEntry?.slug || null;
+    } catch (err) {
+      console.error("Error in AI exam snipe matching:", err);
+      return null;
+    }
+  };
+
+  // Fetch exam snipe data for the course on load using AI matching
+  useEffect(() => {
+    if (typeof window === "undefined" || !subjectData) return;
+    
+    const courseName = subjectData.subject || slug;
+    setExamSnipeMatching(true);
+    
+    // Show preparing message in chat
+    setMessages([{ role: "assistant", content: "", isLoading: true }]);
+    
+    (async () => {
+      try {
+        // First, get the list of exam snipe entries (just metadata)
+        const examRes = await fetch("/api/exam-snipe/history", { credentials: "include" });
+        const examJson = await examRes.json().catch(() => ({}));
+
+        if (examJson?.ok && Array.isArray(examJson.history) && examJson.history.length > 0) {
+          // Use AI to determine which exam snipe entry matches this course
+          const matchedSlug = await matchExamSnipeWithAI(courseName, slug, examJson.history);
+
+          if (matchedSlug) {
+            // Fetch only the matched exam snipe's full data
+            const fullDataRes = await fetch(`/api/exam-snipe/history?slug=${encodeURIComponent(matchedSlug)}`, { credentials: "include" });
+            const fullDataJson = await fullDataRes.json().catch(() => ({}));
+
+            if (fullDataJson?.ok && fullDataJson.record && fullDataJson.record.results) {
+              const results = fullDataJson.record.results;
+              const contextData: string[] = [];
+
+              contextData.push(`DETAILED EXAM SNIPE DATA FOR ${fullDataJson.record.courseName || courseName.toUpperCase()}:`);
+              contextData.push(`Total exams analyzed: ${results.totalExams || 0}`);
+
+              if (results.gradeInfo) {
+                contextData.push(`Grade info: ${results.gradeInfo}`);
+              }
+              if (results.patternAnalysis) {
+                contextData.push(`Pattern analysis: ${results.patternAnalysis}`);
+              }
+
+              // Full study order (all concepts)
+              if (results.concepts && Array.isArray(results.concepts) && results.concepts.length > 0) {
+                const studyOrder = results.concepts.map((c: any, idx: number) => {
+                  const name = c.name || `Concept ${idx + 1}`;
+                  const desc = c.description ? ` - ${c.description}` : "";
+                  return `${idx + 1}. ${name}${desc}`;
+                }).join("\n");
+                contextData.push(`STUDY ORDER (priority, all concepts):\n${studyOrder}`);
+              }
+
+              // All common questions
+              if (results.commonQuestions && Array.isArray(results.commonQuestions) && results.commonQuestions.length > 0) {
+                const allQuestions = results.commonQuestions.map((q: any, idx: number) => {
+                  const question = q.question || "";
+                  const count = q.examCount || 0;
+                  const points = q.averagePoints || 0;
+                  return `${idx + 1}. "${question}" (appears in ${count} exams, avg ${points} pts)`;
+                }).join("\n");
+                contextData.push(`ALL COMMON QUESTIONS:\n${allQuestions}`);
+              }
+
+              const contextText = contextData.join("\n\n");
+              setExamSnipeData(contextText);
+            } else {
+              setExamSnipeData(null);
+            }
+          } else {
+            setExamSnipeData(null);
+          }
+          // Mark as matched after AI matching completes (whether match found or not)
+          setExamSnipeMatching(false);
+          setExamSnipeMatched(true);
+          // Remove preparing message
+          setMessages([]);
+        } else {
+          setExamSnipeData(null);
+          // Still mark as matched even if no exam snipe entries exist
+          setExamSnipeMatching(false);
+          setExamSnipeMatched(true);
+          // Remove preparing message
+          setMessages([]);
+        }
+      } catch (err) {
+        console.error("Failed to fetch exam snipe data for initial context:", err);
+        setExamSnipeData(null);
+        // Mark as matched even on error so initial prompt can proceed
+        setExamSnipeMatching(false);
+        setExamSnipeMatched(true);
+        // Remove preparing message
+        setMessages([]);
+      }
+    })();
+  }, [slug, subjectData]);
+
+  // Load all available exam snipes for Chad's context
   useEffect(() => {
     if (typeof window === "undefined") return;
+    
+    (async () => {
+      try {
+        const res = await fetch("/api/exam-snipe/history", { credentials: "include" });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(json?.history)) {
+          const examSnipes = json.history.map((record: any) => ({
+            slug: record.slug,
+            courseName: record.courseName || "Untitled Exam Snipe",
+            createdAt: record.createdAt,
+          }));
+          setAvailableExamSnipes(examSnipes);
+          console.log(`Loaded ${examSnipes.length} exam snipes for Chad's context`);
+        }
+      } catch (err) {
+        console.error("Failed to load exam snipes for context:", err);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setPracticeLogLoaded(false);
     try {
       const stored = localStorage.getItem(`${PRACTICE_LOG_PREFIX}${slug}`);
-    if (!stored) {
-      setPracticeLog([]);
-      return;
-    }
-    try {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed)) {
-        setPracticeLog(
-          parsed
+      if (!stored) {
+        setPracticeLog([]);
+        setPracticeLogLoaded(true);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stored);
+        console.log("[Practice Log Load] Parsed from localStorage:", parsed?.length || 0, "entries");
+        if (Array.isArray(parsed)) {
+          const mapped = parsed
             .filter((entry) => entry && typeof entry === "object")
             .map((entry: any) => ({
-              id:
-                typeof entry.id === "string"
-                  ? entry.id
-                  : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-              timestamp:
-                typeof entry.timestamp === "number"
-                  ? entry.timestamp
-                  : Date.now(),
-              topic: typeof entry.topic === "string" ? entry.topic : "General Practice",
-              question: typeof entry.question === "string" ? entry.question : entry.result || "No question recorded",
-              answer: typeof entry.answer === "string" ? entry.answer : "No answer recorded",
-              assessment: typeof entry.assessment === "string" ? entry.assessment : "Legacy entry",
-              grade: typeof entry.grade === "number" ? entry.grade : (typeof entry.rating === "number" ? entry.rating : 5),
-              // Legacy fields
-              skill: typeof entry.skill === "string" ? entry.skill : undefined,
-              rating: typeof entry.rating === "number" ? entry.rating : undefined,
-              strengths: Array.isArray(entry.strengths)
-                ? entry.strengths.filter((item: any) => typeof item === "string")
-                : undefined,
-              weaknesses: Array.isArray(entry.weaknesses)
-                ? entry.weaknesses.filter((item: any) => typeof item === "string")
-                : undefined,
-              recommendation: typeof entry.recommendation === "string" ? entry.recommendation : undefined,
-              confidence: typeof entry.confidence === "number" ? entry.confidence : undefined,
-              difficulty: typeof entry.difficulty === "string" ? entry.difficulty : undefined,
-              raw: typeof entry.raw === "string" ? entry.raw : undefined,
-              result: typeof entry.result === "string" ? entry.result : undefined,
-              questions: typeof entry.questions === "number" ? entry.questions : undefined,
-            }))
-        );
-      } else if (typeof parsed === "string") {
+                id:
+                  typeof entry.id === "string"
+                    ? entry.id
+                    : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                timestamp:
+                  typeof entry.timestamp === "number"
+                    ? entry.timestamp
+                    : Date.now(),
+                topic: typeof entry.topic === "string" ? entry.topic : "General Practice",
+                question: typeof entry.question === "string" ? entry.question : entry.result || "No question recorded",
+                answer: typeof entry.answer === "string" ? entry.answer : "No answer recorded",
+                assessment: typeof entry.assessment === "string" ? entry.assessment : "Legacy entry",
+                grade: typeof entry.grade === "number" ? entry.grade : (typeof entry.rating === "number" ? entry.rating : 5),
+                // Legacy fields
+                skill: typeof entry.skill === "string" ? entry.skill : undefined,
+                rating: typeof entry.rating === "number" ? entry.rating : undefined,
+                strengths: Array.isArray(entry.strengths)
+                  ? entry.strengths.filter((item: any) => typeof item === "string")
+                  : undefined,
+                weaknesses: Array.isArray(entry.weaknesses)
+                  ? entry.weaknesses.filter((item: any) => typeof item === "string")
+                  : undefined,
+                recommendation: typeof entry.recommendation === "string" ? entry.recommendation : undefined,
+                confidence: typeof entry.confidence === "number" ? entry.confidence : undefined,
+                difficulty: typeof entry.difficulty === "string" ? entry.difficulty : undefined,
+                raw: typeof entry.raw === "string" ? entry.raw : undefined,
+                result: typeof entry.result === "string" ? entry.result : undefined,
+                questions: typeof entry.questions === "number" ? entry.questions : undefined,
+              }));
+          console.log("[Practice Log Load] Mapped entries:", mapped.length);
+          setPracticeLog(mapped);
+        } else if (typeof parsed === "string") {
+          setPracticeLog([
+            {
+              id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+              timestamp: Date.now(),
+              topic: "Legacy entry",
+              question: "Legacy question",
+              answer: parsed.slice(0, 120),
+              assessment: "Legacy entry",
+              grade: 5,
+              result: parsed.slice(0, 120),
+            },
+          ]);
+        } else {
+          setPracticeLog([]);
+        }
+      } catch {
+        const normalized = stored.trim();
+        if (!normalized) {
+          setPracticeLog([]);
+          return;
+        }
         setPracticeLog([
           {
             id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
             timestamp: Date.now(),
             topic: "Legacy entry",
             question: "Legacy question",
-            answer: parsed.slice(0, 120),
+            answer: normalized.slice(0, 200),
             assessment: "Legacy entry",
             grade: 5,
-            result: parsed.slice(0, 120),
+            result: normalized.slice(0, 200),
           },
         ]);
-      } else {
-        setPracticeLog([]);
       }
-    } catch {
-      // Legacy string log fallback
-      const normalized = stored.trim();
-      if (!normalized) {
-        setPracticeLog([]);
-        return;
-      }
-      setPracticeLog([
-        {
-          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          timestamp: Date.now(),
-          topic: "Legacy entry",
-          question: "Legacy question",
-          answer: normalized.slice(0, 200),
-          assessment: "Legacy entry",
-          grade: 5,
-          result: normalized.slice(0, 200),
-        },
-      ]);
-    }
     } catch (err) {
       console.error("Failed to load practice log:", err);
-    setPracticeLog([]);
+      setPracticeLog([]);
+    } finally {
+      setPracticeLogLoaded(true);
     }
   }, [slug]);
 
@@ -1510,16 +2180,20 @@ useEffect(() => {
   setMessages([]);
   setInitialPromptSent(false);
   setError(null);
+  setExamSnipeMatched(false);
+  setExamSnipeMatching(false);
+  setExamSnipeData(null);
 }, [slug]);
 
 useEffect(() => {
-  if (!initialPromptSent && !loadingSubject && !sending) {
+  // Wait for exam snipe matching to complete before sending initial prompt
+  if (!initialPromptSent && !loadingSubject && !sending && practiceLogLoaded && examSnipeMatched && !examSnipeMatching) {
     setInitialPromptSent(true);
     setTimeout(() => {
       void sendMessage("", { suppressUser: true, omitFromHistory: true });
     }, 150);
   }
-}, [subjectData, loadingSubject, initialPromptSent, sending]);
+}, [subjectData, loadingSubject, initialPromptSent, sending, practiceLogLoaded, examSnipeMatched, examSnipeMatching]);
 
   useEffect(() => {
     if (!messagesEndRef.current) return;
@@ -1527,8 +2201,8 @@ useEffect(() => {
   }, [messages, sending]);
 
 const practiceContext = useMemo(
-  () => buildPracticeContext(slug, subjectData, practiceLog),
-  [slug, subjectData, practiceLog]
+  () => buildPracticeContext(slug, subjectData, practiceLog, examSnipeData, availableExamSnipes),
+  [slug, subjectData, practiceLog, examSnipeData, availableExamSnipes]
 );
 
 async function sendMessage(
@@ -1599,25 +2273,38 @@ async function sendMessage(
 
   const historyForApi = conversation.slice(0, -1);
 
-  try {
-    setSending(true);
-    setError(null);
+    try {
+      setSending(true);
+      setError(null);
 
-    const res = await fetch("/api/chat/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        context: practiceContext,
-        messages: historyForApi.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
-        path:
-          typeof window !== "undefined"
-            ? window.location.pathname
-            : `/subjects/${slug}/practice`,
-      }),
-    });
+      // Debug: verify context being sent
+      const contextHasLogs = practiceContext.includes("COMPLETE PRACTICE LOG HISTORY");
+      console.log("[sendMessage] practiceContext length:", practiceContext.length);
+      console.log("[sendMessage] Context contains practice logs:", contextHasLogs);
+      if (contextHasLogs) {
+        const logIndex = practiceContext.indexOf("COMPLETE PRACTICE LOG HISTORY");
+        console.log("[sendMessage] Practice logs start at index:", logIndex);
+        console.log("[sendMessage] Practice logs preview in context:", practiceContext.substring(logIndex, logIndex + 500));
+      } else {
+        console.warn("[sendMessage] WARNING: practiceContext does NOT contain practice logs!");
+        console.log("[sendMessage] Context preview (last 1000 chars):", practiceContext.substring(Math.max(0, practiceContext.length - 1000)));
+      }
+
+      const res = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: practiceContext,
+          messages: historyForApi.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+          path:
+            typeof window !== "undefined"
+              ? window.location.pathname
+              : `/subjects/${slug}/practice`,
+        }),
+      });
 
     if (!res.ok || !res.body) {
       throw new Error(`Chat failed (${res.status})`);
@@ -1804,6 +2491,307 @@ async function sendMessage(
     void sendMessage(prompt);
   };
 
+  // State for tracking lesson generation
+  const [generatingLessonFor, setGeneratingLessonFor] = useState<string | null>(null);
+
+  // Extract topic from question using AI
+  const extractTopicFromQuestion = async (questionText: string): Promise<string | null> => {
+    try {
+      const courseName = subjectData?.subject || slug;
+      const courseTopics = subjectData?.topics?.map(t => t.name) || 
+                          Object.keys(subjectData?.nodes || {}).filter(k => !k.startsWith("__")) || [];
+      
+      const topicList = courseTopics.length > 0 
+        ? courseTopics.map((t, idx) => `${idx + 1}. "${t}"`).join('\n')
+        : 'No topics available';
+
+      const prompt = `You are a topic matching assistant. Given a practice question, determine which course topic it relates to.
+
+Course: "${courseName}"
+Available Topics:
+${topicList}
+
+Question: "${questionText}"
+
+Analyze the question and determine which topic it matches. Consider:
+- The main concept or subject matter being tested
+- Keywords and terminology
+- The type of problem or skill required
+
+Respond with ONLY the exact topic name from the list above, or "NONE" if no match is found. Do not include any explanation, just the topic name or "NONE".`;
+
+      const res = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: "You are a topic matching assistant. Match practice questions to course topics based on content, concepts, and terminology.",
+          messages: [
+            { role: "user", content: prompt }
+          ],
+          path: `/subjects/${slug}/practice`,
+        }),
+      });
+
+      if (!res.ok || !res.body) {
+        console.error("Failed to extract topic from question");
+        return null;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let response = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+
+        const chunk = decoder.decode(value, { stream: true });
+        chunk.split("\n").forEach((line) => {
+          if (!line.startsWith("data: ")) return;
+          const payload = line.slice(6);
+          if (!payload) return;
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed.type === "text") {
+              response += parsed.content;
+            }
+          } catch (e) {
+            // Ignore parse errors
+          }
+        });
+      }
+
+      const trimmed = response.trim();
+      if (trimmed.toUpperCase() === "NONE" || !trimmed) {
+        return null;
+      }
+
+      // Try to find exact match in course topics
+      const matchedTopic = courseTopics.find((topic) => 
+        trimmed.toLowerCase().includes(topic.toLowerCase()) || 
+        topic.toLowerCase().includes(trimmed.toLowerCase())
+      );
+
+      return matchedTopic || trimmed;
+    } catch (err) {
+      console.error("Error extracting topic from question:", err);
+      return null;
+    }
+  };
+
+  // Check if lesson exists for a topic
+  const lessonExists = (topicName: string): boolean => {
+    if (!subjectData?.nodes) return false;
+    const topicData = subjectData.nodes[topicName];
+    if (!topicData || typeof topicData === 'string') return false;
+    return Array.isArray(topicData.lessons) && topicData.lessons.length > 0;
+  };
+
+  // Generate a specific topic name based on the question
+  const generateSpecificTopicName = async (baseTopic: string, questionText: string): Promise<string> => {
+    try {
+      const prompt = `You are a topic naming assistant. Given a base topic and a specific practice question, create a more specific and descriptive topic name that captures both the general concept and the specific aspect asked in the question.
+
+Base Topic: "${baseTopic}"
+Question: "${questionText}"
+
+Create a topic name that:
+- Includes the base topic
+- Adds specificity based on what the question is asking about
+- Is concise (3-8 words max)
+- Captures the specific skill, method, or application mentioned in the question
+
+Examples:
+- Base: "PID Regulators", Question: "Dimensionera en pid regulator för fasmarginalen 45 grader" → "PID Regulators and Dimensioning"
+- Base: "Derivatives", Question: "Find the derivative of f(x) = x² + 3x" → "Derivatives and Basic Differentiation"
+- Base: "Integration", Question: "Solve the integral using substitution" → "Integration and Substitution Method"
+
+Respond with ONLY the specific topic name, no explanation.`;
+
+      const res = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          context: "You are a topic naming assistant. Create specific topic names that combine base concepts with specific applications or methods from practice questions.",
+          messages: [
+            { role: "user", content: prompt }
+          ],
+          path: `/subjects/${slug}/practice`,
+        }),
+      });
+
+      if (!res.ok || !res.body) {
+        return baseTopic; // Fallback to base topic
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let response = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+
+        const chunk = decoder.decode(value, { stream: true });
+        chunk.split("\n").forEach((line) => {
+          if (!line.startsWith("data: ")) return;
+          const payload = line.slice(6);
+          if (!payload) return;
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed.type === "text") {
+              response += parsed.content;
+            }
+          } catch (e) {
+            // Ignore parse errors
+          }
+        });
+      }
+
+      const trimmed = response.trim();
+      return trimmed || baseTopic;
+    } catch (err) {
+      console.error("Error generating specific topic name:", err);
+      return baseTopic;
+    }
+  };
+
+  // Generate lesson for a topic with question-specific context
+  const generateLessonForTopic = async (topicName: string, questionText: string, specificTopicName: string): Promise<boolean> => {
+    try {
+      if (!subjectData) return false;
+
+      const courseName = subjectData.subject || slug;
+      const courseContext = subjectData.course_context || "";
+      const combinedText = subjectData.combinedText || "";
+      const topicNode = subjectData.nodes?.[topicName];
+      const baseTopicSummary = (topicNode && typeof topicNode === 'object' && 'overview' in topicNode) 
+        ? topicNode.overview || "" 
+        : "";
+      
+      // Create question-specific topic summary
+      const topicSummary = `${baseTopicSummary ? baseTopicSummary + "\n\n" : ""}SPECIFIC FOCUS: This lesson is being generated in response to a practice question: "${questionText}". The lesson should cover the general topic "${topicName}" but with particular emphasis on the specific aspect, method, or application mentioned in the question. Make sure to include detailed explanations and examples related to what the question is asking about.`;
+      
+      const courseTopics = subjectData.topics?.map(t => t.name) || 
+                          Object.keys(subjectData.nodes || {}).filter(k => !k.startsWith("__")) || [];
+
+      // Build course_context ensuring the original course context is included first
+      let fullCourseContext = courseContext;
+      if (fullCourseContext) {
+        fullCourseContext += "\n\n";
+      }
+      fullCourseContext += `This lesson is being generated to help answer a specific practice question: "${questionText}". Focus on the general topic but emphasize the specific aspect asked in the question.`;
+
+      const res = await fetch("/api/node-lesson", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: courseName,
+          topic: specificTopicName,
+          course_context: fullCourseContext,
+          combinedText: combinedText,
+          topicSummary: topicSummary,
+          lessonsMeta: [{ type: "Full Lesson", title: specificTopicName }],
+          lessonIndex: 0,
+          previousLessons: [],
+          generatedLessons: [],
+          otherLessonsMeta: [],
+          courseTopics: courseTopics,
+          languageName: subjectData.course_language_name || "English",
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || "Lesson generation failed");
+      }
+
+      const lessonData = json.data || {};
+      if (!lessonData.body) {
+        throw new Error("Lesson generation returned empty body");
+      }
+
+      // Save the generated lesson under the specific topic name
+      const updatedData = { ...subjectData };
+      updatedData.nodes = updatedData.nodes || {};
+      updatedData.nodes[specificTopicName] = {
+        overview: baseTopicSummary || '',
+        symbols: [],
+        lessonsMeta: [{ type: 'Full Lesson', title: String(lessonData.title || specificTopicName) }],
+        lessons: [{
+          title: String(lessonData.title || specificTopicName),
+          body: String(lessonData.body || ''),
+          quiz: Array.isArray(lessonData.quiz)
+            ? lessonData.quiz.map((q: any) => ({
+                question: String(q.question || ''),
+                answer: q.answer ? String(q.answer) : undefined,
+              }))
+            : []
+        }],
+        rawLessonJson: [typeof json.raw === 'string' ? json.raw : JSON.stringify(lessonData)],
+      } as any;
+
+      saveSubjectData(slug, updatedData);
+      setSubjectData(updatedData);
+
+      return true;
+    } catch (err) {
+      console.error("Error generating lesson:", err);
+      return false;
+    }
+  };
+
+  // Main handler for opening lesson
+  const handleOpenLesson = async (questionText: string) => {
+    if (generatingLessonFor) return; // Prevent multiple simultaneous requests
+    
+    try {
+      setGeneratingLessonFor(questionText);
+      
+      // Extract topic from question
+      const topicName = await extractTopicFromQuestion(questionText);
+      
+      if (!topicName) {
+        alert("Could not determine the topic for this question. Please try again.");
+        return;
+      }
+
+      // Generate specific topic name based on question
+      const specificTopicName = await generateSpecificTopicName(topicName, questionText);
+      
+      // Check if lesson exists for specific topic first, then base topic
+      let finalTopicName = specificTopicName;
+      let lessonAlreadyExists = lessonExists(specificTopicName);
+      
+      if (!lessonAlreadyExists) {
+        // Check if base topic has a lesson
+        if (lessonExists(topicName)) {
+          // Use existing base topic lesson
+          finalTopicName = topicName;
+        } else {
+          // Generate new lesson with question-specific context
+          const success = await generateLessonForTopic(topicName, questionText, specificTopicName);
+          if (!success) {
+            alert("Failed to generate lesson. Please try again.");
+            return;
+          }
+          // Use the specific topic name
+          finalTopicName = specificTopicName;
+        }
+      }
+
+      // Navigate to the lesson
+      router.push(`/subjects/${slug}/node/${encodeURIComponent(finalTopicName)}/lesson/0`);
+    } catch (err) {
+      console.error("Error opening lesson:", err);
+      alert("An error occurred while opening the lesson. Please try again.");
+    } finally {
+      setGeneratingLessonFor(null);
+    }
+  };
+
   if (loadingSubject) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--background)] text-[var(--foreground)]">
@@ -1815,34 +2803,25 @@ async function sendMessage(
   return (
     <div className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)]">
       <div className="border-b border-[var(--foreground)]/10 bg-[var(--background)]/90 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-4xl items-center justify-between px-6 py-5">
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <button
-              onClick={() => router.push(`/subjects/${slug}`)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 hover:bg-[var(--background)]/70 transition-colors flex-shrink-0"
-              aria-label="Back to course"
-            >
-              <span className="text-lg">←</span>
-            </button>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs uppercase tracking-widest text-[var(--foreground)]/60">
-                Practice Mode
-              </div>
-              <h1 className="text-lg font-semibold leading-tight truncate">
-                {subjectData?.subject || slug}
-              </h1>
+        <div className="mx-auto flex w-full max-w-4xl items-center justify-between px-6 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] uppercase tracking-widest text-[var(--foreground)]/60">
+              Practice Mode
             </div>
+            <h1 className="text-base font-semibold leading-tight truncate">
+              {subjectData?.subject || slug}
+            </h1>
           </div>
-          <div className="flex items-center gap-3 flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <button
               onClick={() => setLogModalOpen(true)}
-              className="inline-flex items-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-4 py-1.5 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors whitespace-nowrap"
+              className="inline-flex items-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-2.5 py-1 text-[11px] font-medium text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors whitespace-nowrap"
             >
               Practice Log
             </button>
             <button
               onClick={() => setRawLogModalOpen(true)}
-              className="inline-flex items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-3 py-1.5 text-xs font-medium text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors whitespace-nowrap"
+              className="inline-flex items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-2 py-1 text-[10px] font-medium text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors whitespace-nowrap"
             >
               Raw Logs
             </button>
@@ -1850,7 +2829,8 @@ async function sendMessage(
               onClick={() => {
                 if (confirm('Are you sure you want to clear all practice logs? This cannot be undone.')) {
                   try {
-                    localStorage.removeItem(`${PRACTICE_LOG_PREFIX}${slug}`);
+                    // Explicitly set empty array instead of just removing, to prevent any race conditions
+                    localStorage.setItem(`${PRACTICE_LOG_PREFIX}${slug}`, JSON.stringify([]));
                   } catch (error) {
                     console.warn("Failed to clear practice logs from storage:", error);
                   }
@@ -1861,10 +2841,36 @@ async function sendMessage(
                       practiceLogs: []
                     });
                   }
+                  // Clear state immediately and verify it stays cleared
                   setPracticeLog([]);
+                  // Verify localStorage is actually empty after a brief delay
+                  setTimeout(() => {
+                    const stored = localStorage.getItem(`${PRACTICE_LOG_PREFIX}${slug}`);
+                    if (stored) {
+                      try {
+                        const parsed = JSON.parse(stored);
+                        if (Array.isArray(parsed) && parsed.length === 0) {
+                          // Good, it's empty
+                          setPracticeLog([]);
+                        } else if (Array.isArray(parsed) && parsed.length > 0) {
+                          // Something restored it, clear again
+                          console.warn("Practice logs were restored, clearing again");
+                          localStorage.setItem(`${PRACTICE_LOG_PREFIX}${slug}`, JSON.stringify([]));
+                          setPracticeLog([]);
+                        }
+                      } catch {
+                        // Invalid data, clear it
+                        localStorage.setItem(`${PRACTICE_LOG_PREFIX}${slug}`, JSON.stringify([]));
+                        setPracticeLog([]);
+                      }
+                    } else {
+                      // No data, ensure state is empty
+                      setPracticeLog([]);
+                    }
+                  }, 100);
                 }
               }}
-              className="inline-flex items-center justify-center rounded-full border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/20 transition-colors whitespace-nowrap"
+              className="inline-flex items-center justify-center rounded-full border border-red-500/40 bg-red-500/10 px-2 py-1 text-[10px] font-medium text-red-400 hover:bg-red-500/20 transition-colors whitespace-nowrap"
               title="Clear all practice logs"
             >
               Clear Logs
@@ -1891,10 +2897,11 @@ async function sendMessage(
           )}
 
           {messages.map((msg, idx) => {
-            if (msg.hidden) return null;
+            if (msg.hidden || msg.role === "system") return null;
             const isUser = msg.role === "user";
             const isAssistant = msg.role === "assistant";
-            const showSpinner = isAssistant && sending && msg.content.trim() === "";
+            const showSpinner = (isAssistant && sending && msg.content.trim() === "") || (isAssistant && msg.isLoading);
+            const isPreparing = isAssistant && msg.isLoading && examSnipeMatching;
             return (
               <div
                 key={`${msg.role}-${idx}`}
@@ -1915,14 +2922,14 @@ async function sendMessage(
                       <div className="flex items-center gap-2 text-xs text-[var(--foreground)]/60">
                         <GlowSpinner
                           size={16}
-                          ariaLabel="Chad thinking"
-                          idSuffix={`practice-thinking-${idx}`}
+                          ariaLabel={isPreparing ? "Preparing" : "Chad thinking"}
+                          idSuffix={isPreparing ? `practice-preparing-${idx}` : `practice-thinking-${idx}`}
                         />
-                        Thinking...
+                        {isPreparing ? "Preparing..." : "Thinking..."}
                       </div>
                     ) : isAssistant ? (
                       <>
-                        {renderPracticeContent(msg.content || "")}
+                        {renderPracticeContent(msg.content || "", handleOpenLesson, generatingLessonFor)}
                         {/* Render UI elements */}
                         {msg.uiElements && msg.uiElements.length > 0 && (
                           <div className="mt-3 space-y-2">
@@ -1977,44 +2984,85 @@ async function sendMessage(
             e.preventDefault();
             void sendMessage();
           }}
-          className="mt-4 space-y-3 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4"
+          className="mt-4 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4"
         >
-          <div className="flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => handleDifficultyAdjustment("down")}
-              disabled={sending}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-lg text-[var(--foreground)] hover:bg-[var(--background)]/70 disabled:opacity-50 transition-colors"
-              aria-label="Lower difficulty"
-              title="Lower difficulty"
-            >
-              –
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDifficultyAdjustment("up")}
-              disabled={sending}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-lg text-[var(--foreground)] hover:bg-[var(--background)]/70 disabled:opacity-50 transition-colors"
-              aria-label="Raise difficulty"
-              title="Raise difficulty"
-            >
-              +
-            </button>
-          </div>
-          <div className="flex items-end gap-3">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void sendMessage();
-                }
-              }}
-              placeholder="Respond with your work, explain your reasoning, or ask for a different drill…"
-              rows={2}
-              className="flex-1 resize-none rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/40 focus:border-[var(--accent-cyan)] focus:outline-none"
-            />
+          <div className="flex items-center gap-3">
+            <div className="flex-1 relative">
+              {/* Plus button for dropdown */}
+              <div className="absolute left-2 top-1/2 -translate-y-1/2 z-10" data-qr-dropdown>
+                <button
+                  type="button"
+                  onClick={() => setShowQrDropdown(!showQrDropdown)}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-base leading-none text-[var(--foreground)] hover:bg-[var(--background)]/70 disabled:opacity-50 transition-colors"
+                  aria-label="More options"
+                  title="More options"
+                >
+                  +
+                </button>
+                {/* Dropdown menu */}
+                {showQrDropdown && (
+                  <div className="absolute left-0 bottom-full mb-2 w-48 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/95 shadow-lg overflow-hidden z-20">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void createQrSession();
+                      }}
+                      className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors"
+                    >
+                      Answer with phone
+                    </button>
+                  </div>
+                )}
+              </div>
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void sendMessage();
+                  }
+                }}
+                placeholder="Respond with your work, explain your reasoning, or ask for a different drill…"
+                rows={1}
+                className="w-full resize-none rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/80 pl-12 pr-20 py-4.5 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/40 focus:border-[var(--accent-cyan)] focus:outline-none"
+              />
+              {/* Image thumbnails in textarea */}
+              {qrImages.length > 0 && (
+                <div className="absolute left-12 top-1.5 flex gap-1 flex-wrap pointer-events-none">
+                  {qrImages.map((img) => (
+                    <img
+                      key={img.id}
+                      src={img.data}
+                      alt="Uploaded"
+                      className="h-6 w-6 object-cover rounded border border-[var(--foreground)]/20"
+                    />
+                  ))}
+                </div>
+              )}
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleDifficultyAdjustment("down")}
+                  disabled={sending}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-base leading-none text-[var(--foreground)] hover:bg-[var(--background)]/70 disabled:opacity-50 transition-colors"
+                  aria-label="Lower difficulty"
+                  title="Lower difficulty"
+                >
+                  –
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDifficultyAdjustment("up")}
+                  disabled={sending}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-base leading-none text-[var(--foreground)] hover:bg-[var(--background)]/70 disabled:opacity-50 transition-colors"
+                  aria-label="Raise difficulty"
+                  title="Raise difficulty"
+                >
+                  +
+                </button>
+              </div>
+            </div>
             <button
               type="submit"
               disabled={sending || !input.trim()}
@@ -2031,6 +3079,60 @@ async function sendMessage(
           </div>
         )}
       </div>
+
+      {/* QR Code Modal */}
+      {showQrModal && qrUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowQrModal(false);
+              if (qrPollIntervalRef.current) {
+                clearInterval(qrPollIntervalRef.current);
+                qrPollIntervalRef.current = null;
+              }
+            }
+          }}
+        >
+          <div className="w-full max-w-md rounded-2xl border border-[var(--foreground)]/30 bg-[var(--background)]/95 p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-[var(--foreground)]">
+                Answer with Phone
+              </h2>
+              <button
+                onClick={() => {
+                  setShowQrModal(false);
+                  if (qrPollIntervalRef.current) {
+                    clearInterval(qrPollIntervalRef.current);
+                    qrPollIntervalRef.current = null;
+                  }
+                }}
+                className="text-[var(--foreground)]/60 hover:text-[var(--foreground)] transition-colors"
+              >
+                ×
+              </button>
+            </div>
+            <div className="space-y-4">
+              <p className="text-sm text-[var(--foreground)]/70">
+                Scan this QR code with your phone to open the camera. Take photos
+                of your work, and they will automatically appear in the text field.
+              </p>
+              <div className="flex justify-center p-4 bg-white rounded-lg">
+                {qrCodeDataUrl ? (
+                  <img src={qrCodeDataUrl} alt="QR Code" className="w-64 h-64" />
+                ) : (
+                  <div className="w-64 h-64 flex items-center justify-center text-[var(--foreground)]/50">
+                    Generating QR code...
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-[var(--foreground)]/50 text-center">
+                Waiting for images...
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {logModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6">
@@ -2283,10 +3385,26 @@ async function sendMessage(
                     .map((entry) => (
                       <div
                         key={entry.id}
-                        className="rounded-lg border border-[var(--foreground)]/15 bg-[var(--background)]/90 p-4 font-mono text-xs whitespace-pre-wrap"
+                        className="rounded-lg border border-[var(--foreground)]/15 bg-[var(--background)]/90 p-4 font-mono text-xs whitespace-pre-wrap relative"
                       >
-                        <div className="text-[var(--foreground)]/50 mb-2">
-                          {new Date(entry.timestamp).toISOString()} — ID: {entry.id}
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-[var(--foreground)]/50">
+                            {new Date(entry.timestamp).toISOString()} — ID: {entry.id}
+                          </div>
+                          <button
+                            onClick={() => {
+                              if (confirm(`Are you sure you want to remove this practice log entry?\n\nID: ${entry.id}\nTopic: ${entry.topic || 'N/A'}\nTimestamp: ${new Date(entry.timestamp).toLocaleString()}`)) {
+                                removePracticeLogEntry(entry.id);
+                              }
+                            }}
+                            className="inline-flex items-center justify-center h-6 w-6 rounded border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors ml-2 flex-shrink-0"
+                            aria-label={`Remove practice log entry ${entry.id}`}
+                            title="Remove this entry"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" stroke="currentColor" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
                         </div>
                         <pre className="bg-[var(--background)]/80 p-3 rounded border border-[var(--foreground)]/10 overflow-x-auto text-[var(--foreground)]">
 {JSON.stringify(entry, null, 2)}
