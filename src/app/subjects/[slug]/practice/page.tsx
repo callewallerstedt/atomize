@@ -900,8 +900,8 @@ function extractBasicTopics(data: StoredSubjectData | null): string[] {
           .map((topic) => ({
             name: normalizeName(topic),
             coverage:
-              typeof topic === "object" && topic && typeof topic.coverage === "number"
-                ? topic.coverage
+              typeof topic === "object" && topic && typeof (topic as any).coverage === "number"
+                ? (topic as any).coverage
                 : 0,
           }))
           .filter((topic) => topic.name)
