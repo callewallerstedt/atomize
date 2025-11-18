@@ -2020,7 +2020,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
             
             // Get lesson content
             const contentEl = lessonContentDiv || surgeLessonCard.querySelector('.lesson-content') || surgeLessonCard;
-            const content = contentEl?.innerText || contentEl?.textContent || '';
+            const content = (contentEl as HTMLElement)?.innerText || contentEl?.textContent || '';
             
             // Build structured context for Chad
             const surgeContext: string[] = [];
