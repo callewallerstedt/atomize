@@ -243,7 +243,7 @@ const practiceProblemContainer: PluginSimple = (mdInstance) => {
 				// Tokenize the content between markers (from line after opening to line before closing)
 				const oldParent = state.parentType;
 				const oldLineMax = state.lineMax;
-				state.parentType = "practice_problem";
+				state.parentType = "practice_problem" as any;
 				state.lineMax = line;
 				state.md.block.tokenize(state, startLine + 1, line);
 				state.parentType = oldParent;
