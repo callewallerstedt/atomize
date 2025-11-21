@@ -15,9 +15,10 @@ async function generateNameFromText(text: string, fallbackTitle?: string, prefer
 
 Rules:
 - Keep it short and concise: 1-5 words
-- Format: "name coursecode" or "name coursecode / coursecode2" if multiple course codes are present
-- Include the course code(s) if present (format: 3 letters + 3 numbers, e.g., EEN117, TMA123, FMA240)
-- Examples: "Calculus TMA123", "Linear Algebra TMA123/ TMA124", "Signals and Systems EEN117"
+- Format: "name coursecode" or "name coursecode / coursecode2" ONLY if course codes are actually present in the materials
+- ONLY include course code(s) if they are explicitly found in the materials (format: 3 letters + 3 numbers, e.g., EEN117, TMA123, FMA240)
+- If no course codes are found in the materials, return just the course name without any course codes
+- Examples: "Calculus TMA123" (if TMA123 is in materials), "Linear Algebra" (if no course code found), "Signals and Systems EEN117" (if EEN117 is in materials)
 - Use a specific, descriptive name that reflects the actual course content
 - Remove qualifiers like "exam", "practice", "notes", "2024", etc.
 - Prefer the actual course name over generic terms

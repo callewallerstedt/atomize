@@ -33,6 +33,140 @@ type ParsedAction = {
   params: Record<string, string>;
 };
 
+// Helper function to parse flexible date input and convert to ISO format (YYYY-MM-DD)
+// Accepts: "5 days", "in 2 weeks", "March 15th", "2024-03-15", "next Monday", etc.
+function parseDateInput(dateInput: string): string | null {
+  if (!dateInput || !dateInput.trim()) return null;
+  
+  const input = dateInput.trim().toLowerCase();
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const today = new Date(now);
+  
+  // Already in ISO format (YYYY-MM-DD)
+  const isoMatch = input.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const date = new Date(parseInt(isoMatch[1]), parseInt(isoMatch[2]) - 1, parseInt(isoMatch[3]));
+    date.setHours(0, 0, 0, 0);
+    return date.toISOString().split('T')[0];
+  }
+  
+  // Days from now: "5 days", "in 3 days", "3 days left", etc.
+  const daysMatch = input.match(/(\d+)\s*days?/);
+  if (daysMatch) {
+    const days = parseInt(daysMatch[1]);
+    const examDate = new Date(today);
+    examDate.setDate(examDate.getDate() + days);
+    // Use local date components to avoid timezone issues
+    const year = examDate.getFullYear();
+    const month = String(examDate.getMonth() + 1).padStart(2, '0');
+    const day = String(examDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  
+  // Weeks from now: "2 weeks", "in 1 week", etc.
+  const weeksMatch = input.match(/(\d+)\s*weeks?/);
+  if (weeksMatch) {
+    const weeks = parseInt(weeksMatch[1]);
+    const examDate = new Date(today);
+    examDate.setDate(examDate.getDate() + (weeks * 7));
+    // Use local date components to avoid timezone issues
+    const year = examDate.getFullYear();
+    const month = String(examDate.getMonth() + 1).padStart(2, '0');
+    const day = String(examDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  
+  // Months from now: "1 month", "in 2 months", etc.
+  const monthsMatch = input.match(/(\d+)\s*months?/);
+  if (monthsMatch) {
+    const months = parseInt(monthsMatch[1]);
+    const examDate = new Date(today);
+    examDate.setMonth(examDate.getMonth() + months);
+    // Use local date components to avoid timezone issues
+    const year = examDate.getFullYear();
+    const month = String(examDate.getMonth() + 1).padStart(2, '0');
+    const day = String(examDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  
+  // Try to parse as a natural date string
+  try {
+    const parsed = new Date(input);
+    if (!isNaN(parsed.getTime())) {
+      parsed.setHours(0, 0, 0, 0);
+      // If the date is in the past, assume next year
+      if (parsed < today) {
+        parsed.setFullYear(parsed.getFullYear() + 1);
+      }
+      // Use local date components to avoid timezone issues
+      const year = parsed.getFullYear();
+      const month = String(parsed.getMonth() + 1).padStart(2, '0');
+      const day = String(parsed.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+  } catch (e) {
+    // Continue to other parsing methods
+  }
+  
+  // Try parsing common date formats
+  const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 
+                      'july', 'august', 'september', 'october', 'november', 'december'];
+  const monthAbbrevs = ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
+                        'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  
+  // Format: "March 15th", "March 15", "Mar 15", etc.
+  for (let i = 0; i < monthNames.length; i++) {
+    const monthPattern = new RegExp(`(${monthNames[i]}|${monthAbbrevs[i]})\\s+(\\d{1,2})(?:st|nd|rd|th)?`, 'i');
+    const match = input.match(monthPattern);
+    if (match) {
+      const month = i;
+      const day = parseInt(match[2]);
+      let year = today.getFullYear();
+      
+      const examDate = new Date(year, month, day);
+      examDate.setHours(0, 0, 0, 0);
+      
+      // If date has passed this year, use next year
+      if (examDate < today) {
+        examDate.setFullYear(year + 1);
+      }
+      
+      // Use local date components to avoid timezone issues
+      const finalYear = examDate.getFullYear();
+      const finalMonth = String(examDate.getMonth() + 1).padStart(2, '0');
+      const finalDay = String(examDate.getDate()).padStart(2, '0');
+      return `${finalYear}-${finalMonth}-${finalDay}`;
+    }
+  }
+  
+  // Format: "15/03/2024" or "03/15/2024" (DD/MM/YYYY or MM/DD/YYYY)
+  const slashMatch = input.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (slashMatch) {
+    // Try both formats
+    const date1 = new Date(parseInt(slashMatch[3]), parseInt(slashMatch[2]) - 1, parseInt(slashMatch[1]));
+    const date2 = new Date(parseInt(slashMatch[3]), parseInt(slashMatch[1]) - 1, parseInt(slashMatch[2]));
+    
+    // Use the one that makes sense (not too far in the future/past)
+    const diff1 = Math.abs(date1.getTime() - today.getTime());
+    const diff2 = Math.abs(date2.getTime() - today.getTime());
+    const examDate = diff1 < diff2 ? date1 : date2;
+    examDate.setHours(0, 0, 0, 0);
+    
+    if (examDate < today) {
+      examDate.setFullYear(examDate.getFullYear() + 1);
+    }
+    
+    // Use local date components to avoid timezone issues
+    const finalYear = examDate.getFullYear();
+    const finalMonth = String(examDate.getMonth() + 1).padStart(2, '0');
+    const finalDay = String(examDate.getDate()).padStart(2, '0');
+    return `${finalYear}-${finalMonth}-${finalDay}`;
+  }
+  
+  return null;
+}
+
 type ParsedUIElement = {
   type: 'button' | 'file_upload';
   id: string;
@@ -645,7 +779,7 @@ function buildPracticeContext(
   lines.push("- open_course_modal (opens course creation modal)");
   lines.push("- open_flashcards|slug:course-slug (opens flashcards modal for a course - use the exact slug from the context)");
   lines.push("- open_lesson_flashcards|slug:course-slug|topic:TopicName|lessonIndex:0 (opens flashcards for a specific lesson)");
-  lines.push("- set_exam_date|slug:course-slug|date:YYYY-MM-DD|name:Optional exam name (set or update exam date for a course - date must be in ISO format YYYY-MM-DD, use exact slug from context)");
+  lines.push("- set_exam_date|slug:course-slug|date:flexible date input|name:Optional exam name (set or update exam date for a course - date can be in flexible format like '5 days', 'in 2 weeks', 'March 15th', '2024-03-15', etc. The system will automatically convert it to the correct date. Use exact slug from context)");
   lines.push("- fetch_exam_snipe_data|slug:course-name-or-slug (fetch detailed exam snipe data for a course - use the EXACT course name the user mentioned, NOT the course slug. Exam snipe data is stored separately and matched by course name. Shows loading spinner, fetches the data, adds it to chat context, then you should respond naturally about what you found. The data will stay in context for all future messages in this chat. NOTE: In practice mode, exam snipe data for the current course is already loaded in your context - you don't need to fetch it again. Just reference the existing EXAM SNIPE ANALYSIS DATA that's already available.)");
   lines.push("");
   lines.push("You can also render interactive UI elements in your messages using:");
@@ -684,16 +818,15 @@ function buildPracticeContext(
   lines.push("- After fetching, the data will be in context and you can answer their question");
   lines.push("");
     lines.push("IMPORTANT: Exam Date Tracking:");
-    lines.push("- When the user mentions an exam date (e.g., 'My French Revolution exam is on November 10th' or 'Math exam on 2024-03-20'),");
-    lines.push("- Extract the course name and date from their message");
+    lines.push("- When the user mentions an exam date (e.g., 'My French Revolution exam is in 5 days', 'Math exam on March 15th', 'Exam in 2 weeks'),");
+    lines.push("- Extract the course name and date/days information from their message");
     lines.push("- Match the course name to a course in the context to get the exact slug");
-    lines.push("- Convert the date to ISO format (YYYY-MM-DD) - if user says 'November 10th' or 'Nov 10', calculate the full date including the year");
-    lines.push("- If the user mentions a date without a year, assume current year or next year if the date has already passed this year");
-    lines.push("- Calculate how many days are left until the exam date from today");
-    lines.push("- Use set_exam_date action with the slug and date in ISO format (YYYY-MM-DD)");
-    lines.push("- Example: User says 'French Revolution exam is November 10th' -> Calculate: today is 2024-10-15, exam is 2024-11-10, that's 26 days away. 'Setting exam date for French Revolution to November 10th (26 days left). ACTION:set_exam_date|slug:french-revolution|date:2024-11-10'");
+    lines.push("- Use set_exam_date action with the slug and the date/days in the EXACT format the user said it (e.g., '5 days', 'March 15th', 'in 2 weeks', '2024-03-20')");
+    lines.push("- The system will automatically parse and convert the date format - you don't need to convert it to ISO format");
+    lines.push("- Supported formats: '5 days', 'in 2 weeks', 'March 15th', '2024-03-15', 'next Monday', etc.");
+    lines.push("- Example: User says 'French Revolution exam is in 5 days' -> 'Setting exam date for French Revolution to 5 days from now. ACTION:set_exam_date|slug:french-revolution|date:5 days'");
+    lines.push("- Example: User says 'Math exam on March 15th' -> 'Setting exam date for Math to March 15th. ACTION:set_exam_date|slug:math-101|date:March 15th'");
     lines.push("- Setting a new exam date will OVERWRITE any existing exam dates for that course - it replaces all previous dates with the new one");
-    lines.push("- Always calculate and mention the days left when setting an exam date");
   lines.push("");
   lines.push("CRITICAL RULE: When using ACTION commands:");
   lines.push("1. ACTION commands are ALWAYS optional - you can respond normally without any actions");
@@ -1684,14 +1817,15 @@ export default function PracticePage() {
           // Clean slug
           slug = slug.replace(/[^a-zA-Z0-9\-_]/g, "").toLowerCase();
           if (slug && dateStr) {
-            // Validate date format (YYYY-MM-DD)
-            const dateMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-            if (dateMatch) {
+            // Parse the flexible date input
+            const isoDate = parseDateInput(dateStr);
+            
+            if (isoDate) {
               try {
                 const data = loadSubjectData(slug);
                 if (data) {
                   // Replace all existing exam dates with the new one (overwrite behavior)
-                  data.examDates = [{ date: dateStr, name: examName }];
+                  data.examDates = [{ date: isoDate, name: examName }];
                   saveSubjectData(slug, data);
                   // Trigger a custom event to refresh the UI
                   window.dispatchEvent(new CustomEvent("synapse:exam-date-updated", { detail: { slug } }));

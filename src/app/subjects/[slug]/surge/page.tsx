@@ -169,7 +169,7 @@ const PRACTICE_LOG_PREFIX = "atomicPracticeLog:";
 type LessonPart = { header: string; content: string };
 
 const TOPIC_SUGGESTION_TARGET = 4;
-const MIN_TOPIC_SUGGESTIONS = 3;
+const MIN_TOPIC_SUGGESTIONS = TOPIC_SUGGESTION_TARGET;
 
 function splitLessonContentIntoParts(fullMessage: string, fallbackHeader: string): LessonPart[] {
   if (!fullMessage) return [];
@@ -279,55 +279,68 @@ function splitLessonContentIntoParts(fullMessage: string, fallbackHeader: string
 }
 
 function extractTopicSuggestions(text: string, requiredCount = TOPIC_SUGGESTION_TARGET): string[] {
-  const topics: string[] = [];
-  const addTopic = (raw?: string | null) => {
-    if (!raw) return;
+  const uniqueTopics: string[] = [];
+  const normalizedSeen = new Set<string>();
+
+  const recordTopic = (raw?: string | null) => {
+    if (!raw) return false;
     let topic = raw
       .replace(/^[-•]\s*/, "")
       .replace(/[`*"_]/g, "")
       .trim();
-    if (!topic) return;
-    // Remove trailing punctuation or numbering artifacts
+    if (!topic) return false;
     topic = topic.replace(/^[0-9]+\.\s*/, "").trim();
-    if (!topic) return;
-    if (!topics.includes(topic)) {
-      topics.push(topic);
+    if (!topic) return false;
+
+    // Normalize for duplicate detection (preserve original topic text)
+    const normalized = topic.toLowerCase()
+      .replace(/\s+/g, ' ')  // Normalize whitespace
+      .trim();
+    
+    if (!normalized || normalizedSeen.has(normalized)) {
+      return false;
     }
+    
+    normalizedSeen.add(normalized);
+    uniqueTopics.push(topic);
+    return true;
   };
 
-  // Direct TOPIC_SUGGESTION lines
-  const suggestionMatches = text.matchAll(/TOPIC_SUGGESTION:\s*(.+?)(?:\n|$)/gi);
-  for (const match of suggestionMatches) {
-    addTopic(match[1]);
-    if (topics.length >= requiredCount) {
-      return topics.slice(0, requiredCount);
-    }
+  // Quick check - if text doesn't contain TOPIC_SUGGESTION, skip parsing
+  if (!text.includes('TOPIC') && !text.includes('SUGGESTION')) {
+    return [];
   }
 
-  // Bullet fallback
-  if (topics.length < requiredCount) {
-    const bulletMatches = text.matchAll(/(?:^|\n)[-•]\s*([^\n]+)/g);
-    for (const match of bulletMatches) {
-      addTopic(match[1]);
-      if (topics.length >= requiredCount) {
-        return topics.slice(0, requiredCount);
+  // Extract topics - match topics that have newlines OR are at the end of string
+  // This handles both complete topics (with newlines) and the last topic (might not have newline)
+  // Make regex flexible to handle variations: TOPIC_SUGGESTION, TOPIC SUGGESTION, TOPIC-SUGGESTION
+  // And handle both : and - as separators
+  const suggestionRegex = /TOPIC[_\s-]*SUGGESTION\s*[:\-]\s*([^\r\n]+?)(?:\r?\n|$)/gi;
+  const matches = Array.from(text.matchAll(suggestionRegex));
+  
+  // Process all matches, but only take unique topics up to requiredCount
+  for (const match of matches) {
+    const topicText = match[1];
+    // Only process if it's a valid topic (not empty, not just whitespace)
+    if (topicText && topicText.trim()) {
+      const added = recordTopic(topicText);
+      if (added && uniqueTopics.length >= requiredCount) {
+        break;
       }
     }
   }
 
-  // Fallback: take first line after each TOPIC_SUGGESTION token even if malformed
-  if (topics.length < requiredCount) {
-    const chunks = text.split(/TOPIC_SUGGESTION:/i).slice(1);
-    for (const chunk of chunks) {
-      const candidate = chunk.split("\n")[0];
-      addTopic(candidate);
-      if (topics.length >= requiredCount) {
-        return topics.slice(0, requiredCount);
-      }
-    }
+  const finalTopics = uniqueTopics.slice(0, requiredCount);
+  
+  // Only log when we actually find topics (not on every tiny chunk)
+  if (finalTopics.length >= requiredCount) {
+    console.log("✅ TOPIC SUGGESTIONS EXTRACTION COMPLETE:", {
+      found: finalTopics.length,
+      topics: finalTopics
+    });
   }
 
-  return topics.slice(0, requiredCount);
+  return finalTopics;
 }
 
 function sanitizeJsonPayload(raw: string): string {
@@ -504,6 +517,7 @@ function buildSurgeContext(
       }
       lines.push("");
       lines.push("CRITICAL OUTPUT REQUIREMENTS:");
+      lines.push("- You MUST return four distinct topics. Invent closely-related subtopics if needed to ensure there are four.");
       lines.push("- Your ENTIRE response must be EXACTLY these 4 lines (copy this format exactly):");
       lines.push("TOPIC_SUGGESTION: Topic Name 1");
       lines.push("TOPIC_SUGGESTION: Topic Name 2");
@@ -511,6 +525,7 @@ function buildSurgeContext(
       lines.push("TOPIC_SUGGESTION: Topic Name 4");
       lines.push("");
       lines.push("ABSOLUTE RULES:");
+      lines.push("- If you can only find 3 concepts, split the most important one into two high-value subtopics so you still output 4 lines.");
       lines.push("- DO NOT use dashes, bullets, or any other formatting");
       lines.push("- DO NOT write ANY text before the first TOPIC_SUGGESTION line");
       lines.push("- DO NOT write ANY text after the last TOPIC_SUGGESTION line");
@@ -522,129 +537,131 @@ function buildSurgeContext(
       lines.push("- NO dashes, NO bullets, NO markdown formatting - just the 4 TOPIC_SUGGESTION lines");
       lines.push("- If you write anything other than the 4 TOPIC_SUGGESTION lines, it will break the system");
     } else {
+      lines.push("⚡ SYNAPSE SURGE MODE — LEARN PHASE");
+      lines.push("");
+      lines.push("You are generating a structured lesson for a selected topic. Always follow these rules:");
+      lines.push("");
+      lines.push("====================================================");
+      lines.push("1. LESSON STRUCTURE");
+      lines.push("====================================================");
+      lines.push("");
+      lines.push("• Output a single Markdown document.");
+      lines.push("• CRITICAL: Create exactly 3–6 chapters using Markdown H1 headings. Every chapter MUST start with a line like '# Chapter 1: [Short Title]'. The leading '# ' is mandatory.");
+      lines.push("• Do NOT write plain text headings like 'Chapter 1: ...' without the '# ' prefix. That is incorrect and will break the system.");
+      lines.push("• Use H2/H3 for sections and subsections under each chapter.");
+      lines.push("• For every chapter and every H2/H3 section, write multiple full paragraphs (3–6 sentences each). Do NOT output only headings or bullet lists.");
+      lines.push("• Lists are allowed, but most of the lesson MUST be normal prose paragraphs, not lists.");
+      lines.push("• Include tables and LaTeX math when relevant.");
+      lines.push("• Code examples: ONLY include code examples if the topic is about programming, coding, or software development. Do NOT force code examples into non-coding subjects.");
+      lines.push("• Provide 3–5 worked examples with complete step-by-step solutions.");
+      lines.push("• Include practice problems using EXACTLY this format:");
+      lines.push("");
+      lines.push(":::practice-problem");
+      lines.push("[problem text]");
+      lines.push(":::");
+      lines.push("");
+      lines.push("[solution here, outside the box]");
+      lines.push("");
+      lines.push("====================================================");
+      lines.push("2. TONE AND CONTENT BOUNDARIES");
+      lines.push("====================================================");
+      lines.push("");
+      lines.push("Do NOT include:");
+      lines.push("• Long intros");
+      lines.push("• Generic fluff (\"In this chapter we will explore…\")");
+      lines.push("• Meta commentary");
+      lines.push("• Philosophical filler");
+      lines.push("• Repeated definitions");
+      lines.push("• Academic padding");
+      lines.push("• Empty narrative text");
+      lines.push("");
+      lines.push("Use clear, direct, beginner-friendly language:");
+      lines.push("• No prior knowledge assumed");
+      lines.push("• Define every technical term immediately");
+      lines.push("• Use concrete examples before abstract ideas");
+      lines.push("• Keep transitions short and functional");
+      lines.push("• Explain why each step is taken");
+      lines.push("");
+      lines.push("====================================================");
+      lines.push("3. LENGTH REQUIREMENTS");
+      lines.push("====================================================");
+      lines.push("");
+      lines.push("• At least 3000 words of actual prose.");
+      lines.push("• Maximum around 6000 words.");
+      lines.push("• If the topic needs more than 3000 words, continue naturally.");
+      lines.push("");
+      lines.push("====================================================");
+      lines.push("4. COURSE CONTEXT USAGE (MANDATORY)");
+      lines.push("====================================================");
+      lines.push("");
+      lines.push("You will receive COURSE CONTEXT with:");
+      lines.push("• course files");
+      lines.push("• course summary");
+      lines.push("• topic list");
+      lines.push("");
+      lines.push("You must:");
+      lines.push("• Match terminology and notation from the course files");
+      lines.push("• Base examples on course material when appropriate");
+      lines.push("• Connect custom topics to the course structure");
+      lines.push("• Reference related topics where useful");
+      lines.push("");
+      lines.push("====================================================");
+      lines.push("5. EXAM SNIPE INTEGRATION (MANDATORY)");
+      lines.push("====================================================");
+      lines.push("");
+      lines.push("You will receive EXAM SNIPE ANALYSIS.");
+      lines.push("");
+      lines.push("You must:");
+      lines.push("• Prioritize exam-tested concepts");
+      lines.push("• Build examples around common exam patterns");
+      lines.push("• Teach solutions in exam-style formats");
+      lines.push("• Highlight recurring exam structures");
+      lines.push("• Explain typical pitfalls and how to avoid them");
+      lines.push("");
+      lines.push("====================================================");
+      lines.push("6. TEACHING LOGIC");
+      lines.push("====================================================");
+      lines.push("");
+      lines.push("• Begin simple, increase difficulty gradually");
+      lines.push("• Break ideas into small steps");
+      lines.push("• Move from intuition → concept → technique → exam usage");
+      lines.push("• Always provide fully solved examples");
+      lines.push("• Never assume unmentioned prerequisites");
+      lines.push("");
+      lines.push("====================================================");
+      lines.push("7. WHAT NOT TO DO");
+      lines.push("====================================================");
+      lines.push("");
+      lines.push("• Do NOT suggest topics");
+      lines.push("• Do NOT ask for instructions");
+      lines.push("• Do NOT summarize the context");
+      lines.push("• Do NOT repeat the rules");
+      lines.push("• Do NOT switch languages unless told");
+      lines.push("• Do NOT include unverifiable claims");
+      lines.push("• Do NOT write chapter headings without a leading '# '. Always use '# Chapter X: [Title]' for chapter starts.");
+      lines.push("• Do NOT create fewer than 3 chapters or more than 6 chapters");
+      lines.push("• Do NOT include code examples unless the topic is about programming/coding");
+      lines.push("");
+      lines.push("====================================================");
+      lines.push("CONTEXT PROMPT");
+      lines.push("====================================================");
+      lines.push("");
+      lines.push("SURGE MODE ACTIVE FOR COURSE \"" + courseName + "\"");
+      lines.push("CURRENT PHASE: LEARN");
       lines.push("TEACHING TOPIC: " + currentTopic);
       lines.push("");
-      lines.push("CRITICAL: The user has selected a topic to learn. You MUST generate a lesson, NOT suggest topics.");
-      lines.push("DO NOT suggest topics. DO NOT ask what topic to teach. The topic is: " + currentTopic);
       if (courseLanguageName) {
-        lines.push(`LANGUAGE REQUIREMENT: Write the ENTIRE lesson (all explanations, examples, and questions) in ${courseLanguageName}. Do NOT switch languages or translate unless explicitly asked by the user.`);
+        lines.push("Generate the lesson immediately in the language: " + courseLanguageName);
       } else {
-        lines.push("LANGUAGE REQUIREMENT: Detect the dominant language of the course materials and write the entire lesson in that language. Do NOT switch languages unless the user specifically requests it.");
+        lines.push("Generate the lesson immediately. Detect the dominant language of the course materials and write in that language.");
       }
       lines.push("");
-      lines.push("INSTRUCTIONS FOR LESSON GENERATION:");
-      lines.push("- Generate a comprehensive, in-depth lesson on the selected topic: " + currentTopic);
-      lines.push("- Structure the lesson as 3-6 progressive chapters, each building on the previous");
-      lines.push("- CRITICAL LENGTH REQUIREMENTS: The lesson body MUST contain AT LEAST 3000 words of explanatory prose");
-      lines.push("- Target length: 4000-6000 words. If you reach 3000 words and haven't fully covered the topic, CONTINUE writing until you reach comprehensive depth");
-      lines.push("- Count only actual prose text—do not count LaTeX delimiters, code blocks, JSON syntax, or markdown formatting");
-      lines.push("- Expand each concept with genuine explanations, derivations, examples, and narrative transitions. Do NOT pad with fluff");
-      lines.push("");
-      lines.push("CRITICAL: EXPLAIN FOR BEGINNERS - NO PRIOR KNOWLEDGE ASSUMED:");
-      lines.push("- Assume the student has ZERO prior knowledge of this topic. Explain as if teaching someone completely new to the subject");
-      lines.push("- Start with the SIMPLEST possible explanations. Use everyday language and analogies before introducing technical terms");
-      lines.push("- Progressively increase complexity: Simple → Intermediate → Advanced. Each chapter should build naturally on the previous");
-      lines.push("- AVOID unnecessarily complex vocabulary. Use simple, clear words whenever possible. If you must use technical terms, define them immediately in plain language");
-      lines.push("- When introducing new concepts, explain them using familiar ideas first, then gradually introduce the formal terminology");
-      lines.push("- Break down complex ideas into smaller, digestible pieces. Don't jump ahead - ensure each step is fully understood before moving to the next");
-      lines.push("- Use concrete examples before abstract concepts. Show practical applications before diving into theory");
-      lines.push("- If a concept requires prerequisite knowledge, explain those prerequisites first in simple terms");
-      lines.push("- Write in a conversational, accessible tone. Avoid academic jargon unless absolutely necessary, and always explain it");
-      lines.push("- Remember: clarity and simplicity are more important than sounding sophisticated. The goal is understanding, not impressing");
-      lines.push("");
-      lines.push("CRITICAL: COURSE CONTEXT USAGE:");
-      lines.push("- The COURSE CONTEXT section below contains the course files, course summary, and available topics");
-      lines.push("- You MUST use this course context throughout ALL chapters of the lesson generation");
-      lines.push("- When explaining concepts, use terminology, notation, and examples that match the course material");
-      lines.push("- Reference specific content from the course files when relevant");
-      lines.push("- Ensure your explanations align with how the course teaches concepts");
-      lines.push("- If the topic is a custom topic (not in the course topics list), still explain it WITHIN the context of this course");
-      lines.push("- Connect the topic to other course topics and concepts where relevant");
-      lines.push("");
-      lines.push("CRITICAL: EXAM ANALYSIS CONTEXT USAGE:");
-      lines.push("- The EXAM SNIPE ANALYSIS section below contains HIGH-VALUE information from past exams FOR THIS COURSE");
-      lines.push("- You MUST use this exam analysis throughout ALL chapters of the lesson generation");
-      lines.push("- Prioritize concepts, methods, and question types that appear frequently in the exam analysis");
-      lines.push("- When creating examples, base them on the common question patterns from the exam analysis");
-      lines.push("- When explaining concepts, emphasize aspects that are frequently tested according to the exam analysis");
-      lines.push("- When teaching problem-solving methods, focus on approaches that match exam question formats");
-      lines.push("- Reference exam connections and patterns throughout the lesson to show exam relevance");
-      lines.push("- The exam analysis shows what examiners value most—your lesson should prepare students for exactly those questions");
-      lines.push("- If exam analysis shows specific question types or formats, include similar examples in your lesson");
-      lines.push("- If exam analysis shows common pitfalls or mistakes, address them explicitly in your lesson");
-      lines.push("- ALWAYS keep the exam analysis in mind when generating each chapter—it should inform your content choices");
-      lines.push("- COMBINE course context with exam analysis: Use course material to explain concepts, but prioritize exam-tested aspects");
-      lines.push("");
-      lines.push("STRUCTURE AND FORMATTING:");
-      lines.push("- Output MUST be a single Markdown document. No commentary outside the document. Use real newlines. Do not double-escape backslashes");
-      lines.push("- Use H1 headings (#) for chapter titles. Create 3-6 chapters that progress from basics to advanced");
-      lines.push("- Use H2 headings (##) and H3 headings (###) within chapters for sections and subsections");
-      lines.push("- Always put ONE blank line before and after headings, lists, code fences, tables, and display math");
-      lines.push("- Use multiple H2/H3 sections within each chapter. Each major section should contain multiple paragraphs (3-5 sentences each) before moving on");
-      lines.push("- Markdown only. No HTML except practice problem containers");
-      lines.push("- Tables must use pipe syntax with a header separator row (`|---|`)");
-      lines.push("- Every code fence MUST specify a language (```python, ```javascript, ```c, etc.). Snippets should be runnable or compile as shown");
-      lines.push("- Math uses KaTeX-compatible LaTeX only: inline `$...$`, display `\\[ ... \\]` on their own lines. Avoid environments like `align`. Use `\\text{}` for words. Escape `_` in text as needed");
-      lines.push("- Do NOT include links, images, Mermaid, or raw HTML other than practice problem containers");
-      lines.push("- Do NOT assume prior knowledge. Define symbols and notation when first used");
-      lines.push("");
-      lines.push("PEDAGOGY AND STRUCTURE:");
-      lines.push("- ADAPTIVE STRUCTURE: Organize the lesson in a way that best fits THIS SPECIFIC TOPIC. Do NOT use a rigid template or force topics into predefined chapter structures");
-      lines.push("- Let the topic guide the organization. Some topics need more theory first, others need examples first, some need both interwoven");
-      lines.push("- The goal is to teach the student HOW TO UNDERSTAND and HOW TO USE the topic, not just what it is");
-      lines.push("- PROGRESSIVE DIFFICULTY: Start simple and gradually increase complexity, but let the natural flow of the topic determine the progression");
-      lines.push("- BEGINNER-FIRST APPROACH: In early chapters, use the simplest possible language. Save technical terminology for later when concepts are understood");
-      lines.push("- DEPTH REQUIREMENT: Each concept must be explained thoroughly with context, motivation, and connections to other ideas");
-      lines.push("- FOCUS ON UNDERSTANDING: Explain not just what things are, but WHY they work, HOW they're used, and WHEN to apply them");
-      lines.push("- FOCUS ON USAGE: Include practical examples showing how to actually use the topic. Show real-world applications and problem-solving approaches");
-      lines.push("- Include MULTIPLE worked examples (at least 3-5 total across all chapters) that progress from easy to hard. Show all steps, and explain WHY each step is taken");
-      lines.push("- Each example should be substantial—not just one-line calculations. Include reasoning, alternative approaches, and common mistakes");
-      lines.push("- Include typical pitfalls and how to avoid them. Explain WHY these mistakes happen");
-      lines.push("- Include at least: one table, one code example, some inline math and at least one display math block");
-      lines.push("- PRACTICE PROBLEMS: When you write practice problems or exercises, wrap ONLY the problem statement in practice problem containers using this syntax:");
-      lines.push("  :::practice-problem");
-      lines.push("  [Problem statement here - can include multiple paragraphs, math, lists, etc.]");
-      lines.push("  :::");
-      lines.push("  ");
-      lines.push("  [Solution and explanation goes here, OUTSIDE the container]");
-      lines.push("  This will automatically style the problem in a distinctive lozenge-shaped box with a 'Practice Problem' label. The solution should be written immediately after the closing ::: marker, outside the container. Always provide complete, step-by-step solutions for any problems or examples you present.");
-      lines.push("- ALWAYS SOLVE EXAMPLES: When you present any example problem, worked example, or practice problem, you MUST provide a complete solution with step-by-step explanations. Never leave problems unsolved - students need to see how to work through them");
-      lines.push("- Build narrative flow: connect sections with transitions. Explain how concepts relate to each other");
-      lines.push("- Focus on exam preparation: ensure students can solve exam-style problems after completing all chapters");
-      lines.push("- Use the exam analysis to guide what problems to include and how to structure examples");
-      lines.push("");
-      lines.push("CHAPTER ORGANIZATION:");
-      lines.push("- Create 3-6 chapters that naturally break down the topic");
-      lines.push("- Let the topic's structure determine chapter organization. For example:");
-      lines.push("  * A procedural topic might organize by steps or stages");
-      lines.push("  * A conceptual topic might organize by building from simple to complex ideas");
-      lines.push("  * A tool/technology topic might organize by use cases or features");
-      lines.push("  * A mathematical topic might organize by techniques or problem types");
-      lines.push("- Each chapter should have a clear purpose that advances understanding and ability to use the topic");
-      lines.push("- Chapters should build on each other, but the progression should feel natural for the topic");
-      lines.push("- Each chapter should be substantial with multiple H2/H3 sections and multiple paragraphs");
-      lines.push("- CRITICAL: The difficulty curve must be gradual. Never jump from simple to complex without building the bridge in between");
-      lines.push("- DO NOT force topics into generic structures like 'Introduction → Concepts → Methods → Applications'. Instead, organize based on what makes sense for THIS topic");
-      lines.push("");
-      lines.push("OUTPUT FORMAT:");
-      lines.push("Write a single, continuous Markdown document with H1 headings for chapters:");
-      lines.push("");
-      lines.push("# Chapter 1: [Chapter Title]");
-      lines.push("");
-      lines.push("## Section Title");
-      lines.push("");
-      lines.push("[Substantial content with multiple paragraphs, examples, explanations, math, etc.]");
-      lines.push("");
-      lines.push("### Subsection Title");
-      lines.push("");
-      lines.push("[More content...]");
-      lines.push("");
-      lines.push("# Chapter 2: [Chapter Title]");
-      lines.push("");
-      lines.push("[Continue with 3-6 chapters total, each with H2/H3 sections and substantial content]");
-      lines.push("");
-      lines.push("REMEMBER: The topic is already selected. Generate the lesson NOW, do NOT suggest topics.");
-      lines.push("This is a comprehensive, progressive lesson that teaches from basics to exam-level competence. The lesson body MUST be at least 3000 words of substantive content.");
+      lines.push("Use:");
+      lines.push("• COURSE CONTEXT");
+      lines.push("• COURSE FILES (first 20k chars)");
+      lines.push("• AVAILABLE TOPICS");
+      lines.push("• EXAM SNIPE ANALYSIS");
+      lines.push("• PAST SURGE SESSIONS");
     }
   } else if (phase === "quiz") {
     lines.push("CURRENT PHASE: QUIZ - Testing the new topic");
@@ -661,110 +678,53 @@ function buildSurgeContext(
   }
 
   lines.push("");
-  lines.push("=".repeat(80));
-  lines.push("COURSE CONTEXT - CRITICAL: YOU MUST USE THIS CONTEXT");
-  lines.push("=".repeat(80));
+  lines.push("COURSE CONTEXT:");
+  if (data?.course_context) {
+    lines.push(data.course_context);
+  } else {
+    lines.push("No course summary available.");
+  }
   lines.push("");
-  lines.push("⚠️ MANDATORY: All your responses (topic suggestions, lessons, explanations) MUST be based on");
-  lines.push("this course context. Use the course files, course summary, and topics listed below.");
-  lines.push("When explaining ANY topic (including custom topics), explain it WITHIN the context of this course.");
-  lines.push("");
-  if (data) {
-    if (data.course_context) {
-      lines.push("COURSE SUMMARY:");
-      lines.push(data.course_context);
+  lines.push("COURSE FILES (first 20k chars):");
+  if (data?.combinedText) {
+    lines.push(data.combinedText.slice(0, 20000));
+    if (data.combinedText.length > 20000) {
       lines.push("");
-    }
-    if (data.combinedText) {
-      lines.push(`COURSE FILES CONTENT (${data.combinedText.length} total chars, showing up to 20,000 chars):`);
-      lines.push("This contains the actual course material from uploaded files. Use this content to:");
-      lines.push("- Understand the course scope and depth");
-      lines.push("- Extract relevant examples and concepts");
-      lines.push("- Match terminology and notation used in the course");
-      lines.push("- Ensure your explanations align with how the course teaches concepts");
-      lines.push("");
-      lines.push(data.combinedText.slice(0, 20000)); // Increased to 20k chars
-      if (data.combinedText.length > 20000) {
-        lines.push("");
-        lines.push(`[Note: Course files content truncated. Total length: ${data.combinedText.length} chars]`);
-      }
-      lines.push("");
-    }
-    if (data.topics && data.topics.length > 0) {
-      lines.push("AVAILABLE TOPICS IN THIS COURSE:");
-      data.topics.forEach(topic => {
-        lines.push(`• ${topic.name}${topic.summary ? ` - ${topic.summary}` : ""}`);
-      });
-      lines.push("");
-      lines.push("When suggesting topics, prioritize topics from this list that align with exam snipe analysis.");
+      lines.push(`[Note: Course files content truncated. Total length: ${data.combinedText.length} chars]`);
     }
   } else {
-    lines.push("⚠️ WARNING: No course data available");
+    lines.push("No course files available.");
   }
-  lines.push("=".repeat(80));
-
   lines.push("");
-  lines.push("=".repeat(80));
-  lines.push("EXAM SNIPE ANALYSIS - CRITICAL CONTEXT FOR LESSON GENERATION");
-  lines.push("=".repeat(80));
+  lines.push("AVAILABLE TOPICS:");
+  if (data?.topics && data.topics.length > 0) {
+    data.topics.forEach(topic => {
+      lines.push(`• ${topic.name}${topic.summary ? ` - ${topic.summary}` : ""}`);
+    });
+  } else {
+    lines.push("No topics available.");
+  }
+  lines.push("");
+  lines.push("EXAM SNIPE ANALYSIS:");
   if (examSnipeData) {
-    lines.push("");
-    lines.push("⚠️ MANDATORY USAGE: This exam snipe analysis contains HIGH-VALUE information from past exams.");
-    lines.push("You MUST reference and use this analysis throughout ALL parts of the lesson you generate.");
-    lines.push("");
-    lines.push("HOW TO USE EXAM ANALYSIS IN LESSON GENERATION:");
-    lines.push("1. PRIORITIZE CONTENT: Focus on concepts, methods, and question types that appear frequently");
-    lines.push("2. SHAPE EXAMPLES: Base your worked examples on common question patterns from the analysis");
-    lines.push("3. EMPHASIZE TESTED ASPECTS: When explaining concepts, emphasize what examiners test most");
-    lines.push("4. MATCH EXAM FORMATS: Structure problem-solving methods to match exam question formats");
-    lines.push("5. ADDRESS COMMON PATTERNS: Include examples that mirror the question types shown in the analysis");
-    lines.push("6. REFERENCE EXAM CONNECTIONS: Throughout the lesson, show how content connects to exam questions");
-    lines.push("7. PREPARE FOR SPECIFIC QUESTIONS: If the analysis shows specific question types, teach those explicitly");
-    lines.push("8. ADDRESS PITFALLS: If the analysis mentions common mistakes, address them in your lesson");
-    lines.push("");
-    lines.push("EXAM SNIPE ANALYSIS DATA:");
     lines.push(examSnipeData);
-    lines.push("");
-    lines.push("REMEMBER: The exam analysis shows what examiners value most. Your lesson should prepare students");
-    lines.push("for exactly those questions. Keep this analysis in mind when generating EVERY part of the lesson.");
   } else {
-    lines.push("");
-    lines.push("⚠️ NO EXAM SNIPE ANALYSIS AVAILABLE:");
-    lines.push("No exam snipe data found. Generate lesson based on course materials and general best practices.");
-    lines.push("If exam snipe analysis becomes available, it should be prioritized for future lessons.");
+    lines.push("No exam snipe analysis available.");
   }
-  lines.push("=".repeat(80));
-
+  lines.push("");
+  lines.push("PAST SURGE SESSIONS:");
+  if (lastSurge) {
+    lines.push(lastSurge.summary);
+  }
   if (practiceLog.length > 0) {
     lines.push("");
-    lines.push("PRACTICE LOG HISTORY (last 20 entries):");
+    lines.push("Practice log (last 20 entries):");
     practiceLog.slice(-20).forEach(entry => {
       lines.push(`[${entry.topic}] Q: ${entry.question} | A: ${entry.answer} | Grade: ${entry.grade}/10`);
     });
   }
-
-  if (lastSurge) {
-    lines.push("");
-    lines.push("LAST SURGE SESSION SUMMARY:");
-    lines.push(lastSurge.summary);
-  }
-
-  // Add all previously covered topics from surge log
-  if (data?.surgeLog && data.surgeLog.length > 0) {
-    lines.push("");
-    lines.push("ALL PREVIOUSLY COVERED TOPICS (from all Surge sessions):");
-    const coveredTopics = new Set<string>();
-    data.surgeLog.forEach(entry => {
-      entry.repeatedTopics.forEach(rt => coveredTopics.add(rt.topic));
-      if (entry.newTopic) coveredTopics.add(entry.newTopic);
-    });
-    if (coveredTopics.size > 0) {
-      Array.from(coveredTopics).forEach(topic => {
-        lines.push(`• ${topic}`);
-      });
-    } else {
-      lines.push("• No topics covered yet");
-    }
+  if (!lastSurge && practiceLog.length === 0) {
+    lines.push("No past Surge sessions available.");
   }
 
   lines.push("");
@@ -853,6 +813,7 @@ export default function SurgePage() {
     quizResults: [],
     quizStageTransitions: [],
   });
+  const lastPersistedLessonSignatureRef = useRef<string | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState<string>("");
   const [lastAssistantMessage, setLastAssistantMessage] = useState<string>("");
   
@@ -2185,7 +2146,17 @@ export default function SurgePage() {
       // Use system messages directly (for topic selection - no user message shown)
       historyForApi = systemMessages;
     } else if (messages.length === 0 && phase === "learn" && !topicToCheck) {
-      historyForApi = [{ role: "system" as const, content: "You must output exactly 4 topic suggestions in this format:\nTOPIC_SUGGESTION: Topic Name 1\nTOPIC_SUGGESTION: Topic Name 2\nTOPIC_SUGGESTION: Topic Name 3\nTOPIC_SUGGESTION: Topic Name 4\n\nDo not write anything else. No explanations, no introductions, no dashes, no bullets. Just the 4 lines starting with TOPIC_SUGGESTION:" }];
+      historyForApi = [{
+        role: "system" as const,
+        content:
+          "You must output exactly 4 topic suggestions. If you can only find 3, split the most valuable concept into two actionable subtopics so there are still 4 lines.\n" +
+          "Format:\n" +
+          "TOPIC_SUGGESTION: Topic Name 1\n" +
+          "TOPIC_SUGGESTION: Topic Name 2\n" +
+          "TOPIC_SUGGESTION: Topic Name 3\n" +
+          "TOPIC_SUGGESTION: Topic Name 4\n\n" +
+          "Do not write anything else. No explanations, no introductions, no dashes, no bullets. Just those 4 lines starting with TOPIC_SUGGESTION."
+      }];
     } else if (messages.length > 0 && messages[messages.length - 1]?.role === "user") {
       historyForApi = messages.slice(0, -1); // Remove last user message, it will be in the conversation
     } else {
@@ -2199,10 +2170,10 @@ export default function SurgePage() {
       // If using system messages (topic selection), don't initialize conversation
       // We'll show "Chad is thinking..." and only show buttons when done
       if (systemMessages && systemMessages.length > 0) {
-        setConversation([]);
-        conversationRef.current = [];
-        setSuggestedTopics([]);
-        setShowTopicSelection(false);
+      setConversation([]);
+      conversationRef.current = [];
+      setSuggestedTopics([]);
+      setShowTopicSelection(false);
       }
 
       const res = await fetch("/api/chat/stream", {
@@ -2243,19 +2214,21 @@ export default function SurgePage() {
               accumulated += parsed.content;
               
               // During topic suggestion phase, don't update conversation state
-              // We'll only show buttons once all 4 topics are parsed
+              // Parse topics during streaming and show as soon as we have all 4 complete
               const isTopicSuggestionPhase = phase === "learn" && !topicToCheck && !currentTopic;
               
               // Always parse topic suggestions during topic suggestion phase (even if not updating conversation)
               if (isTopicSuggestionPhase) {
+                // Parse topics from accumulated text during streaming
                 const topics = extractTopicSuggestions(accumulated, TOPIC_SUGGESTION_TARGET);
-                if (topics.length >= MIN_TOPIC_SUGGESTIONS) {
+                
+                // As soon as we have all 4 complete topics, show them immediately
+                if (topics.length >= MIN_TOPIC_SUGGESTIONS && !showTopicSelection) {
+                  console.log("✅ Found all topics during streaming, showing immediately:", topics);
                   setSuggestedTopics(topics);
                   setShowTopicSelection(true);
-                  // Clear conversation to hide any streaming text
                   setConversation([]);
                   conversationRef.current = [];
-                  // Stop showing "Chad is thinking" now that topics are ready to display
                   setSending(false);
                 }
               } else {
@@ -2395,6 +2368,17 @@ export default function SurgePage() {
             } else if (parsed.type === "error") {
               throw new Error(parsed.error || "Streaming error");
             } else if (parsed.type === "done") {
+              // Log the complete response from Chad, especially for topic suggestions
+              const isTopicSuggestionPhase = phase === "learn" && !topicToCheck && !currentTopic;
+              if (isTopicSuggestionPhase) {
+                console.log("🎯 STREAMING COMPLETE - Full response from Chad for topic suggestions:", {
+                  accumulatedLength: accumulated.length,
+                  fullText: accumulated,
+                  hasTopicSuggestions: /TOPIC[_\s-]*SUGGESTION/i.test(accumulated),
+                  lineCount: accumulated.split('\n').length
+                });
+              }
+              
               // Finalize accumulated content
               setConversation((prev) => {
                 const updated = [...prev];
@@ -2547,13 +2531,39 @@ export default function SurgePage() {
               });
 
               if (phase === "learn" && !currentTopic && !showTopicSelection) {
+                console.log("🏁 Final parse after streaming complete:", {
+                  accumulatedLength: accumulated.length,
+                  fullAccumulated: accumulated.substring(0, 500) // First 500 chars for debugging
+                });
                 const finalTopics = extractTopicSuggestions(accumulated, TOPIC_SUGGESTION_TARGET);
+                console.log("🏁 Final topics parsed:", {
+                  topicsCount: finalTopics.length,
+                  topics: finalTopics,
+                  meetsMinimum: finalTopics.length >= MIN_TOPIC_SUGGESTIONS
+                });
+                
+                // Always stop the spinner, even if we don't have enough topics
+                setSending(false);
+                
                 if (finalTopics.length >= MIN_TOPIC_SUGGESTIONS) {
+                  console.log("✅ Setting final topic suggestions in UI:", finalTopics);
                   setSuggestedTopics(finalTopics);
                   setShowTopicSelection(true);
                   setConversation([]);
                   conversationRef.current = [];
-                  setSending(false);
+                } else if (finalTopics.length > 0) {
+                  // If we have some topics but not enough, still show them
+                  console.log("⚠️ Only found", finalTopics.length, "topics, but showing them anyway");
+                  setSuggestedTopics(finalTopics);
+                  setShowTopicSelection(true);
+                  setConversation([]);
+                  conversationRef.current = [];
+                } else {
+                  console.warn("⚠️ No topics found in response:", {
+                    found: finalTopics.length,
+                    required: MIN_TOPIC_SUGGESTIONS,
+                    accumulatedPreview: accumulated.substring(0, 200)
+                  });
                 }
               }
             }
@@ -3017,6 +3027,136 @@ export default function SurgePage() {
     await saveCurrentSession(true);
   };
 
+  const persistSurgeLessonToCourse = useCallback(
+    async (lessonContent: string, topicName: string) => {
+      const trimmedLesson = lessonContent?.trim();
+      if (!trimmedLesson || !topicName) return;
+
+      const signature = `${sessionId}:${topicName}:${trimmedLesson.length}`;
+      if (lastPersistedLessonSignatureRef.current === signature) {
+        return;
+      }
+
+      let currentData = loadSubjectData(slug);
+      if (!currentData) {
+        currentData = {
+          subject: slug,
+          files: [],
+          combinedText: "",
+          nodes: {},
+          topics: [],
+          tree: { subject: slug, topics: [] },
+        };
+      } else {
+        currentData = { ...currentData };
+      }
+
+      const nodesCopy: Record<string, any> = { ...(currentData.nodes || {}) };
+      const existingNode = nodesCopy[topicName];
+      const normalizedNode =
+        existingNode && typeof existingNode === "object"
+          ? {
+              ...existingNode,
+              lessons: Array.isArray(existingNode.lessons) ? [...existingNode.lessons] : [],
+              lessonsMeta: Array.isArray(existingNode.lessonsMeta) ? [...existingNode.lessonsMeta] : [],
+            }
+          : {
+              overview: "",
+              symbols: [],
+              lessons: [],
+              lessonsMeta: [],
+            };
+
+      const existingIndex = Array.isArray(normalizedNode.lessons)
+        ? normalizedNode.lessons.findIndex((lesson: any) => lesson?.surgeSessionId === sessionId)
+        : -1;
+
+      const timestamp = Date.now();
+      const lessonTitle =
+        (existingIndex !== -1 && normalizedNode.lessons?.[existingIndex]?.title) || `${topicName} (Surge Lesson)`;
+
+      const previousLesson = existingIndex !== -1 ? normalizedNode.lessons[existingIndex] : null;
+      const baseLesson = {
+        ...(previousLesson || {}),
+        title: lessonTitle,
+        body: trimmedLesson,
+        quiz: Array.isArray(previousLesson?.quiz) ? previousLesson?.quiz : [],
+        flashcards: previousLesson?.flashcards,
+        metadata: previousLesson?.metadata,
+        origin: "surge" as const,
+        surgeSessionId: sessionId,
+        createdAt: previousLesson?.createdAt || timestamp,
+        updatedAt: timestamp,
+      };
+
+      if (existingIndex !== -1 && Array.isArray(normalizedNode.lessons)) {
+        normalizedNode.lessons[existingIndex] = baseLesson;
+        if (Array.isArray(normalizedNode.lessonsMeta)) {
+          normalizedNode.lessonsMeta[existingIndex] = {
+            type: "Surge Lesson",
+            title: lessonTitle,
+          };
+        } else {
+          normalizedNode.lessonsMeta = [];
+          normalizedNode.lessonsMeta[existingIndex] = { type: "Surge Lesson", title: lessonTitle };
+        }
+      } else {
+        normalizedNode.lessons = Array.isArray(normalizedNode.lessons) ? [...normalizedNode.lessons, baseLesson] : [baseLesson];
+        normalizedNode.lessonsMeta = Array.isArray(normalizedNode.lessonsMeta)
+          ? [...normalizedNode.lessonsMeta, { type: "Surge Lesson", title: lessonTitle }]
+          : [{ type: "Surge Lesson", title: lessonTitle }];
+      }
+
+      nodesCopy[topicName] = normalizedNode;
+
+      let topicsList = Array.isArray(currentData.topics) ? [...currentData.topics] : [];
+      if (!topicsList.some((t) => t.name === topicName)) {
+        topicsList.push({ name: topicName, summary: "" });
+      }
+
+      const treeTopics = currentData.tree?.topics ? [...currentData.tree.topics] : [];
+      if (!treeTopics.some((t: any) => t.name === topicName)) {
+        treeTopics.push({ name: topicName, subtopics: [] });
+      }
+      const tree = {
+        subject: currentData.tree?.subject || currentData.subject || slug,
+        topics: treeTopics,
+      };
+
+      const progress = { ...(currentData.progress || {}) };
+      const existingProgress = progress[topicName] || { totalLessons: 0, completedLessons: 0 };
+      progress[topicName] = {
+        ...existingProgress,
+        totalLessons: Array.isArray(normalizedNode.lessons) ? normalizedNode.lessons.length : existingProgress.totalLessons,
+        completedLessons: Math.min(existingProgress.completedLessons || 0, Array.isArray(normalizedNode.lessons) ? normalizedNode.lessons.length : existingProgress.totalLessons),
+      };
+
+      const updatedData: StoredSubjectData = {
+        ...currentData,
+        nodes: nodesCopy,
+        topics: topicsList,
+        tree,
+        progress,
+      };
+
+      await saveSubjectDataAsync(slug, updatedData);
+      setData(updatedData);
+      lastPersistedLessonSignatureRef.current = signature;
+      console.log("Saved Surge lesson to course content", { topicName, sessionId });
+    },
+    [sessionId, slug, setData]
+  );
+
+  const activeSurgeTopic = currentTopic || sessionData.newTopic;
+  const surgeLessonContent = sessionData.newTopicLesson;
+
+  useEffect(() => {
+    if (!surgeLessonContent || !activeSurgeTopic) return;
+    const trimmed = surgeLessonContent.trim();
+    if (trimmed.length < 200) return;
+    persistSurgeLessonToCourse(trimmed, activeSurgeTopic);
+  }, [surgeLessonContent, activeSurgeTopic, persistSurgeLessonToCourse]);
+
   const [inputValue, setInputValue] = useState("");
 
   // Word click handler (copied from lesson page)
@@ -3064,7 +3204,20 @@ export default function SurgePage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-[var(--background)]">
-      <div className="mx-auto w-full max-w-4xl px-6 py-8">
+      <div className="mx-auto w-full max-w-4xl px-6 py-8 relative">
+        {/* Centered glow behind the surge box */}
+        <div 
+          className="absolute inset-0 -z-10 rounded-2xl"
+          style={{
+            background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.15), rgba(255, 45, 150, 0.15))',
+            filter: 'blur(40px)',
+            left: '50%',
+            right: 'auto',
+            width: '100%',
+            maxWidth: '100%',
+            transform: 'translateX(-50%)',
+          }}
+        />
         <div className="mb-6">
 
           {/* Phase Indicator */}
@@ -3160,7 +3313,7 @@ export default function SurgePage() {
                     setCurrentQuestion("");
                   }
                 }}
-                className={`absolute ${phase === "repeat" ? "text-sm font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] bg-clip-text text-transparent" : "text-[var(--foreground)]/30"} transition-opacity hover:opacity-70 cursor-pointer`}
+                className={`absolute phase-button ${phase === "repeat" ? "text-sm font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] bg-clip-text text-transparent" : "text-[var(--foreground)]/30"} transition-opacity hover:opacity-70 cursor-pointer`}
                 style={{ lineHeight: '1.25rem', left: '15%', transform: 'translateX(-50%)' }}
               >
                 Review
@@ -3181,7 +3334,7 @@ export default function SurgePage() {
                     topicSuggestionTriggered.current = false;
                   }
                 }}
-                className={`absolute ${phase === "learn" ? "text-sm font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] bg-clip-text text-transparent" : "text-[var(--foreground)]/30"} transition-opacity hover:opacity-70 cursor-pointer`}
+                className={`absolute phase-button ${phase === "learn" ? "text-sm font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] bg-clip-text text-transparent" : "text-[var(--foreground)]/30"} transition-opacity hover:opacity-70 cursor-pointer`}
                 style={{ lineHeight: '1.25rem', left: '50%', transform: 'translateX(-50%)' }}
               >
                 Learn
@@ -3200,7 +3353,7 @@ export default function SurgePage() {
                     setCurrentQuestion("");
                   }
                 }}
-                className={`absolute ${phase === "quiz" ? "text-sm font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] bg-clip-text text-transparent" : "text-[var(--foreground)]/30"} transition-opacity hover:opacity-70 cursor-pointer`}
+                className={`absolute phase-button ${phase === "quiz" ? "text-sm font-semibold bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] bg-clip-text text-transparent" : "text-[var(--foreground)]/30"} transition-opacity hover:opacity-70 cursor-pointer`}
                 style={{ lineHeight: '1.25rem', left: '85%', transform: 'translateX(-50%)' }}
                 title="Hold Alt/Ctrl (or Cmd) while clicking to run the Erlang quiz debug"
               >
@@ -3276,77 +3429,83 @@ export default function SurgePage() {
                     const topicsToReview = Array.from(allTopics);
                     
                     if (topicsToReview.length === 0) {
-                      // No topics to review - show introduction
+                      // No topics to review - show introduction aligned with homepage styling
                       return (
-                        <div className="rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 p-8">
-                          <div className="text-center mb-8">
-                            <div className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] mb-4" style={{ fontFamily: 'var(--font-orbitron), sans-serif' }}>
-                              Welcome to Surge
+                        <div className="rounded-[28px] border border-white/10 bg-[var(--background)] px-6 py-8 md:px-10 md:py-10">
+                          <div className="flex flex-col gap-6">
+                            <div className="text-center space-y-2">
+                              <h2 className="text-2xl md:text-[32px] font-semibold text-white leading-tight">
+                                Welcome to Surge
+                              </h2>
+                              <p className="text-sm text-white/60 max-w-2xl mx-auto">
+                                Let Chad take control of your learning, and just focus on understanding.
+                              </p>
                             </div>
-                            <div className="text-lg font-semibold text-[var(--foreground)] mb-6">
-                              Your accelerated learning session
-                            </div>
-                          </div>
-                          
-                          <div className="space-y-4 text-left mb-8">
-                            <div className="text-base text-[var(--foreground)]/90">
-                              <strong className="text-[var(--accent-cyan)]">Surge</strong> is a three-phase learning system designed to help you master topics quickly and effectively:
-                            </div>
-                            
-                            <div className="space-y-3">
-                              <div className="flex items-start gap-3">
-                                <div className="text-xl font-bold text-[var(--accent-cyan)] mt-0.5">1</div>
-                                <div>
-                                  <div className="font-semibold text-[var(--foreground)] mb-1">Review Phase</div>
-                                  <div className="text-sm text-[var(--foreground)]/70">
-                                    Test your understanding of previously learned topics with focused quiz questions.
+
+                            <div className="flex flex-col md:flex-row gap-3">
+                              {[
+                                {
+                                  label: "Review",
+                                  icon: (
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                                      <path d="M21 3v5h-5" />
+                                      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                                      <path d="M3 21v-5h5" />
+                                    </svg>
+                                  ),
+                                },
+                                {
+                                  label: "Learn",
+                                  icon: (
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+                                      <path d="M8 7h6" />
+                                      <path d="M8 11h8" />
+                                      <path d="M8 15h4" />
+                                    </svg>
+                                  ),
+                                },
+                                {
+                                  label: "Quiz",
+                                  icon: (
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M9 11l3 3L22 4" />
+                                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                                    </svg>
+                                  ),
+                                },
+                              ].map((item, idx) => (
+                                <div
+                                  key={item.label}
+                                  className="flex-1 flex items-center gap-3 rounded-2xl border border-white/10 bg-[var(--background)]/80 px-5 py-4 text-white/75"
+                                >
+                                  <div className="text-white/50 flex-shrink-0">
+                                    {item.icon}
                                   </div>
+                                  <div className="text-sm font-medium text-white">{item.label}</div>
                                 </div>
-                              </div>
-                              
-                              <div className="flex items-start gap-3">
-                                <div className="text-xl font-bold text-[var(--accent-pink)] mt-0.5">2</div>
-                                <div>
-                                  <div className="font-semibold text-[var(--foreground)] mb-1">Learn Phase</div>
-                                  <div className="text-sm text-[var(--foreground)]/70">
-                                    Explore new topics with interactive lessons tailored to your course.
-                                  </div>
-                                </div>
-                              </div>
-                              
-                              <div className="flex items-start gap-3">
-                                <div className="text-xl font-bold text-[var(--accent-cyan)] mt-0.5">3</div>
-                                <div>
-                                  <div className="font-semibold text-[var(--foreground)] mb-1">Quiz Phase</div>
-                                  <div className="text-sm text-[var(--foreground)]/70">
-                                    Reinforce your learning with comprehensive quizzes on the new material.
-                                  </div>
-                                </div>
-                              </div>
+                              ))}
                             </div>
-                            
-                            <div className="pt-4 border-t border-[var(--foreground)]/10 text-sm text-[var(--foreground)]/80">
-                              Since this is your first Surge session, we'll start with the <strong>Learn Phase</strong> to introduce you to new topics.
+
+                            <div className="flex flex-wrap items-center justify-center gap-3">
+                              <button
+                                onClick={() => {
+                                  setPhase("learn");
+                                  setCurrentTopic("");
+                                  setSuggestedTopics([]);
+                                  setShowTopicSelection(false);
+                                  setShowCustomInput(false);
+                                  setConversation([]);
+                                  conversationRef.current = [];
+                                  setCurrentQuestion("");
+                                  topicSuggestionTriggered.current = false;
+                                }}
+                                className="inline-flex h-10 items-center rounded-full border border-white/15 bg-white/5 px-6 text-sm font-semibold text-white/90 hover:bg-white/10 transition-colors"
+                              >
+                                Continue
+                              </button>
                             </div>
-                          </div>
-                          
-                          <div className="text-center">
-                            <button
-                              onClick={() => {
-                                setPhase("learn");
-                                setCurrentTopic("");
-                                setSuggestedTopics([]);
-                                setShowTopicSelection(false);
-                                setShowCustomInput(false);
-                                setConversation([]);
-                                conversationRef.current = [];
-                                setCurrentQuestion("");
-                                topicSuggestionTriggered.current = false;
-                              }}
-                              className="px-8 py-3 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/20 to-[var(--accent-pink)]/20 hover:from-[var(--accent-cyan)]/30 hover:to-[var(--accent-pink)]/30 text-[var(--foreground)] font-medium transition-all border border-[var(--accent-cyan)]/30"
-                            >
-                              Continue
-                            </button>
                           </div>
                         </div>
                       );
@@ -3666,8 +3825,8 @@ export default function SurgePage() {
             ) : null}
 
             {/* Learn Phase Topic Recommendation */}
-            {phase === "learn" && showTopicSelection && suggestedTopics.length >= MIN_TOPIC_SUGGESTIONS && (
-              <div className="rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/90 p-8 shadow-[0_20px_60px_-30px_rgba(20,200,255,0.4)]">
+            {phase === "learn" && showTopicSelection && suggestedTopics.length > 0 && (
+              <div className="rounded-2xl border border-white/10 bg-[var(--background)]/90 p-8">
                 {(() => {
                   const [recommendedTopic, ...otherTopics] = suggestedTopics;
                   return (
@@ -3684,9 +3843,10 @@ export default function SurgePage() {
                       <div className="flex flex-col sm:flex-row gap-3 justify-center items-center mb-8">
                         <button
                           onClick={() => handleTopicSelect(recommendedTopic)}
-                          className="px-8 py-3 rounded-xl bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] text-[var(--foreground)] font-semibold tracking-wide uppercase shadow-lg shadow-[var(--accent-cyan)]/30 hover:shadow-[var(--accent-pink)]/30 transition-all"
+                          className="px-6 py-2 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-sm text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors"
+                          style={{ boxShadow: 'none' }}
                         >
-                          Start with {recommendedTopic}
+                          Start
                         </button>
                       </div>
                       {otherTopics.length > 0 && (
@@ -3697,16 +3857,18 @@ export default function SurgePage() {
                           <div className="flex flex-wrap justify-center gap-2">
                             {otherTopics.map((topic, idx) => (
                               <button
-                                key={topic}
+                                key={`${topic}-${idx}`}
                                 onClick={() => handleTopicSelect(topic)}
-                                className="px-3 py-1.5 rounded-full border border-[var(--accent-cyan)]/30 bg-[var(--background)]/60 text-xs font-medium text-[var(--foreground)]/80 hover:bg-[var(--accent-cyan)]/10 transition-colors"
+                                className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors"
+                                style={{ boxShadow: 'none' }}
                               >
                                 {topic}
                               </button>
                             ))}
                             <button
                               onClick={() => setShowCustomInput((prev) => !prev)}
-                              className="px-3 py-1.5 rounded-full border border-dashed border-[var(--foreground)]/30 text-xs font-medium text-[var(--foreground)]/70 hover:border-[var(--accent-cyan)]/50 hover:text-[var(--foreground)] transition-colors"
+                              className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors"
+                              style={{ boxShadow: 'none' }}
                             >
                               + Custom topic
                             </button>

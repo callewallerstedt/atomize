@@ -17,6 +17,10 @@ export type TopicGeneratedLesson = {
   quizCompletedAt?: number; // timestamp when answers were checked
   flashcards?: LessonFlashcard[];
   metadata?: LessonMetadata | null;
+  origin?: "surge" | "ai" | "quicklearn" | "manual" | string;
+  surgeSessionId?: string;
+  createdAt?: number;
+  updatedAt?: number;
 };
 export type TopicGeneratedContent = {
   overview: string;

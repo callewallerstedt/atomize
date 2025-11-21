@@ -242,22 +242,6 @@ function PomodoroTimer() {
     <div className="relative pomodoro-timer">
       {/* Icon mode when not running */}
       {!isRunning && (
-        <div
-          className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
-          style={{
-            padding: '1.5px',
-            background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-            e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-          }}
-        >
           <button
             onClick={() => setShowSettings(!showSettings)}
             onMouseDown={(e) => {
@@ -265,29 +249,28 @@ function PomodoroTimer() {
               e.currentTarget.blur();
             }}
             className="relative inline-flex items-center justify-center px-1.5 py-1.5
-                       text-white
-                       bg-[var(--background)]/90 backdrop-blur-md
                        focus:outline-none focus:ring-0 focus-visible:outline-none
                        transition-all duration-300 ease-out"
             style={{ 
               outline: 'none', 
               WebkitTapHighlightColor: 'transparent', 
               transform: 'none !important',
-              borderRadius: '10.5px',
+              borderRadius: '50%',
               margin: 0,
               display: 'flex',
               height: '32px',
               width: '32px',
+              boxShadow: 'none',
+              background: 'rgba(229, 231, 235, 0.08)',
             }}
             aria-label="Pomodoro Timer"
             title="Pomodoro Timer"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
               <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
               <path d="M12 6v6l4 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
           </button>
-        </div>
       )}
       
       {/* Expanded mode when running */}
@@ -609,7 +592,7 @@ function FileUploadArea({
 function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(fullscreen);
-  const [minimized, setMinimized] = useState(false);
+  const [showFullChat, setShowFullChat] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -622,14 +605,18 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
   const [start, setStart] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastMessageContentRef = useRef<string>('');
-  const [scrollTrigger, setScrollTrigger] = useState(0);
-  const chatDropdownRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
-  const [showHistory, setShowHistory] = useState(false);
+  const chatDropdownRef = useRef<HTMLDivElement>(null);
+  const [scrollTrigger, setScrollTrigger] = useState(0);
   const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
   const lastSavedRef = useRef<string>('');
   const isLoadingFromHistoryRef = useRef<boolean>(false);
   const pendingWelcomeMessageRef = useRef<{ welcomeMessage: string; userMessage: string } | null>(null);
+
+  // Don't render anything in fullscreen mode (handled elsewhere)
+  if (fullscreen) {
+    return null;
+  }
 
   // Load chat history from localStorage
   useEffect(() => {
@@ -645,22 +632,21 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
   useEffect(() => {
     const handleOpenChat = () => {
       setOpen(true);
-      setMinimized(false);
       requestAnimationFrame(() => {
         chatInputRef.current?.focus();
       });
     };
 
     const handleToggleChat = () => {
-      if (open) {
-        setOpen(false);
-      } else {
-        setOpen(true);
-        setMinimized(false);
-        requestAnimationFrame(() => {
-          chatInputRef.current?.focus();
-        });
-      }
+      setOpen(prev => {
+        const newState = !prev;
+        if (newState) {
+          requestAnimationFrame(() => {
+            chatInputRef.current?.focus();
+          });
+        }
+        return newState;
+      });
     };
 
     const handleOpenChatWithMessage = (e: Event) => {
@@ -692,7 +678,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
       document.removeEventListener('synapse:toggle-chat', handleToggleChat as EventListener);
       document.removeEventListener('synapse:open-chat-with-message', handleOpenChatWithMessage as EventListener);
     };
-  }, [open]);
+  }, []); // Remove 'open' from dependencies to prevent re-registration
 
   // ESC key handler - always active when chat is open
   useEffect(() => {
@@ -716,6 +702,11 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
   // Global keyboard listener to open chat when typing starts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore special keys and shortcuts
+      if (e.ctrlKey || e.metaKey || e.altKey || e.key === 'Escape' || e.key === 'Tab') {
+        return;
+      }
+
       // Check if user is already in a text input (but allow if it's our chat input)
       const activeElement = document.activeElement;
       const isTextInput = activeElement && (
@@ -725,40 +716,24 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
       );
 
       // If already in a text input that's NOT our chat input, don't do anything
-      if (isTextInput && activeElement !== chatInputRef.current) return;
+      if (isTextInput && activeElement !== chatInputRef.current) {
+        return;
+      }
 
-      // If chat is fully open and not minimized, and user is typing in our input, don't intercept
-      if (open && !minimized && activeElement === chatInputRef.current) return;
-
-      // Ignore modifier keys and special keys
-      if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
-      if (e.key === 'Tab' || e.key === 'Enter' || e.key === 'Escape' || e.key.length > 1) return;
-
-      // If it's a printable character, show minimized input and insert it
-      if (e.key.length === 1 && !e.key.match(/[\x00-\x1F]/)) {
-        e.preventDefault();
-        
-        // If chat is minimized and user is typing, stay minimized and append to input
-        if (open && minimized) {
-          setInput(prev => prev + e.key);
-        } else if (!open) {
-          // If chat is closed, open minimized and set input
+      // If it's a printable character, show pill under header (not full chat)
+      if (e.key.length === 1 && !e.key.match(/[^\x20-\x7E]/)) {
+        if (!open && !showFullChat) {
           setOpen(true);
-          setMinimized(true);
-          setInput(e.key);
-        } else {
-          // If chat is open but not minimized, just append
-          setInput(prev => prev + e.key);
+          setShowFullChat(false); // Show pill, not full chat
+          requestAnimationFrame(() => {
+            chatInputRef.current?.focus();
+            // Set the typed character in the input
+            if (chatInputRef.current) {
+              chatInputRef.current.value = e.key;
+              setInput(e.key);
+            }
+          });
         }
-        
-        requestAnimationFrame(() => {
-          chatInputRef.current?.focus();
-          // Set cursor to end
-          if (chatInputRef.current) {
-            const length = chatInputRef.current.value.length;
-            chatInputRef.current.setSelectionRange(length, length);
-          }
-        });
       }
     };
 
@@ -766,7 +741,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open, minimized]);
+  }, [open]);
 
   // Save chat to history when a conversation is complete (not during streaming)
   useEffect(() => {
@@ -803,7 +778,6 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
   function startNewChat() {
     setMessages([]);
     setInput("");
-    setShowHistory(false);
     lastSavedRef.current = '';
     setCurrentChatId(null);
   }
@@ -811,7 +785,6 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
   function loadChat(chat: ChatHistory) {
     isLoadingFromHistoryRef.current = true;
     setMessages(chat.messages);
-    setShowHistory(false);
     setCurrentChatId(chat.id);
   }
 
@@ -1991,6 +1964,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
     if (!text || sending) return;
     setInput("");
     setMessages((m) => [...m, { role: 'user', content: text }]);
+    setShowFullChat(true); // Open full chat when sending a message
     try {
       setSending(true);
       document.dispatchEvent(new CustomEvent('synapse:chat-sending', { detail: { sending: true } }));
@@ -2232,28 +2206,36 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
     }
   }, [open]);
 
-  // Click outside to close chat
+  // Click outside to close chat - but NOT when clicking the toggle button
   useEffect(() => {
-    if (!open) return;
+    if (!open && !showFullChat) return;
     
     function handleClickOutside(event: MouseEvent) {
-      const target = event.target as Node;
-      // Check if click is outside the dropdown
+      const target = event.target as Element;
+      // Don't close if clicking the chat pill, full chat dropdown, or toggle button
       if (
-        chatDropdownRef.current &&
-        !chatDropdownRef.current.contains(target)
+        target.closest('[data-chat-pill]') ||
+        target.closest('[data-chat-input]') ||
+        target.closest('button[data-chat-toggle]') ||
+        target.closest('[data-chat-dropdown]')
       ) {
-        setOpen(false);
+        return;
       }
+      // Close if clicking outside
+      setOpen(false);
+      setShowFullChat(false);
     }
     
-    // Use capture phase to catch clicks before they bubble
-    document.addEventListener('mousedown', handleClickOutside, true);
+    // Use a small delay to let button clicks process first
+    const timeoutId = setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside, true);
+    }, 0);
     
     return () => {
+      clearTimeout(timeoutId);
       document.removeEventListener('mousedown', handleClickOutside, true);
     };
-  }, [open]);
+  }, [open, showFullChat]);
 
   // Resize handlers (bottom-left grip)
   useEffect(() => {
@@ -2402,277 +2384,231 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
 
   return (
     <>
-      {typeof document !== 'undefined' ? createPortal(
-        <>
-          <div
-            style={{
-              position: 'fixed',
-              top: '4.6rem',
-              left: 0,
-              right: 0,
-              bottom: 0,
-              overflow: 'hidden',
-              pointerEvents: open ? 'auto' : 'none',
-              zIndex: 9998,
+      {/* Chat pill under header - appears when typing */}
+      {typeof document !== 'undefined' && open && !showFullChat ? createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            top: 'calc(3.5rem + max(3px, calc(env(safe-area-inset-top, 0px) / 2)) + 1.5rem)',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 9998,
+            pointerEvents: 'auto',
+            opacity: 1,
+            transition: 'opacity 0.2s ease-out',
+          }}
+        >
+          <div 
+            data-chat-pill
+            className="flex items-center gap-3 rounded-full bg-[rgba(229,231,235,0.08)] px-5 py-3 border border-white/5"
+            style={{ 
+              boxShadow: 'none',
+              minWidth: '400px',
+              maxWidth: '700px',
             }}
           >
-            <div 
-              ref={chatDropdownRef}
-              className={`rounded-2xl rounded-t-none border border-[var(--foreground)]/20 border-t-0 bg-[var(--background)]/95 shadow-2xl pl-8 pr-8 flex flex-col transition-all duration-300 ease-out ${
-                minimized ? 'pt-2 pb-2' : 'pt-4 pb-8'
-              }`}
-               style={{ 
-                 position: 'absolute',
-                 top: 'calc(max(3px, calc(env(safe-area-inset-top, 0px) / 2)) - 0.3rem)',
-                 left: '1.5rem',
-                 right: '1.5rem',
-                 bottom: minimized ? undefined : '0.5rem',
-                 maxHeight: minimized ? '80px' : '200vh',
-                 transform: open 
-                   ? 'translateY(0)' 
-                   : 'translateY(calc(-100% - 1.5rem - max(3px, calc(env(safe-area-inset-top, 0px) / 2))))',
-               }}
-              onClick={(e) => e.stopPropagation()}>
-          {!minimized && (
-            <>
-              {/* Top right icons */}
-              <div className="relative flex items-center gap-2 justify-between mb-2 flex-shrink-0">
-                <h2 className="text-lg font-semibold text-[var(--foreground)]">Chat</h2>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={startNewChat}
-                    className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
-                    title="New chat"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 5v14M5 12h14"/>
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => setShowHistory(!showHistory)}
-                    className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
-                    title="Chat history"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M3 3h18v18H3V3z"/>
-                      <path d="M3 9h18M9 3v18"/>
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setOpen(false);
-                      setMinimized(false);
-                    }}
-                    className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
-                    title="Close chat"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M18 6L6 18M6 6l12 12"/>
-                    </svg>
-                  </button>
-                </div>
-            
-            {/* History panel - absolute positioned to overlay */}
-            {showHistory && (
-              <div className="absolute top-full right-0 mt-1 w-64 p-2 rounded-lg bg-[var(--background)]/95 bg-gradient-to-br from-[#00E5FF]/20 to-[#FF2D96]/20 backdrop-blur-md border border-[var(--foreground)]/20 z-50 max-h-64 overflow-y-auto">
-                {chatHistory.length === 0 ? (
-                  <div className="text-xs text-[var(--foreground)]/60 text-center py-4">No chat history</div>
-                ) : (
-                  <div className="space-y-1">
-                    {chatHistory.map((chat) => (
-                      <div
-                        key={chat.id}
-                        onClick={() => loadChat(chat)}
-                        className="flex items-center justify-between group p-2 rounded hover:bg-[var(--background)]/80 cursor-pointer transition-colors"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-medium text-[var(--foreground)] truncate">{chat.title}</div>
-                          <div className="text-[10px] text-[var(--foreground)]/50">
-                            {new Date(chat.timestamp).toLocaleDateString()}
-                          </div>
-                        </div>
-                        <button
-                          onClick={(e) => deleteChat(chat.id, e)}
-                          className="opacity-0 group-hover:opacity-100 text-[var(--foreground)]/50 hover:text-[var(--foreground)] transition-opacity ml-2"
-                          title="Delete"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M18 6L6 18M6 6l12 12"/>
-                          </svg>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-              </div>
-            </>
-          )}
-          
-          {!minimized && (
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0 pb-15">
-            {messages.length === 0 && (
-              <div className="text-xs text-[var(--foreground)]/60">Ask a question about this page. I'll use the current page content as context.</div>
-            )}
-            {messages.map((m, i) => {
-              // Skip system messages and hidden messages in display (they're context only)
-              if (m.role === 'system' || m.hidden) return null;
-              
-              // Show loading spinner for loading messages
-              if (m.isLoading) {
-                return (
-                  <div key={i} className="flex justify-start">
-                    <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
-                      <div className="text-[1.225rem] text-[var(--foreground)]/90 leading-relaxed flex items-center gap-2">
-                        <span className="inline-block w-2 h-2 bg-[var(--accent-cyan)] rounded-full animate-pulse"></span>
-                        Thinking...
-                      </div>
-                    </div>
-                  </div>
-                );
-              }
-              
-              return (
-              <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-                {m.role === 'user' ? (
-                  <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-lg bg-[var(--accent-cyan)]/20 border border-[var(--accent-cyan)]/40">
-                    <div className="text-[1.225rem] text-[var(--foreground)]/90 leading-relaxed">
-                      {m.content}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
-                    <div className="text-[1.225rem] text-[var(--foreground)]/90 leading-relaxed">
-                      {m.role === 'assistant' ? (
-                        <>
-                          <LessonBody body={sanitizeLessonBody(String(m.content || ''))} />
-                          {/* Render UI elements */}
-                          {m.uiElements && m.uiElements.length > 0 && (
-                            <div className="mt-3 space-y-2">
-                              {m.uiElements.map((ui, uiIdx) => {
-                                if (ui.type === 'button') {
-                                  return (
-                                    <button
-                                      key={uiIdx}
-                                      onClick={() => handleButtonClick(ui.action, ui.params)}
-                                      className="inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
-                                      style={{ color: 'white' }}
-                                    >
-                                      {ui.label || 'Button'}
-                                    </button>
-                                  );
-                                } else if (ui.type === 'file_upload') {
-                                  const files = uploadedFiles[ui.id] || [];
-                                  const status = uploadStatus[ui.id] || 'idle';
-                                  // Extract button label from params if provided
-                                  const buttonLabel = ui.params?.buttonLabel || 'Generate';
-                                  return (
-                                    <FileUploadArea
-                                      key={uiIdx}
-                                      uploadId={ui.id}
-                                      message={ui.message}
-                                      files={files}
-                                      buttonLabel={buttonLabel}
-                                      action={ui.action}
-                                      status={status}
-                                      onFilesChange={(newFiles) => handleFileUpload(ui.id, newFiles)}
-                                      onGenerate={() => handleButtonClick(ui.action, ui.params, ui.id)}
-                                    />
-                                  );
-                                }
-                                return null;
-                              })}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        m.content
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-            })}
-              {/* Scroll target for auto-scroll */}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-          <div className={`flex items-center gap-2 flex-shrink-0 ${minimized ? '' : 'mt-2'}`}>
-            {minimized && (
-              <button
-                onClick={() => {
-                  setMinimized(false);
-                  requestAnimationFrame(() => {
-                    chatInputRef.current?.focus();
-                  });
-                }}
-                className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
-                title="Expand chat"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 15l-6-6-6 6"/>
-                </svg>
-              </button>
-            )}
-             <input
-               ref={chatInputRef}
-               value={input}
-               onChange={(e) => setInput(e.target.value)}
-               onKeyDown={(e) => { 
-                 if (e.key === 'Enter') {
-                   if (minimized) {
-                     setMinimized(false);
-                     // Wait for animation to complete before sending (300ms animation)
-                     setTimeout(() => {
-                       sendMessage();
-                     }, 300);
-                   } else {
-                     sendMessage();
-                   }
-                 }
-               }}
-               placeholder="Type a message..."
-               className="flex-1 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-3 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none transition-transform duration-300"
-               style={{ transform: 'scale(1)', transformOrigin: 'left center' }}
-             />
-            <button
-              onClick={() => {
-                if (minimized) {
-                  setMinimized(false);
-                  // Wait for animation to complete before sending (300ms animation)
-                  setTimeout(() => {
-                    sendMessage();
-                  }, 300);
-                } else {
+            <input
+              ref={chatInputRef}
+              data-chat-input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { 
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
                   sendMessage();
                 }
               }}
-              disabled={sending}
-              className="inline-flex h-11 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-base font-medium !text-white hover:opacity-95 disabled:opacity-60 disabled:!text-white transition-transform duration-300"
-              style={{ color: 'white', transform: 'scale(1)' }}
+              placeholder="Chat with Chad..."
+              className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder:text-white/60 focus:outline-none"
+              style={{ boxShadow: 'none' }}
+            />
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (input.trim()) {
+                  sendMessage();
+                }
+              }}
+              disabled={sending || !input.trim()}
+              className={`transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full ${input.trim() ? 'text-white/90 hover:text-white' : 'text-white/60 hover:text-white/80'}`}
+              style={{ 
+                boxShadow: 'none',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+              }}
             >
-              {sending ? 'Sending…' : 'Send'}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
             </button>
-            {minimized && (
+          </div>
+        </div>,
+        document.body
+      ) : null}
+      {/* Floating chat button in bottom right */}
+      {typeof document !== 'undefined' && !showFullChat ? createPortal(
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen(true);
+            setShowFullChat(true);
+            requestAnimationFrame(() => {
+              chatInputRef.current?.focus();
+            });
+          }}
+          className="fixed bottom-6 right-6 z-50 inline-flex items-center justify-center w-12 h-12 rounded-full transition-all duration-300 ease-out"
+          style={{ 
+            background: 'rgba(229, 231, 235, 0.08)',
+            boxShadow: 'none',
+          }}
+          aria-label="Open chat"
+          title="Open chat"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+        </button>,
+        document.body
+      ) : null}
+      {/* Full chat dropdown */}
+      {typeof document !== 'undefined' && showFullChat ? createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 9999,
+            width: '90%',
+            maxWidth: '800px',
+            maxHeight: '90vh',
+            zoom: typeof window !== 'undefined' && window.innerWidth >= 768 && !(window.navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)) ? 1.4 : undefined,
+          }}
+        >
+          <div 
+            ref={chatDropdownRef}
+            data-chat-dropdown
+            className="rounded-2xl border border-white/5 flex flex-col"
+            style={{ 
+              boxShadow: 'none',
+              background: 'rgba(15, 18, 22, 0.95)',
+              height: 'min(750px, 90vh)',
+              maxHeight: '90vh',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 flex-shrink-0 border-b border-white/5">
+              <h2 className="text-lg font-semibold text-white">Chat</h2>
               <button
                 onClick={() => {
+                  setShowFullChat(false);
                   setOpen(false);
-                  setMinimized(false);
                 }}
-                className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors !shadow-none"
+                className="text-white/60 hover:text-white/80 transition-colors !shadow-none"
                 title="Close chat"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M18 6L6 18M6 6l12 12"/>
                 </svg>
               </button>
-            )}
+            </div>
+            
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto space-y-3 p-4 min-h-0">
+              {messages.length === 0 && (
+                <div className="text-xs text-white/60">Ask a question about this page. I'll use the current page content as context.</div>
+              )}
+              {messages.map((m, i) => {
+                if (m.role === 'system' || m.hidden) return null;
+                
+                if (m.isLoading) {
+                  return (
+                    <div key={i} className="flex justify-start">
+                      <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5">
+                        <div className="text-sm text-white/90 leading-relaxed flex items-center gap-2">
+                          <span className="inline-block w-2 h-2 bg-white/60 rounded-full animate-pulse"></span>
+                          Thinking...
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                
+                return (
+                  <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+                    {m.role === 'user' ? (
+                      <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-2xl bg-[rgba(229,231,235,0.15)] border border-white/10">
+                        <div className="text-sm text-white/90 leading-relaxed">
+                          {m.content}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-2xl bg-[rgba(229,231,235,0.08)] border border-white/5">
+                        <div className="text-sm text-white/90 leading-relaxed">
+                          {m.role === 'assistant' ? (
+                            <>
+                              <div className="chat-bubble">
+                                <LessonBody body={sanitizeLessonBody(String(m.content || ''))} />
+                              </div>
+                            </>
+                          ) : (
+                            m.content
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </div>
+            
+            {/* Chat pill at bottom */}
+            <div className="p-4 border-t border-white/5 flex-shrink-0">
+              <div 
+                data-chat-pill
+                className="flex items-center gap-3 rounded-full bg-[rgba(229,231,235,0.08)] px-5 py-3 border border-white/5"
+                style={{ 
+                  boxShadow: 'none',
+                }}
+              >
+                <input
+                  ref={chatInputRef}
+                  data-chat-input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => { 
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      sendMessage();
+                    }
+                  }}
+                  placeholder="Chat with Chad..."
+                  className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder:text-white/60 focus:outline-none"
+                  style={{ boxShadow: 'none' }}
+                />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (input.trim()) {
+                      sendMessage();
+                    }
+                  }}
+                  disabled={sending || !input.trim()}
+                  className={`transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full ${input.trim() ? 'text-white/90 hover:text-white' : 'text-white/60 hover:text-white/80'}`}
+                  style={{ 
+                    boxShadow: 'none',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                  }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M5 12h14M12 5l7 7-7 7"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-          </div>
-        </>,
+        </div>,
         document.body
       ) : null}
     </>
@@ -2701,7 +2637,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
-  const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -2877,20 +2812,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       if (settingsOpen && !(event.target as Element).closest('.settings-modal')) {
         setSettingsOpen(false);
       }
-      if (toolsDropdownOpen && !(event.target as Element).closest('.tools-dropdown')) {
-        setToolsDropdownOpen(false);
-      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [settingsOpen, toolsDropdownOpen]);
-
-  useEffect(() => {
-    if (isMobile) {
-      setToolsDropdownOpen(false);
-    }
-  }, [isMobile]);
+  }, [settingsOpen]);
 
   useEffect(() => {
     if (!isMobile) {
@@ -3046,111 +2972,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   </h1>
                 </div>
               </button>
-              <div className="relative hidden md:block tools-dropdown">
-                {/* Gradient border wrapper */}
-                <div
-                  className="inline-block rounded-xl transition-all duration-300"
-                  style={{
-                    padding: '1.5px',
-                    background: toolsDropdownOpen
-                      ? 'linear-gradient(135deg, rgba(0, 229, 255, 1), rgba(255, 45, 150, 1))'
-                      : 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-                    boxShadow: toolsDropdownOpen 
-                      ? '0 0 20px rgba(0, 229, 255, 0.4), 0 0 40px rgba(255, 45, 150, 0.2)'
-                      : '0 2px 8px rgba(0, 0, 0, 0.3)',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!toolsDropdownOpen) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!toolsDropdownOpen) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-                    }
-                  }}
-                >
-                  <button
-                    onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
-                    className="group relative inline-flex items-center gap-2 px-1.5 py-1.5
-                               text-white
-                               transition-all duration-300 ease-out
-                               bg-[var(--background)]/90 backdrop-blur-md"
-                    style={{
-                      borderRadius: 'calc(0.75rem - 1.5px)',
-                      height: '32px',
-                    }}
-                  >
-                    {/* Grid icon for futuristic look */}
-                    <svg
-                      className="relative z-10 h-4 w-4 transition-all duration-300"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                    </svg>
-                    
-                    <span className="relative z-10 text-sm font-medium tracking-wide">Tools</span>
-                    
-                    {/* Animated chevron */}
-                    <svg
-                      className={`relative z-10 h-3.5 w-3.5 transition-transform duration-300 ${toolsDropdownOpen ? 'rotate-180' : ''}`}
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2.5}
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                </div>
-
-                {toolsDropdownOpen && (
-                  <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 z-50">
-                    <div className="relative rounded-xl p-2
-                                 bg-[var(--background)]/95 backdrop-blur-md
-                                 shadow-[0_4px_12px_rgba(0,0,0,0.7)]
-                                 overflow-hidden">
-                      <div className="space-y-1 min-w-[160px]">
-                        <button
-                          onClick={() => {
-                            router.push('/exam-snipe');
-                            setToolsDropdownOpen(false);
-                          }}
-                          className="w-full text-left px-3 py-2 rounded-lg bg-[var(--background)]/60 text-[var(--foreground)]
-                                     hover:bg-[var(--background)]/80 transition-colors text-sm"
-                        >
-                          Exam Snipe
-                        </button>
-                        <button
-                          onClick={() => {
-                            router.push('/quicklearn');
-                            setToolsDropdownOpen(false);
-                          }}
-                          className="w-full text-left px-3 py-2 rounded-lg bg-[var(--background)]/60 text-[var(--foreground)]
-                                     hover:bg-[var(--background)]/80 transition-colors text-sm"
-                        >
-                          Quick Learn
-                        </button>
-                        <button
-                          onClick={() => {
-                            router.push('/readassist');
-                            setToolsDropdownOpen(false);
-                          }}
-                          className="w-full text-left px-3 py-2 rounded-lg bg-[var(--background)]/60 text-[var(--foreground)]
-                                     hover:bg-[var(--background)]/80 transition-colors text-sm"
-                        >
-                          Read Assist
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
 
             {/* Center: SURGE text on surge page */}
@@ -3170,75 +2991,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               </div>
             )}
 
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
               {!isMobile && (
                 <>
-                  {/* Chat button */}
-                  <div
-                    className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
-                    style={{
-                      padding: '1.5px',
-                      background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-                    }}
-                  >
-                    <button
-                      onClick={() => {
-                        document.dispatchEvent(new CustomEvent('synapse:toggle-chat'));
-                      }}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        e.currentTarget.blur();
-                      }}
-                      className="relative inline-flex items-center justify-center px-1.5 py-1.5
-                                 text-white
-                                 bg-[var(--background)]/90 backdrop-blur-md
-                                 focus:outline-none focus:ring-0 focus-visible:outline-none
-                                 transition-all duration-300 ease-out"
-                      style={{ 
-                        outline: 'none', 
-                        WebkitTapHighlightColor: 'transparent', 
-                        transform: 'none !important',
-                        borderRadius: '10.5px',
-                        margin: 0,
-                        display: 'flex',
-                        height: '32px',
-                        width: '32px',
-                      }}
-                      aria-label="Toggle chat"
-                      title="Toggle chat"
-                    >
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                      </svg>
-                    </button>
-                  </div>
-                  {/* SurgeLog button - only for Tester subscription on surge page */}
+                {/* SurgeLog button - only for Tester subscription on surge page */}
                   {subscriptionLevel === "Tester" && pathname?.includes('/surge') && (
-                    <div
-                      className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
-                      style={{
-                        padding: '1.5px',
-                        background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-                        e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-                      }}
-                    >
                       <button
                         onClick={() => {
                           setSurgeLogModalOpen(true);
@@ -3248,28 +3005,27 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                           e.currentTarget.blur();
                         }}
                         className="relative inline-flex items-center justify-center px-1.5 py-1.5
-                                   text-white
-                                   bg-[var(--background)]/90 backdrop-blur-md
                                    focus:outline-none focus:ring-0 focus-visible:outline-none
                                    transition-all duration-300 ease-out"
                         style={{ 
                           outline: 'none', 
                           WebkitTapHighlightColor: 'transparent', 
                           transform: 'none !important',
-                          borderRadius: '10.5px',
+                          borderRadius: '50%',
                           margin: 0,
                           display: 'flex',
                           height: '32px',
                           width: '32px',
+                          boxShadow: 'none',
+                          background: 'rgba(229, 231, 235, 0.08)',
                         }}
                         aria-label="Surge Log"
                         title="Surge Log"
                       >
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                       </button>
-                    </div>
                   )}
                   {/* Pomodoro Timer */}
                   <PomodoroTimer />
@@ -3277,22 +3033,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               )}
               <div className="hidden md:flex items-center gap-2">
                 {/* Fullscreen button */}
-                <div
-                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
-                  style={{
-                    padding: '1.5px',
-                    background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-                  }}
-                >
                   <button
                     onClick={toggleFullscreen}
                     onMouseDown={(e) => {
@@ -3300,51 +3040,34 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       e.currentTarget.blur();
                     }}
                     className="relative inline-flex items-center justify-center px-1.5 py-1.5
-                               text-white
-                               bg-[var(--background)]/90 backdrop-blur-md
                                focus:outline-none focus:ring-0 focus-visible:outline-none
                                transition-all duration-300 ease-out"
                     style={{ 
                       outline: 'none', 
                       WebkitTapHighlightColor: 'transparent', 
                       transform: 'none !important',
-                      borderRadius: '10.5px',
+                      borderRadius: '50%',
                       margin: 0,
                       display: 'flex',
                       height: '32px',
                       width: '32px',
+                      boxShadow: 'none',
+                      background: 'rgba(229, 231, 235, 0.08)',
                     }}
                     aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
                     title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
                   >
                     {isFullscreen ? (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
                       </svg>
                     ) : (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
                       </svg>
                     )}
                   </button>
-                </div>
                 {/* Info button */}
-                <div
-                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
-                  style={{
-                    padding: '1.5px',
-                    background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-                  }}
-                >
                   <button
                     onClick={() => setInfoOpen(true)}
                     onMouseDown={(e) => {
@@ -3352,47 +3075,30 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       e.currentTarget.blur();
                     }}
                     className="relative inline-flex items-center justify-center px-1.5 py-1.5
-                               text-white
-                               bg-[var(--background)]/90 backdrop-blur-md
                                focus:outline-none focus:ring-0 focus-visible:outline-none
                                transition-all duration-300 ease-out"
                     style={{ 
                       outline: 'none', 
                       WebkitTapHighlightColor: 'transparent', 
                       transform: 'none !important',
-                      borderRadius: '10.5px',
+                      borderRadius: '50%',
                       margin: 0,
                       display: 'flex',
                       height: '32px',
                       width: '32px',
+                      boxShadow: 'none',
+                      background: 'rgba(229, 231, 235, 0.08)',
                     }}
                     aria-label="Info"
                     title="About this app"
                   >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
                       <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
                       <path d="M12 8.5a.75.75 0 100-1.5.75.75 0 000 1.5z" fill="currentColor"/>
                       <path d="M11.25 10.5h1.5v6h-1.5z" fill="currentColor"/>
                     </svg>
                   </button>
-                </div>
                 {/* Settings button */}
-                <div
-                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
-                  style={{
-                    padding: '1.5px',
-                    background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-                  }}
-                >
                   <button
                     onClick={() => setSettingsOpen(true)}
                     onMouseDown={(e) => {
@@ -3400,29 +3106,28 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       e.currentTarget.blur();
                     }}
                     className="relative inline-flex items-center justify-center px-1.5 py-1.5
-                               text-white
-                               bg-[var(--background)]/90 backdrop-blur-md
                                focus:outline-none focus:ring-0 focus-visible:outline-none
                                transition-all duration-300 ease-out"
                     style={{ 
                       outline: 'none', 
                       WebkitTapHighlightColor: 'transparent', 
                       transform: 'none !important',
-                      borderRadius: '10.5px',
+                      borderRadius: '50%',
                       margin: 0,
                       display: 'flex',
                       height: '32px',
                       width: '32px',
+                      boxShadow: 'none',
+                      background: 'rgba(229, 231, 235, 0.08)',
                     }}
                     aria-label="Settings"
                     title="Settings"
                   >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-90">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
                       <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" stroke="currentColor" strokeWidth="1.5"/>
                       <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5"/>
                     </svg>
                   </button>
-                </div>
               </div>
 
               <div ref={mobileMenuRef} className="relative md:hidden">

@@ -2,9 +2,9 @@
 @import "katex/dist/katex.min.css";
 
 :root {
-  --background: #0F1216;
+  --background: #1a1a1a;
   --foreground: #E5E7EB;
-  --accent-cyan: #00E5FF;
+  --accent-cyan: #9CA3AF;
   --accent-pink: #FF2D96;
   --accent-grad: linear-gradient(90deg, var(--accent-cyan), var(--accent-pink));
 }
@@ -71,7 +71,7 @@ html, body {
 
 /* Markdown/lesson typography without relying on the typography plugin */
 .lesson-content {
-  color: #E5E7EB;
+  color: rgba(229, 231, 235, 0.75);
 }
 .lesson-content h1 {
   font-size: 1.375rem; /* ~22px */
@@ -79,7 +79,7 @@ html, body {
   font-weight: 700;
   margin-top: 1.25rem;
   margin-bottom: 0.75rem;
-  color: rgba(229, 231, 235, 0.6); /* Lower opacity */
+  color: #FFFFFF;
   padding-left: 0.75rem;
   padding-top: 0.25rem;
   padding-bottom: 0.25rem;
@@ -92,7 +92,7 @@ html, body {
   top: 0;
   bottom: 0;
   width: 3px;
-  background: linear-gradient(to bottom, rgba(0, 229, 255, 0.4), rgba(255, 45, 150, 0.4));
+  background: linear-gradient(to bottom, rgba(0, 229, 255, 0.6), rgba(255, 45, 150, 0.6));
 }
 .lesson-content h2 {
   font-size: 1.125rem; /* ~18px */
@@ -100,7 +100,7 @@ html, body {
   font-weight: 700;
   margin-top: 1rem;
   margin-bottom: 0.5rem;
-  color: rgba(229, 231, 235, 0.55); /* Lower opacity */
+  color: #FFFFFF;
   padding-left: 0.625rem;
   padding-top: 0.2rem;
   padding-bottom: 0.2rem;
@@ -113,14 +113,14 @@ html, body {
   top: 0;
   bottom: 0;
   width: 2px;
-  background: linear-gradient(to bottom, rgba(0, 229, 255, 0.35), rgba(255, 45, 150, 0.35));
+  background: linear-gradient(to bottom, rgba(0, 229, 255, 0.5), rgba(255, 45, 150, 0.5));
 }
 .lesson-content h3 {
   font-size: 1rem;      /* 16px - smaller than h2 */
   font-weight: 600;
   margin: 1.25rem 0 0.5rem; /* top spacing so it stands out */
   line-height: 1.3;
-  color: rgba(229, 231, 235, 0.5); /* Lower opacity */
+  color: #FFFFFF;
   padding-left: 0.5rem;
   padding-top: 0.15rem;
   padding-bottom: 0.15rem;
@@ -133,12 +133,13 @@ html, body {
   top: 0;
   bottom: 0;
   width: 2px;
-  background: linear-gradient(to bottom, rgba(0, 229, 255, 0.3), rgba(255, 45, 150, 0.3));
+  background: linear-gradient(to bottom, rgba(0, 229, 255, 0.4), rgba(255, 45, 150, 0.4));
 }
 .lesson-content p {
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
   line-height: 1.8;
+  color: rgba(229, 231, 235, 0.7);
 }
 .lesson-content ul,
 .lesson-content ol {
@@ -151,6 +152,7 @@ html, body {
   margin-top: 0.25rem;
   margin-bottom: 0.25rem;
   list-style: inherit;
+  color: rgba(229, 231, 235, 0.7);
 }
 .lesson-content ul {
   list-style-type: none;
@@ -185,7 +187,7 @@ html, body {
 .lesson-content blockquote {
   border-left: 3px solid #2B3140;
   padding-left: 0.75rem;
-  color: #A7AFBE;
+  color: rgba(229, 231, 235, 0.7);
   margin: 0.75rem 0;
 }
 .lesson-content table {
@@ -193,11 +195,18 @@ html, body {
   border-collapse: collapse;
   margin: 0.75rem 0;
 }
-.lesson-content th,
+.lesson-content th {
+  border-top: 1px solid #1E2532;
+  padding: 0.5rem;
+  text-align: left;
+  color: #FFFFFF;
+  font-weight: 600;
+}
 .lesson-content td {
   border-top: 1px solid #1E2532;
   padding: 0.5rem;
   text-align: left;
+  color: rgba(229, 231, 235, 0.7);
 }
 .lesson-content .katex-display {
   margin: 1rem 0;
@@ -259,8 +268,8 @@ select {
 .paragraph-line {
   background: linear-gradient(
     to bottom,
-    rgba(0, 229, 255, 0) 0%,
-    rgba(0, 229, 255, 0.6) 10%,
+    rgba(156, 163, 175, 0) 0%,
+    rgba(156, 163, 175, 0.6) 10%,
     rgba(255, 45, 150, 0.6) 90%,
     rgba(255, 45, 150, 0) 100%
   );
@@ -512,12 +521,50 @@ button:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8) !important;
 }
 
+/* Remove shadows from phase indicator buttons (Review, Learn, Quiz) */
+button.phase-button,
+button.phase-button:hover {
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+/* Remove shadows from date buttons */
+button.date-button,
+button.date-button:hover {
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
 /* Pulse glow animation for Surge button */
 @keyframes pulse-glow {
   0%, 100% {
-    box-shadow: 0 0 30px rgba(0, 229, 255, 0.6), 0 0 60px rgba(255, 45, 150, 0.4), 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(0, 229, 255, 0.5), 0 0 0 4px rgba(255, 45, 150, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 30px rgba(156, 163, 175, 0.6), 0 0 60px rgba(255, 45, 150, 0.4), 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(156, 163, 175, 0.5), 0 0 0 4px rgba(255, 45, 150, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   }
   50% {
-    box-shadow: 0 0 40px rgba(0, 229, 255, 0.8), 0 0 80px rgba(255, 45, 150, 0.6), 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(0, 229, 255, 0.7), 0 0 0 4px rgba(255, 45, 150, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    box-shadow: 0 0 40px rgba(156, 163, 175, 0.8), 0 0 80px rgba(255, 45, 150, 0.6), 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(156, 163, 175, 0.7), 0 0 0 4px rgba(255, 45, 150, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   }
+}
+
+/* Constrain lesson content margins in chat bubbles */
+.chat-bubble .lesson-content p {
+  margin: 0 !important;
+}
+
+.chat-bubble .lesson-content ul,
+.chat-bubble .lesson-content ol {
+  margin: 0.25rem 0 !important;
+}
+
+.chat-bubble .lesson-content h1,
+.chat-bubble .lesson-content h2,
+.chat-bubble .lesson-content h3 {
+  margin: 0.25rem 0 !important;
+}
+
+.chat-bubble .lesson-content *:first-child {
+  margin-top: 0 !important;
+}
+
+.chat-bubble .lesson-content *:last-child {
+  margin-bottom: 0 !important;
 }

@@ -598,7 +598,7 @@ export default function SubjectPage() {
               </button>
               <button
                 onClick={() => router.push(`/subjects/${slug}/practice`)}
-                className="w-full rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 hover:bg-[var(--background)]/70 transition-all py-3 px-6 flex items-center justify-center text-base font-semibold text-[var(--foreground)]"
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 hover:bg-[var(--background)]/65 transition-all py-3 px-6 flex items-center justify-center text-base font-semibold text-[var(--foreground)]/85"
               >
                 Practice
               </button>
@@ -707,6 +707,9 @@ export default function SubjectPage() {
                 }).map((t: any, i: number) => {
                   const name = t.name;
                   const isGen = !!(Array.isArray(nodes?.[name]?.lessons) && nodes[name].lessons.length > 0);
+                  const hasSurgeLesson =
+                    Array.isArray(nodes?.[name]?.lessons) &&
+                    nodes[name].lessons.some((lesson: any) => lesson?.origin === "surge");
                   const isGenerating = !!nodeGenerating[name];
                   const isFirst = i === 0;
                   const isLast = i === tree.topics.length - 1;
@@ -736,7 +739,22 @@ export default function SubjectPage() {
                       {isGen && (
                         <div className={`pointer-events-none absolute inset-0 opacity-20 ${roundedClass}`} style={{ backgroundImage: 'linear-gradient(90deg, #00E5FF, #FF2D96)' }} />
                       )}
-                      <span className={`text-sm transition-colors ${isGen ? 'text-[var(--foreground)] hover:opacity-90' : 'text-[var(--foreground)]/70 hover:text-[var(--foreground)]'}`}>{name}</span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`text-sm transition-colors ${
+                            isGen
+                              ? 'text-[var(--foreground)] hover:opacity-90'
+                              : 'text-[var(--foreground)]/70 hover:text-[var(--foreground)]'
+                          }`}
+                        >
+                          {name}
+                        </span>
+                        {hasSurgeLesson && (
+                          <span className="text-[10px] uppercase tracking-[0.25em] text-white/35 font-semibold">
+                            Surge
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                         {subscriptionLevel === "Tester" && (
                           <button
@@ -745,7 +763,7 @@ export default function SubjectPage() {
                               e.stopPropagation();
                               setTopicInfoOpen(topicInfoOpen === name ? null : name);
                             }}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--background)]/60 border border-[var(--accent-cyan)]/30 text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/10 hover:border-[var(--accent-cyan)]/50 transition-all opacity-0 group-hover:opacity-100"
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--background)]/60 border border-[var(--foreground)]/20 text-[var(--foreground)]/70 hover:bg-[var(--foreground)]/10 hover:border-[var(--foreground)]/30 transition-all opacity-0 group-hover:opacity-100"
                             title="View topic info"
                           >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -865,7 +883,7 @@ export default function SubjectPage() {
               
               return (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setTopicInfoOpen(null)}>
-                  <div className="w-full max-w-lg rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/95 backdrop-blur-sm p-6" onClick={(e) => e.stopPropagation()}>
+                  <div className="w-full max-w-lg rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/95 backdrop-blur-sm p-6" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-semibold text-[var(--foreground)]">Topic Information</h3>
                       <button
@@ -901,7 +919,7 @@ export default function SubjectPage() {
                     <div className="mt-6 flex justify-end">
                       <button
                         onClick={() => setTopicInfoOpen(null)}
-                        className="rounded-lg border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/80"
+                        className="rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/60 px-4 py-2 text-sm text-[var(--foreground)]/80 hover:bg-[var(--background)]/75"
                       >
                         Close
                       </button>
@@ -920,7 +938,7 @@ export default function SubjectPage() {
                     return (
                       <div
                         key={examSnipe.id}
-                        className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 cursor-pointer hover:border-[var(--accent-cyan)]/40 transition-colors"
+                        className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 cursor-pointer hover:border-[var(--foreground)]/30 transition-colors"
                         role="link"
                         tabIndex={0}
                         onClick={() => router.push(`/subjects/${slug}/examsnipe`)}
@@ -1034,7 +1052,7 @@ export default function SubjectPage() {
                     return (
                       <div
                         key={examSnipe.id}
-                        className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 cursor-pointer hover:border-[var(--accent-cyan)]/40 transition-colors"
+                        className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 cursor-pointer hover:border-[var(--foreground)]/30 transition-colors"
                         role="link"
                         tabIndex={0}
                         onClick={() => router.push(`/subjects/${slug}/examsnipe`)}

@@ -19,13 +19,17 @@ export async function POST(req: Request) {
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const system = [
-      "Extract topics and core concepts strictly from the provided text blocks.",
-      "Return JSON only: { subject: string; topics: { name: string; summary: string; coverage: number }[] }",
-      "8–16 concise topics. coverage sums ≈ 100 and never exceeds it. No external knowledge.",
-      "Always extract topics from the provided text, even if it's brief. Work with what you have.",
+      "You are summarizing a course based on the provided materials.",
+      "Write a comprehensive course summary in PLAIN TEXT ONLY (2-4 paragraphs).",
+      "The summary should describe:",
+      "- What the course is about",
+      "- Key themes, concepts, and learning objectives",
+      "- The level and style (introductory vs advanced; theoretical vs applied)",
+      "- Main areas of focus",
+      "",
       preferredLanguage
-        ? `CRITICAL: Write all names and summaries in ${preferredLanguage}.`
-        : "IMPORTANT: Use the SAME LANGUAGE as the provided text for all names and summaries.",
+        ? `CRITICAL: Write all content in ${preferredLanguage}.`
+        : "IMPORTANT: Use the SAME LANGUAGE as the provided text.",
     ].join("\n");
 
     // Build input_text blocks by inlining text from provided documents (preferred path)
@@ -168,7 +172,76 @@ export async function POST(req: Request) {
       max_output_tokens: 900,
     });
 
-    const course_context = (resp as any)?.output?.[0]?.content?.[0]?.text?.trim?.() || "";
+    let course_context = (resp as any)?.output?.[0]?.content?.[0]?.text?.trim?.() || "";
+    
+    // Clean any JSON structures that might have been returned
+    // Remove markdown code blocks
+    course_context = course_context.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    
+    // If it looks like JSON (starts with {), try to extract plain text
+    const trimmedContext = course_context.trim();
+    if (trimmedContext.startsWith('{') && trimmedContext.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(course_context);
+        // Try to extract a meaningful summary from JSON
+        if (parsed.course_context && typeof parsed.course_context === 'string') {
+          course_context = parsed.course_context;
+        } else if (parsed.summary && typeof parsed.summary === 'string') {
+          course_context = parsed.summary;
+        } else if (parsed.subject && typeof parsed.subject === 'string') {
+          // If it's the full response object, generate a simple description from the subject
+          course_context = `This course covers ${parsed.subject}.`;
+        } else if (Array.isArray(parsed.topics) || Array.isArray(parsed.areas)) {
+          // If it's topics/areas array, ignore it and use a fallback
+          course_context = syllabus || text || 'Course summary unavailable';
+        } else {
+          // Try to extract any string values
+          const stringValues = Object.values(parsed).filter(v => typeof v === 'string');
+          course_context = stringValues.length > 0 ? String(stringValues[0]) : (syllabus || text || 'Course summary unavailable');
+        }
+      } catch {
+        // If parsing fails, remove JSON structure
+        course_context = course_context
+          .replace(/\{[^}]*\}/g, '') // Remove JSON objects
+          .replace(/\[[^\]]*\]/g, '') // Remove arrays
+          .trim() || (syllabus || text || 'Course summary unavailable');
+      }
+    } else if (trimmedContext.startsWith('{')) {
+      // Partial JSON - try to extract text content
+      try {
+        const parsed = JSON.parse(course_context);
+        if (parsed.course_context && typeof parsed.course_context === 'string') {
+          course_context = parsed.course_context;
+        } else if (parsed.summary && typeof parsed.summary === 'string') {
+          course_context = parsed.summary;
+        } else {
+          course_context = syllabus || text || 'Course summary unavailable';
+        }
+      } catch {
+        // Remove JSON structures but keep text
+        course_context = course_context
+          .replace(/\{[^}]*"course_context"\s*:\s*"([^"]+)"/g, '$1')
+          .replace(/\{[^}]*"summary"\s*:\s*"([^"]+)"/g, '$1')
+          .replace(/\{[^}]*\}/g, '')
+          .replace(/\[[^\]]*\]/g, '')
+          .trim() || (syllabus || text || 'Course summary unavailable');
+      }
+    }
+    
+    // Final cleanup: remove any remaining JSON-like structures, arrays, and code blocks
+    course_context = course_context
+      .replace(/```json\s*/g, '')
+      .replace(/```\s*/g, '')
+      .replace(/\{[^}]*\}/g, '') // Remove any remaining JSON objects
+      .replace(/\[[^\]]*\]/g, '') // Remove arrays
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim();
+    
+    // If after all cleaning it's empty or too short, use syllabus or text as fallback
+    if (!course_context || course_context.length < 20) {
+      course_context = syllabus || text || 'Course summary unavailable';
+    }
+    
     return NextResponse.json({ ok: true, course_context });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err?.message || "Unknown error" }, { status: 500 });

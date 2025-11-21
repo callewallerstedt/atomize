@@ -17,7 +17,17 @@ export async function POST(req: NextRequest) {
 
     const prompt = `You are an AI that reads a course context and produces a fast study synopsis.
 Return 2-3 short bullet insights (max 180 characters total) highlighting the core focus, difficulty, and standout themes.
-Use plain text with bullets.
+
+CRITICAL REQUIREMENTS:
+- Use PLAIN TEXT ONLY with simple bullet points (use "-" or "•")
+- DO NOT return JSON, code blocks, or any structured data
+- DO NOT include topics, areas, or any JSON-like structures
+- Just return plain text bullet points, nothing else
+- Example format:
+  - Core focus: [description]
+  - Difficulty: [description]
+  - Key themes: [description]
+
 ${preferredLanguage ? `Write in ${preferredLanguage}.` : `Write in the SAME LANGUAGE as the Course Context.`}
 
 Course Context:
@@ -32,11 +42,51 @@ Insights:`;
       temperature: 0.3,
     });
 
-    const summary = (completion as any)?.output?.[0]?.content?.[0]?.text?.trim?.();
+    let summary = (completion as any)?.output?.[0]?.content?.[0]?.text?.trim?.();
 
     if (!summary) {
       return new Response(JSON.stringify({ ok: false, error: "Failed to generate summary" }), { status: 500 });
     }
+
+    // Clean any JSON structures that might have been returned
+    // Remove markdown code blocks
+    summary = summary.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    
+    // If it looks like JSON (starts with {), try to extract plain text
+    const trimmedSummary = summary.trim();
+    if (trimmedSummary.startsWith('{') && trimmedSummary.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(summary);
+        // Try to extract a meaningful summary from JSON
+        if (parsed.summary && typeof parsed.summary === 'string') {
+          summary = parsed.summary;
+        } else if (parsed.insights && typeof parsed.insights === 'string') {
+          summary = parsed.insights;
+        } else if (Array.isArray(parsed.topics) || Array.isArray(parsed.areas)) {
+          // If it's topics/areas array, ignore it and use a fallback
+          summary = 'Course summary unavailable';
+        } else {
+          // Try to extract any string values
+          const stringValues = Object.values(parsed).filter(v => typeof v === 'string');
+          summary = stringValues.length > 0 ? String(stringValues[0]) : 'Course summary unavailable';
+        }
+      } catch {
+        // If parsing fails, remove JSON structure
+        summary = summary
+          .replace(/\{[^}]*\}/g, '') // Remove JSON objects
+          .replace(/\[[^\]]*\]/g, '') // Remove arrays
+          .trim() || 'Course summary unavailable';
+      }
+    }
+    
+    // Final cleanup: remove any remaining JSON-like structures
+    summary = summary
+      .replace(/```json\s*/g, '')
+      .replace(/```\s*/g, '')
+      .replace(/\{[^}]*\}/g, '') // Remove any remaining JSON objects
+      .replace(/\[[^\]]*\]/g, '') // Remove arrays
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim();
 
     return new Response(JSON.stringify({ ok: true, summary }), {
       status: 200,

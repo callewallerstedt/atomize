@@ -6,3 +6,5 @@ CREATE INDEX "ExamSnipeHistory_userId_subjectSlug_idx" ON "ExamSnipeHistory"("us
 
 
 
+
+

@@ -75,6 +75,216 @@ function getDaysUntilNextExam(examDates?: Array<{ date: string; name?: string }>
   return diffDays;
 }
 
+// Helper function to parse flexible date input and convert to ISO format (YYYY-MM-DD)
+// Accepts: "5 days", "in 2 weeks", "March 15th", "2024-03-15", "next Monday", etc.
+function parseDateInput(dateInput: string): string | null {
+  if (!dateInput || !dateInput.trim()) return null;
+  
+  const input = dateInput.trim().toLowerCase();
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const today = new Date(now);
+  
+  // Already in ISO format (YYYY-MM-DD)
+  const isoMatch = input.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const date = new Date(parseInt(isoMatch[1]), parseInt(isoMatch[2]) - 1, parseInt(isoMatch[3]));
+    date.setHours(0, 0, 0, 0);
+    return date.toISOString().split('T')[0];
+  }
+  
+  // Days from now: "5 days", "in 3 days", "3 days left", etc.
+  const daysMatch = input.match(/(\d+)\s*days?/);
+  if (daysMatch) {
+    const days = parseInt(daysMatch[1]);
+    const examDate = new Date(today);
+    examDate.setDate(examDate.getDate() + days);
+    // Use local date components to avoid timezone issues
+    const year = examDate.getFullYear();
+    const month = String(examDate.getMonth() + 1).padStart(2, '0');
+    const day = String(examDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  // Weeks from now: "2 weeks", "in 1 week", etc.
+  const weeksMatch = input.match(/(\d+)\s*weeks?/);
+  if (weeksMatch) {
+    const weeks = parseInt(weeksMatch[1]);
+    const examDate = new Date(today);
+    examDate.setDate(examDate.getDate() + (weeks * 7));
+    // Use local date components to avoid timezone issues
+    const year = examDate.getFullYear();
+    const month = String(examDate.getMonth() + 1).padStart(2, '0');
+    const day = String(examDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  
+  // Months from now: "1 month", "in 2 months", etc.
+  const monthsMatch = input.match(/(\d+)\s*months?/);
+  if (monthsMatch) {
+    const months = parseInt(monthsMatch[1]);
+    const examDate = new Date(today);
+    examDate.setMonth(examDate.getMonth() + months);
+    // Use local date components to avoid timezone issues
+    const year = examDate.getFullYear();
+    const month = String(examDate.getMonth() + 1).padStart(2, '0');
+    const day = String(examDate.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  
+  // Try to parse as a natural date string
+  try {
+    const parsed = new Date(input);
+    if (!isNaN(parsed.getTime())) {
+      parsed.setHours(0, 0, 0, 0);
+      // If the date is in the past, assume next year
+      if (parsed < today) {
+        parsed.setFullYear(parsed.getFullYear() + 1);
+      }
+      // Use local date components to avoid timezone issues
+      const year = parsed.getFullYear();
+      const month = String(parsed.getMonth() + 1).padStart(2, '0');
+      const day = String(parsed.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+  } catch (e) {
+    // Continue to other parsing methods
+  }
+  
+  // Try parsing common date formats
+  const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 
+                      'july', 'august', 'september', 'october', 'november', 'december'];
+  const monthAbbrevs = ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
+                        'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  
+  // Format: "March 15th", "March 15", "Mar 15", etc.
+  for (let i = 0; i < monthNames.length; i++) {
+    const monthPattern = new RegExp(`(${monthNames[i]}|${monthAbbrevs[i]})\\s+(\\d{1,2})(?:st|nd|rd|th)?`, 'i');
+    const match = input.match(monthPattern);
+    if (match) {
+      const month = i;
+      const day = parseInt(match[2]);
+      let year = today.getFullYear();
+      
+      const examDate = new Date(year, month, day);
+      examDate.setHours(0, 0, 0, 0);
+      
+      // If date has passed this year, use next year
+      if (examDate < today) {
+        examDate.setFullYear(year + 1);
+      }
+      
+      // Use local date components to avoid timezone issues
+      const finalYear = examDate.getFullYear();
+      const finalMonth = String(examDate.getMonth() + 1).padStart(2, '0');
+      const finalDay = String(examDate.getDate()).padStart(2, '0');
+      return `${finalYear}-${finalMonth}-${finalDay}`;
+    }
+  }
+  
+  // Format: "15/03/2024" or "03/15/2024" (DD/MM/YYYY or MM/DD/YYYY)
+  // Also handle "15/03/24" (DD/MM/YY)
+  const slashMatch = input.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (slashMatch) {
+    let year = parseInt(slashMatch[3]);
+    // Handle 2-digit years (assume 20XX if < 50, 19XX if >= 50)
+    if (year < 100) {
+      year = year < 50 ? 2000 + year : 1900 + year;
+    }
+    
+    // Try both formats (DD/MM/YYYY and MM/DD/YYYY)
+    const date1 = new Date(year, parseInt(slashMatch[2]) - 1, parseInt(slashMatch[1]));
+    const date2 = new Date(year, parseInt(slashMatch[1]) - 1, parseInt(slashMatch[2]));
+    
+    // Use the one that makes sense (not too far in the future/past, and day <= 31)
+    // Prefer DD/MM/YYYY format (date1) if day is > 12, otherwise try both
+    let examDate;
+    if (parseInt(slashMatch[1]) > 12) {
+      // First number is definitely the day (DD/MM/YYYY)
+      examDate = date1;
+    } else if (parseInt(slashMatch[2]) > 12) {
+      // Second number is definitely the day (MM/DD/YYYY)
+      examDate = date2;
+    } else {
+      // Ambiguous - use the one closer to today
+      const diff1 = Math.abs(date1.getTime() - today.getTime());
+      const diff2 = Math.abs(date2.getTime() - today.getTime());
+      examDate = diff1 < diff2 ? date1 : date2;
+    }
+    
+    examDate.setHours(0, 0, 0, 0);
+    
+    if (examDate < today) {
+      examDate.setFullYear(examDate.getFullYear() + 1);
+    }
+    
+    // Use local date components to avoid timezone issues
+    const finalYear = examDate.getFullYear();
+    const finalMonth = String(examDate.getMonth() + 1).padStart(2, '0');
+    const finalDay = String(examDate.getDate()).padStart(2, '0');
+    return `${finalYear}-${finalMonth}-${finalDay}`;
+  }
+  
+  return null;
+}
+
+const LANGUAGE_OPTIONS = [
+  { label: "English", code: "en" },
+  { label: "Swedish", code: "sv" },
+  { label: "Spanish", code: "es" },
+  { label: "French", code: "fr" },
+  { label: "German", code: "de" },
+  { label: "Norwegian", code: "no" },
+  { label: "Danish", code: "da" },
+  { label: "Finnish", code: "fi" },
+  { label: "Italian", code: "it" },
+  { label: "Portuguese", code: "pt" },
+  { label: "Polish", code: "pl" },
+  { label: "Dutch", code: "nl" },
+] as const;
+
+function normalizeLanguageName(value?: string | null) {
+  if (!value) return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const lower = trimmed.toLowerCase();
+  const match = LANGUAGE_OPTIONS.find(
+    (option) => option.label.toLowerCase() === lower || option.code === lower
+  );
+  return match ? match.label : trimmed;
+}
+
+function languageNameToCode(value?: string | null) {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const lower = trimmed.toLowerCase();
+  const match = LANGUAGE_OPTIONS.find(
+    (option) => option.label.toLowerCase() === lower || option.code === lower
+  );
+  return match?.code;
+}
+
+function updateCourseLanguage(slug: string, language: string) {
+  const normalizedName = normalizeLanguageName(language);
+  const data = loadSubjectData(slug) as StoredSubjectData | null;
+  if (!data) return false;
+  if (!normalizedName) {
+    delete data.course_language_name;
+    delete data.course_language_code;
+  } else {
+    data.course_language_name = normalizedName;
+    data.course_language_code = languageNameToCode(normalizedName) || data.course_language_code;
+  }
+  saveSubjectData(slug, data);
+  if (typeof document !== 'undefined') {
+    document.dispatchEvent(new CustomEvent('synapse:course-language-updated', {
+      detail: { slug, language: normalizedName }
+    }));
+  }
+  return true;
+}
+
 export default function Page() {
   return (
     <Suspense fallback={null}>
@@ -127,8 +337,8 @@ function HomepageFileUploadArea({
   action?: string;
   status?: 'idle' | 'ready' | 'processing' | 'success';
 }) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -158,8 +368,8 @@ function HomepageFileUploadArea({
         onDrop={handleDrop}
         className={`rounded-lg border-2 border-dashed p-4 cursor-pointer transition-colors ${
           isDragging
-            ? 'border-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10'
-            : 'border-[var(--accent-cyan)]/40 bg-[var(--background)]/60 hover:border-[var(--accent-cyan)]/60 hover:bg-[var(--background)]/80'
+            ? 'border-white/30 bg-white/5'
+            : 'border-white/20 bg-[var(--background)]/60 hover:border-white/30 hover:bg-[var(--background)]/80'
         }`}
       >
         <div className="text-xs text-[var(--foreground)]/70 text-center">
@@ -203,7 +413,7 @@ function HomepageFileUploadArea({
   );
 }
 
-function WelcomeMessage({ tutorialSignal }: { tutorialSignal: number }) {
+function WelcomeMessage({ tutorialSignal, onQuickLearn }: { tutorialSignal: number; onQuickLearn?: (query: string) => void }) {
   const router = useRouter();
   const [welcomeText, setWelcomeText] = useState("");
   const [aiName, setAiName] = useState("");
@@ -377,6 +587,13 @@ Surge is for those who want to minimize friction and get results fast. I will pr
   const thinkingRef = useRef(false);
   const courseCreationInProgress = useRef(false);
   const isCreatingCourseRef = useRef(false);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
 
   const resetHomepageChat = useCallback(() => {
     tutorialPlaybackRef.current = false;
@@ -567,7 +784,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
           if (colonIndex > 0) {
             const key = param.slice(0, colonIndex).trim();
             let value = param.slice(colonIndex + 1).trim();
-            const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel', 'description'];
+            const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel', 'description', 'query', 'date'];
             if (!spaceAllowedParams.includes(key)) {
               const spaceIndex = value.search(/[\s\n\r]/);
               if (spaceIndex > 0) {
@@ -594,17 +811,34 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       });
     }
     
-    // Parse actions
+    // Parse actions - collect all matches first
+    const allMatches: Array<{ name: string; params: Record<string, string>; fullMatch: string }> = [];
     while ((match = actionRegex.exec(content)) !== null) {
       const actionName = match[1];
       const params: Record<string, string> = {};
       if (match[2]) {
-        match[2].split('|').forEach(param => {
+        // Split parameters, but be careful with values that contain spaces
+        const paramParts = match[2].split('|');
+        for (let i = 0; i < paramParts.length; i++) {
+          const param = paramParts[i];
           const colonIndex = param.indexOf(':');
           if (colonIndex > 0) {
             const key = param.slice(0, colonIndex).trim();
             let value = param.slice(colonIndex + 1).trim();
-            const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel', 'description'];
+            const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel', 'description', 'query', 'date'];
+            
+            // For space-allowed params, the value might continue in the next param part
+            // if it was incorrectly split (e.g., "description:segling på svenska" split at space)
+            if (spaceAllowedParams.includes(key) && value && i < paramParts.length - 1) {
+              // Check if the next part doesn't have a colon (meaning it's a continuation)
+              const nextPart = paramParts[i + 1]?.trim();
+              if (nextPart && !nextPart.includes(':')) {
+                // This is likely a continuation of the value, merge it
+                value = value + ' ' + nextPart;
+                i++; // Skip the next part since we merged it
+              }
+            }
+            
             if (!spaceAllowedParams.includes(key)) {
               const spaceIndex = value.search(/[\s\n\r]/);
               if (spaceIndex > 0) {
@@ -615,12 +849,55 @@ Surge is for those who want to minimize friction and get results fast. I will pr
               value = value.replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
             }
             if (key && value) {
+              // For space-allowed params, always use the longest value (in case of multiple parses during streaming)
+              if (spaceAllowedParams.includes(key) && params[key] && params[key].length > value.length) {
+                // Keep the existing longer value
+              } else {
               params[key] = value;
             }
           }
-        });
+          }
+        }
       }
-      actions.push({ name: actionName, params });
+      if (actionName === 'set_exam_date') {
+        console.log('🟢 Parsed set_exam_date action:', { actionName, params, fullMatch: match[0] });
+      }
+      allMatches.push({ name: actionName, params, fullMatch: match[0] });
+    }
+    
+    // Deduplicate actions - keep only the LAST (most complete) occurrence of each action
+    // This ensures we use the full description when the stream completes
+    const actionMap = new Map<string, { name: string; params: Record<string, string> }>();
+    for (const match of allMatches) {
+      // For actions with space-allowed params, compare parameter completeness
+      const existing = actionMap.get(match.name);
+      if (existing) {
+        // Check if the new match has more complete parameters (longer values for space-allowed params)
+        const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel', 'description', 'query', 'date'];
+        let newIsMoreComplete = false;
+        for (const key of spaceAllowedParams) {
+          const existingValue = existing.params[key] || '';
+          const newValue = match.params[key] || '';
+          if (newValue.length > existingValue.length) {
+            newIsMoreComplete = true;
+            break;
+          }
+        }
+        // Also check if new match has more parameters
+        if (!newIsMoreComplete && Object.keys(match.params).length > Object.keys(existing.params).length) {
+          newIsMoreComplete = true;
+        }
+        if (newIsMoreComplete) {
+          actionMap.set(match.name, { name: match.name, params: match.params });
+        }
+      } else {
+        actionMap.set(match.name, { name: match.name, params: match.params });
+      }
+    }
+    
+    // Convert map to array
+    for (const action of actionMap.values()) {
+      actions.push(action);
     }
     
     // Remove all commands from content for display
@@ -633,21 +910,54 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     return { cleanedContent, uiElements, actions };
   }
 
-  function triggerTextCourseCreation(descriptionParam: string, courseNameParam: string, userMessage?: string) {
+  async function triggerTextCourseCreation(descriptionParam: string, courseNameParam: string, userMessage?: string) {
     if (courseCreationInProgress.current) return;
 
-    const userOriginalMessage = userMessage || '';
-    const actualDescription = (userOriginalMessage && userOriginalMessage.trim().length > 0)
-      ? userOriginalMessage.trim()
-      : descriptionParam.trim();
+    // ALWAYS use descriptionParam (which Chad should have rewritten into a better description)
+    // NEVER fall back to user message - Chad's rewritten description is what we want
+    const actualDescription = descriptionParam.trim();
 
-    if (!actualDescription) return;
+    if (!actualDescription) {
+      console.warn('No description provided from Chad - cannot create course');
+      return;
+    }
 
     courseCreationInProgress.current = true;
     setIsCreatingCourse(true);
 
-    const finalName = courseNameParam || 'New Course';
+    try {
+      // Call API to generate course context from description
+      // The description should already be a good description (rewritten by Chad)
+      const response = await fetch('/api/course-from-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: actualDescription,
+          courseName: courseNameParam || undefined,
+        }),
+      });
 
+      if (response.ok) {
+        const json = await response.json().catch(() => ({}));
+        if (json.ok && json.courseContext) {
+          // Use the generated course context as the syllabus
+          const finalName = json.courseName || courseNameParam || 'New Course';
+          document.dispatchEvent(new CustomEvent('synapse:create-course-with-text', { 
+            detail: { 
+              name: finalName, 
+              syllabus: json.courseContext, // Use generated context
+              topics: json.topics || []
+            } 
+          }));
+          return;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to generate course context:', err);
+    }
+
+    // Fallback to using description directly if API call fails
+    const finalName = courseNameParam || 'New Course';
     document.dispatchEvent(new CustomEvent('synapse:create-course-with-text', { 
       detail: { 
         name: finalName, 
@@ -655,7 +965,6 @@ Surge is for those who want to minimize friction and get results fast. I will pr
         topics: []
       } 
     }));
-
   }
 
   useEffect(() => {
@@ -696,12 +1005,12 @@ Surge is for those who want to minimize friction and get results fast. I will pr
   }, []);
 
   // Execute actions
-  function executeActions(actions: Array<{ name: string; params: Record<string, string> }>, userMessage?: string) {
-    actions.forEach(action => {
+  async function executeActions(actions: Array<{ name: string; params: Record<string, string> }>, userMessage?: string) {
+    for (const action of actions) {
       if (action.name === 'create_course') {
         const isHomepage = typeof window !== 'undefined' && window.location.pathname === '/';
         if (isHomepage) {
-          triggerTextCourseCreation(action.params.syllabus || action.params.description || '', action.params.name || '', userMessage);
+          await triggerTextCourseCreation(action.params.syllabus || action.params.description || '', action.params.name || '', userMessage);
           return;
         }
         const name = action.params.name || 'New Course';
@@ -710,7 +1019,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       } else if (action.name === 'create_course_from_text') {
         const description = action.params.description || '';
         const courseName = action.params.name || '';
-        triggerTextCourseCreation(description, courseName, userMessage);
+        await triggerTextCourseCreation(description, courseName, userMessage);
       } else if (action.name === 'open_course_modal') {
         document.dispatchEvent(new CustomEvent('synapse:open-course-modal'));
       } else if (action.name === 'navigate') {
@@ -743,6 +1052,57 @@ Surge is for those who want to minimize friction and get results fast. I will pr
             router.push(`/subjects/${slug}`);
           }
         }
+      } else if (action.name === 'navigate_surge') {
+        let slug = action.params.slug;
+        if (slug && typeof window !== 'undefined') {
+          if (!slug.match(/^[a-z0-9\-_]+$/)) {
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                const exactMatch = subjects.find((s) => s.name.toLowerCase() === slug.toLowerCase());
+                if (exactMatch) {
+                  slug = exactMatch.slug;
+                } else {
+                  const partialMatch = subjects.find((s) =>
+                    s.name.toLowerCase().includes(slug.toLowerCase()) ||
+                    slug.toLowerCase().includes(s.name.toLowerCase())
+                  );
+                  if (partialMatch) slug = partialMatch.slug;
+                }
+              }
+            } catch {}
+          }
+          if (slug) {
+            router.push(`/subjects/${slug}/surge`);
+          }
+        }
+      } else if (action.name === 'set_course_language') {
+        let slug = action.params.slug || action.params.course || '';
+        let languageValue = action.params.language || action.params.lang || action.params.value || action.params.name || '';
+        if (!slug || !languageValue) continue;
+        slug = slug.trim();
+        if (!slug.match(/^[a-z0-9\-_]+$/)) {
+          try {
+            const subjectsRaw = localStorage.getItem('atomicSubjects');
+            if (subjectsRaw) {
+              const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+              const exactMatch = subjects.find((s) => s.name.toLowerCase() === slug.toLowerCase());
+              if (exactMatch) {
+                slug = exactMatch.slug;
+              } else {
+                const partialMatch = subjects.find((s) =>
+                  s.name.toLowerCase().includes(slug.toLowerCase()) ||
+                  slug.toLowerCase().includes(s.name.toLowerCase())
+                );
+                if (partialMatch) slug = partialMatch.slug;
+              }
+            }
+          } catch {}
+        }
+        slug = slug.trim().replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+        if (!slug) continue;
+        updateCourseLanguage(slug, languageValue);
       } else if (action.name === 'navigate_practice') {
         let slug = action.params.slug;
         if (slug && typeof window !== 'undefined') {
@@ -770,8 +1130,387 @@ Surge is for those who want to minimize friction and get results fast. I will pr
         }
       } else if (action.name === 'start_exam_snipe') {
         router.push('/exam-snipe');
+      } else if (action.name === 'generate_quick_learn') {
+        let query = action.params.query || action.params.topic || '';
+        // If no query in action params, try to extract from user message
+        if (!query && userMessage) {
+          // Try to extract topic from user message - look for patterns like "teach me about X", "explain X", "quick learn on X", etc.
+          const patterns = [
+            /(?:teach|explain|show|create|make|generate|do).*?(?:about|on|for|regarding|concerning)\s+(.+?)(?:\s+please|\s+$|$)/i,
+            /(?:quick learn|lesson|learn).*?(?:about|on|for|regarding|concerning)\s+(.+?)(?:\s+please|\s+$|$)/i,
+            /(?:subject|topic).*?[:]\s*(.+?)(?:\s+please|\s+$|$)/i,
+          ];
+          for (const pattern of patterns) {
+            const match = userMessage.match(pattern);
+            if (match && match[1]) {
+              query = match[1].trim();
+              break;
+            }
+          }
+          // If still no match, use the whole message (but remove common phrases)
+          if (!query) {
+            query = userMessage
+              .replace(/^(?:please|can you|could you|i want|i need|i'd like|create|make|generate|do|teach|explain|show)\s+/i, '')
+              .replace(/\s+(?:please|for me|now|quickly)$/i, '')
+              .trim();
+          }
+        }
+        if (query && onQuickLearn) {
+          onQuickLearn(query);
+        }
+      } else if (action.name === 'set_exam_date') {
+        console.log('🔵 set_exam_date action received:', { 
+          action, 
+          params: action.params,
+          userMessage 
+        });
+        
+        let slug = action.params.slug?.trim();
+        const dateInput = action.params.date?.trim() || action.params.days?.trim() || '';
+        const examName = action.params.name?.trim();
+        
+        console.log('🔵 Initial values:', { slug, dateInput, examName, userMessage });
+        
+        if (dateInput && typeof window !== 'undefined') {
+          // Check if slug exists in course data first
+          let courseDataExists = false;
+          if (slug) {
+            try {
+              const testData = loadSubjectData(slug);
+              courseDataExists = !!testData;
+              console.log('🟡 Course data check:', { slug, courseDataExists });
+            } catch {}
+          }
+          
+          // If slug is invalid or a placeholder AND no course data exists, try to extract course name from user message
+          const isInvalidSlug = (!slug || (!courseDataExists && (slug === 'new-course' || slug === 'new_course' || slug.startsWith('new-'))));
+          
+          console.log('🟡 Slug validation:', { slug, courseDataExists, isInvalidSlug });
+          
+          if (isInvalidSlug) {
+            console.log('🟡 Attempting to extract course name from messages...');
+            // Try to extract course name from the user message
+            const messageText = userMessage || '';
+            console.log('🟡 User message text:', messageText);
+            
+            // First, try to get course name from the most recent assistant message (most reliable)
+            let extractedCourseName = '';
+            if (homepageMessages.length > 0) {
+              console.log('🟡 Checking assistant messages, count:', homepageMessages.length);
+              const lastMessage = homepageMessages[homepageMessages.length - 1];
+              console.log('🟡 Last message:', { role: lastMessage.role, content: lastMessage.content?.substring(0, 300) });
+              if (lastMessage.role === 'assistant' && lastMessage.content) {
+                const assistantText = lastMessage.content;
+                console.log('🟡 Searching assistant text for course name:', assistantText.substring(0, 300));
+                // Look for patterns like "for Reglerteknik", "Reglerteknik exam", "Setting exam date for Reglerteknik", etc.
+                const courseNamePatterns = [
+                  /(?:Setting.*?for|for|exam|course|subject)\s+([A-ZÅÄÖ][a-zåäöA-ZÅÄÖ\s]+?)(?:\s+to|\s+exam|\s+is|\s+on|$)/i,
+                  /([A-ZÅÄÖ][a-zåäöA-ZÅÄÖ\s]{3,}?)(?:\s+exam|\s+to|\s+is|\s+on)/i,
+                ];
+                for (const pattern of courseNamePatterns) {
+                  const match = assistantText.match(pattern);
+                  if (match && match[1]) {
+                    extractedCourseName = match[1].trim();
+                    // Clean up common words that might be captured
+                    extractedCourseName = extractedCourseName.replace(/\s+(exam|to|is|on|date)$/i, '').trim();
+                    if (extractedCourseName.length > 3) {
+                      console.log('🟢 Extracted course name from assistant message:', extractedCourseName);
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+            
+            // If not found in assistant message, try user message
+            if (!extractedCourseName && messageText) {
+              // Look for course names at the end of the message (common pattern: "X days course-name")
+              const endPattern = /(?:days|weeks|months)\s+([A-ZÅÄÖ][a-zåäöA-ZÅÄÖ\s]{3,}?)$/i;
+              const endMatch = messageText.match(endPattern);
+              if (endMatch && endMatch[1]) {
+                extractedCourseName = endMatch[1].trim();
+                console.log('🟢 Extracted course name from end of user message:', extractedCourseName);
+              } else {
+                // Try other patterns
+                const courseNamePatterns = [
+                  /(?:Setting.*?for|for|exam|course|subject)\s+([A-ZÅÄÖ][a-zåäöA-ZÅÄÖ\s]+?)(?:\s+to|\s+exam|\s+is|\s+on|$)/i,
+                  /([A-ZÅÄÖ][a-zåäöA-ZÅÄÖ\s]{3,}?)(?:\s+exam|\s+to|\s+is|\s+on)/i,
+                ];
+                for (const pattern of courseNamePatterns) {
+                  const match = messageText.match(pattern);
+                  if (match && match[1]) {
+                    const candidate = match[1].trim().replace(/\s+(exam|to|is|on|date)$/i, '').trim();
+                    // Skip common words like "set", "the", "to", etc.
+                    if (candidate.length > 3 && !['set', 'the', 'to', 'for', 'exam', 'date'].includes(candidate.toLowerCase())) {
+                      extractedCourseName = candidate;
+                      console.log('🟢 Extracted course name from user message:', extractedCourseName);
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+            
+            console.log('🟡 Final extracted course name:', extractedCourseName);
+            
+            // If we found a course name, try to resolve it to a slug
+            if (extractedCourseName) {
+              try {
+                const subjectsRaw = localStorage.getItem('atomicSubjects');
+                if (subjectsRaw) {
+                  const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                  const exactMatch = subjects.find(s => s.name.toLowerCase() === extractedCourseName.toLowerCase());
+                  if (exactMatch) {
+                    slug = exactMatch.slug;
+                    console.log('Resolved course name to slug:', { courseName: extractedCourseName, slug });
+                  } else {
+                    const partialMatch = subjects.find(s => 
+                      s.name.toLowerCase().includes(extractedCourseName.toLowerCase()) || 
+                      extractedCourseName.toLowerCase().includes(s.name.toLowerCase())
+                    );
+                    if (partialMatch) {
+                      slug = partialMatch.slug;
+                      console.log('Resolved course name to slug (partial match):', { courseName: extractedCourseName, slug });
+                    }
+                  }
+                }
+              } catch (err) {
+                console.error('Error resolving course name:', err);
+              }
+            }
+            
+            // If still no valid slug, try to use extracted course name or fallback
+            if (!slug || slug === 'new-course' || slug === 'new_course' || slug.startsWith('new-')) {
+              try {
+                const subjectsRaw = localStorage.getItem('atomicSubjects');
+                if (subjectsRaw) {
+                  const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                  console.log('🟡 Available courses:', subjects.map(s => ({ name: s.name, slug: s.slug })));
+                  
+                  // If we have an extracted course name, try to match it
+                  if (extractedCourseName) {
+                    const exactMatch = subjects.find(s => 
+                      s.name.toLowerCase() === extractedCourseName.toLowerCase() ||
+                      s.slug.toLowerCase() === extractedCourseName.toLowerCase()
+                    );
+                    if (exactMatch) {
+                      slug = exactMatch.slug;
+                      console.log('🟢 Found exact match for extracted course name:', { extractedCourseName, slug });
+                    } else {
+                      const partialMatch = subjects.find(s => 
+                        s.name.toLowerCase().includes(extractedCourseName.toLowerCase()) || 
+                        extractedCourseName.toLowerCase().includes(s.name.toLowerCase()) ||
+                        s.slug.toLowerCase().includes(extractedCourseName.toLowerCase())
+                      );
+                      if (partialMatch) {
+                        slug = partialMatch.slug;
+                        console.log('🟢 Found partial match for extracted course name:', { extractedCourseName, slug });
+                      }
+                    }
+                  }
+                  
+                  // If still no match, try common patterns
+                  if (!slug || slug === 'new-course' || slug === 'new_course' || slug.startsWith('new-')) {
+                    // Try to find a course that matches "Reglerteknik" or similar
+                    const reglerMatch = subjects.find(s => 
+                      s.name.toLowerCase().includes('regler') || 
+                      s.slug.toLowerCase().includes('regler')
+                    );
+                    if (reglerMatch) {
+                      slug = reglerMatch.slug;
+                      console.log('🟡 Using fallback course match (regler):', { slug });
+                    } else if (subjects.length > 0) {
+                      // Last resort: use the first course (but log a warning)
+                      slug = subjects[0].slug;
+                      console.warn('⚠️ Using first available course as fallback (may be incorrect):', { slug, allCourses: subjects.map(s => s.name) });
+                    }
+                  }
+                }
+              } catch (err) {
+                console.error('Error in fallback course lookup:', err);
+              }
+            }
+            
+            // Final check - verify slug exists in subjects list (even if data doesn't exist yet, we can create it)
+            if (slug) {
+              try {
+                const subjectsRaw = localStorage.getItem('atomicSubjects');
+                if (subjectsRaw) {
+                  const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                  const slugExists = subjects.some(s => s.slug === slug);
+                  if (slugExists) {
+                    console.log('✅ Slug found in subjects list (valid):', { slug });
+                    // Slug is valid, proceed even if it's "new-course"
+                  } else {
+                    console.warn('Skipping set_exam_date: slug not found in subjects list', { slug, originalSlug: action.params.slug, extractedCourseName, userMessage });
+                    return;
+                  }
+                } else {
+                  console.warn('Skipping set_exam_date: no subjects list found', { slug });
+                  return;
+                }
+              } catch (err) {
+                console.error('Error checking subjects list:', err);
+                return;
+              }
+            } else {
+              console.warn('Skipping set_exam_date: could not resolve course slug', { originalSlug: action.params.slug, extractedCourseName, userMessage });
+              return;
+            }
+          } else if (slug && !courseDataExists) {
+            // Slug was provided but no course data exists - try to resolve it
+            console.log('🟡 Slug provided but no course data, attempting resolution...');
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                const match = subjects.find(s => s.slug === slug);
+                if (match) {
+                  // Slug exists in subjects list, so it's valid even if data doesn't exist yet
+                  courseDataExists = true;
+                  console.log('🟢 Slug found in subjects list:', { slug, name: match.name });
+                }
+              }
+            } catch {}
+          }
+          
+          // If slug looks like a course name (not a valid slug format), try to resolve it
+          if (!slug.match(/^[a-z0-9\-_]+$/)) {
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                const exactMatch = subjects.find(s => s.name.toLowerCase() === slug.toLowerCase());
+                if (exactMatch) {
+                  slug = exactMatch.slug;
+                } else {
+                  const partialMatch = subjects.find(s => s.name.toLowerCase().includes(slug.toLowerCase()) || slug.toLowerCase().includes(s.name.toLowerCase()));
+                  if (partialMatch) {
+                    slug = partialMatch.slug;
+                  }
+                }
+              }
+            } catch {}
+          }
+          
+          // Clean slug
+          slug = slug.replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+          
+          // Parse the date input - either a number (days) or DD/MM/YY format
+          let isoDate: string | null = null;
+          const trimmedDate = dateInput.trim();
+          
+          // Check if it's just a number (days from now)
+          const daysMatch = trimmedDate.match(/^\d+$/);
+          if (daysMatch) {
+            const days = parseInt(trimmedDate);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const examDate = new Date(today);
+            examDate.setDate(examDate.getDate() + days);
+            // Use local date components to avoid timezone issues
+            const year = examDate.getFullYear();
+            const month = String(examDate.getMonth() + 1).padStart(2, '0');
+            const day = String(examDate.getDate()).padStart(2, '0');
+            isoDate = `${year}-${month}-${day}`;
+            console.log('🟢 Parsed days input:', { days, isoDate });
+          } else {
+            // Try to parse as DD/MM/YY or DD/MM/YYYY
+            const dateMatch = trimmedDate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+            if (dateMatch) {
+              let day = parseInt(dateMatch[1]);
+              let month = parseInt(dateMatch[2]);
+              let year = parseInt(dateMatch[3]);
+              
+              // Handle 2-digit years (assume 20XX if < 50, 19XX if >= 50)
+              if (year < 100) {
+                year = year < 50 ? 2000 + year : 1900 + year;
+              }
+              
+              const examDate = new Date(year, month - 1, day);
+              examDate.setHours(0, 0, 0, 0);
+              
+              // If date is in the past, assume next year
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              if (examDate < today) {
+                examDate.setFullYear(examDate.getFullYear() + 1);
+              }
+              
+              // Use local date components to avoid timezone issues
+              const finalYear = examDate.getFullYear();
+              const finalMonth = String(examDate.getMonth() + 1).padStart(2, '0');
+              const finalDay = String(examDate.getDate()).padStart(2, '0');
+              isoDate = `${finalYear}-${finalMonth}-${finalDay}`;
+              console.log('🟢 Parsed date input:', { input: trimmedDate, isoDate });
+            } else {
+              // Fallback to old parseDateInput function for other formats
+              isoDate = parseDateInput(dateInput);
+              console.log('🟡 Using fallback parser:', { input: dateInput, isoDate });
+            }
+          }
+          
+          console.log('set_exam_date processing:', { 
+            originalSlug: action.params.slug, 
+            resolvedSlug: slug, 
+            dateInput, 
+            isoDate, 
+            hasData: !!loadSubjectData(slug) 
+          });
+          
+          if (isoDate && slug) {
+            try {
+              let data = loadSubjectData(slug);
+              
+              // If data doesn't exist, create it
+              if (!data) {
+                console.log('🟡 Creating new course data for slug:', slug);
+                // Try to get course name from subjects list
+                let courseName = slug;
+                try {
+                  const subjectsRaw = localStorage.getItem('atomicSubjects');
+                  if (subjectsRaw) {
+                    const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                    const match = subjects.find(s => s.slug === slug);
+                    if (match) {
+                      courseName = match.name;
+                    }
+                  }
+                } catch {}
+                
+                data = {
+                  subject: courseName,
+                  files: [],
+                  combinedText: '',
+                  tree: null,
+                  topics: [],
+                  nodes: {},
+                  progress: {},
+                  examDates: []
+                };
+                saveSubjectData(slug, data);
+                console.log('✅ Created new course data:', { slug, courseName });
+              }
+              
+              if (data) {
+                // Replace all existing exam dates with the new one (overwrite behavior)
+                data.examDates = [{ date: isoDate, name: examName }];
+                saveSubjectData(slug, data);
+                // Trigger a custom event to refresh the UI
+                window.dispatchEvent(new CustomEvent("synapse:exam-date-updated", { detail: { slug } }));
+                console.log('✅ Exam date set successfully:', { slug, date: isoDate, originalInput: dateInput, examDates: data.examDates });
+              } else {
+                console.warn('❌ Course data not found for slug:', slug);
+              }
+            } catch (err) {
+              console.error("❌ Failed to set exam date:", err, { slug, dateInput, isoDate });
+            }
+          } else {
+            console.warn('❌ Failed to parse date or invalid slug:', { slug, dateInput, isoDate });
+          }
+        }
       }
-    });
+    }
   }
 
   // Handle button click
@@ -781,13 +1520,38 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       if (uploadId) {
         setUploadStatus(prev => ({ ...prev, [uploadId]: 'processing' }));
       }
+      const isCourseCreationAction = action === 'generate_course' || action === 'create_course';
+      if (isCourseCreationAction) {
+        if (courseCreationInProgress.current) {
+          setUploadStatus(prev => ({ ...prev, [uploadId]: 'idle' }));
+          return;
+        }
+        courseCreationInProgress.current = true;
+        setIsCreatingCourse(true);
+        setHomepageMessages((prev) => {
+          const next = prev.map((message) => {
+            if (!message.uiElements || message.uiElements.length === 0) return message;
+            const filtered = message.uiElements.filter((ui) => ui.id !== uploadId);
+            if (filtered.length === message.uiElements.length) return message;
+            return { ...message, uiElements: filtered };
+          });
+          if (next.length === 0) {
+            next.push({ role: 'assistant', content: '', uiElements: [] });
+          } else if (next[next.length - 1].role !== 'assistant') {
+            next.push({ role: 'assistant', content: '', uiElements: [] });
+          } else if (next[next.length - 1].uiElements?.length) {
+            next[next.length - 1] = { ...next[next.length - 1], uiElements: [] };
+          }
+          return next;
+        });
+      }
       if (action === 'start_exam_snipe') {
         router.push('/exam-snipe');
         (window as any).__pendingExamFiles = files;
         if (uploadId) {
           setUploadStatus(prev => ({ ...prev, [uploadId]: 'success' }));
         }
-      } else if (action === 'generate_course' || action === 'create_course') {
+      } else if (isCourseCreationAction) {
         const name = params?.name || 'New Course';
         const syllabus = params?.syllabus || '';
         document.dispatchEvent(new CustomEvent('synapse:create-course-with-files', { detail: { files, name, syllabus } }));
@@ -878,8 +1642,8 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     return parts.length > 0 ? parts : text;
   };
 
-  const handleSendMessage = async () => {
-    const text = inputValue.trim();
+  const handleSendMessage = async (messageOverride?: string) => {
+    const text = (messageOverride || inputValue).trim();
     if (!text || !welcomeText || homepageSending || isTutorialActive) return;
     
     // If this is the first message, add the welcome message as the first assistant message
@@ -892,10 +1656,40 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     const userMessage = { role: 'user' as const, content: text };
     setHomepageMessages(prev => [...prev, userMessage]);
     setInputValue("");
+    // Reset textarea height
+    if (chatInputRef.current) {
+      chatInputRef.current.style.height = 'auto';
+    }
     setInputFocused(false);
     setHomepageSending(true);
     setShowThinking(true);
     thinkingRef.current = true;
+
+    if (text.toLowerCase() === 'create course') {
+      const uploadId = `create-course-${Date.now()}`;
+      setHomepageMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: "Drop your course files below or type a detailed description of the course and I'll build it for you. If you don't have files, just describe the course and I'll handle the rest.",
+          uiElements: [
+            {
+              type: 'file_upload' as const,
+              id: uploadId,
+              message: 'Drop your course files here or click to select them.',
+              action: 'create_course',
+              params: {
+                buttonLabel: 'Create Course'
+              }
+            }
+          ]
+        }
+      ]);
+      setHomepageSending(false);
+      setShowThinking(false);
+      thinkingRef.current = false;
+      return;
+    }
 
     try {
       // Get course context
@@ -963,7 +1757,33 @@ Surge is for those who want to minimize friction and get results fast. I will pr
             const { cleanedContent, uiElements, actions } = parseUIElementsAndActions(accumulatedContent);
             // Execute any remaining actions - pass the user's message
             if (actions.length > 0) {
-              executeActions(actions, userMessage.content);
+              // Check for create_course_from_text action BEFORE executing
+              const createCourseAction = actions.find(a => a.name === 'create_course_from_text');
+              if (createCourseAction) {
+                // Extract the FULL course name from the complete action
+                // ONLY use the name parameter - never use description as fallback
+                const courseName = createCourseAction.params.name?.trim() || 'New Course';
+                const tempSlug = courseName.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-") || "subject";
+                
+                // Make slug unique using current subjects list
+                const list = readSubjects();
+                let uniqueSlug = tempSlug;
+                let n = 1;
+                const existingSlugs = new Set(list.map((s) => s.slug));
+                while (existingSlugs.has(uniqueSlug)) {
+                  n++;
+                  uniqueSlug = `${tempSlug}-${n}`;
+                }
+                
+                console.log('🔥 DISPATCHING course-preparing event (AFTER STREAM):', { slug: uniqueSlug, name: courseName });
+                
+                // Dispatch event AFTER stream completes with the FULL name
+                document.dispatchEvent(new CustomEvent('synapse:course-preparing', { 
+                  detail: { slug: uniqueSlug, name: courseName } 
+                }));
+              }
+              
+              await executeActions(actions, userMessage.content);
               
               // If creating a course, show spinner instead of full response
               const isCreatingCourseAction = actions.some(a => a.name === 'create_course_from_text');
@@ -1016,15 +1836,17 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                   setShowThinking(false);
                   thinkingRef.current = false;
                 }
+                
                 // Parse UI elements and actions from accumulated content
+                // BUT don't execute actions during streaming - wait until stream completes
                 const { cleanedContent, uiElements, actions } = parseUIElementsAndActions(accumulatedContent);
                 const hasActions = actions.length > 0;
                 const isCreatingCourseAction = actions.some(a => a.name === 'create_course_from_text');
 
-                if (hasActions) {
-                  executeActions(actions, userMessage.content);
-
+                // During streaming, only update UI - don't execute actions yet
+                // Actions will be executed when stream completes (at line 1558)
                   if (isCreatingCourseAction) {
+                  // Show empty message while creating course
                     setHomepageMessages(prev => {
                       const copy = [...prev];
                       if (copy.length > 0) {
@@ -1032,16 +1854,8 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                       }
                       return copy;
                     });
-                  } else {
-                    setHomepageMessages(prev => {
-                      const copy = [...prev];
-                      if (copy.length > 0) {
-                        copy[copy.length - 1] = { role: 'assistant', content: cleanedContent, uiElements };
-                      }
-                      return copy;
-                    });
-                  }
                 } else if (!isCreatingCourse) {
+                  // Update message content during streaming
                   setHomepageMessages(prev => {
                     const copy = [...prev];
                     if (copy.length > 0) {
@@ -1063,6 +1877,113 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       thinkingRef.current = false;
     }
   };
+
+  const appendTranscriptionText = useCallback((text: string) => {
+    const trimmed = text?.trim();
+    if (!trimmed) return;
+    setInputValue((prev) => {
+      if (!prev) return trimmed;
+      const needsSpace = /\s$/.test(prev) ? '' : ' ';
+      return `${prev}${needsSpace}${trimmed}`;
+    });
+    requestAnimationFrame(() => {
+      chatInputRef.current?.focus();
+    });
+  }, []);
+
+  const cleanupMediaStream = useCallback(() => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+  }, []);
+
+  const stopActiveRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop();
+    } else {
+      cleanupMediaStream();
+    }
+  }, [cleanupMediaStream]);
+
+  const transcribeAudio = useCallback(async (blob: Blob) => {
+    setIsTranscribing(true);
+    setVoiceError(null);
+    try {
+      const formData = new FormData();
+      formData.append('audio', blob, 'voice-input.webm');
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || 'Failed to transcribe audio.');
+      }
+      appendTranscriptionText(String(json.text || '').trim());
+    } catch (err: any) {
+      setVoiceError(err?.message || 'Voice transcription failed.');
+    } finally {
+      setIsTranscribing(false);
+    }
+  }, [appendTranscriptionText]);
+
+  const handleToggleRecording = useCallback(async () => {
+    if (isTranscribing) return;
+    if (isRecording) {
+      setIsRecording(false);
+      stopActiveRecording();
+      return;
+    }
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+      setVoiceError('Voice recording is not available in this environment.');
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof window.MediaRecorder === 'undefined') {
+      setVoiceError('Microphone recording is not supported in this browser yet.');
+      return;
+    }
+    try {
+      setVoiceError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onstop = async () => {
+        cleanupMediaStream();
+        setIsRecording(false);
+        const chunks = audioChunksRef.current.splice(0);
+        if (chunks.length === 0) return;
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        await transcribeAudio(blob);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch (err: any) {
+      console.error('Microphone access failed', err);
+      cleanupMediaStream();
+      setIsRecording(false);
+      setVoiceError(
+        err?.name === 'NotAllowedError'
+          ? 'Microphone permission was denied.'
+          : 'Unable to access the microphone.'
+      );
+    }
+  }, [cleanupMediaStream, isRecording, isTranscribing, stopActiveRecording, transcribeAudio]);
+
+  useEffect(() => {
+    return () => {
+      stopActiveRecording();
+      cleanupMediaStream();
+    };
+  }, [cleanupMediaStream, stopActiveRecording]);
 
   return (
     <div className="mx-auto mb-6 w-full max-w-3xl">
@@ -1086,20 +2007,34 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       )}
       {homepageMessages.length === 0 ? (
         <>
-          <div className="inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
-            <div className="text-base text-[var(--foreground)]/90 leading-relaxed">
+          <div className="inline-block px-3 py-1.5 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5">
+            <div className="text-sm text-white/90 leading-relaxed">
               {renderTextWithSynapse(welcomeText)}
               {isStreaming && (
-                <span className="inline-block w-1.5 h-3.5 bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] animate-pulse ml-1 align-middle"></span>
+                <span className="inline-block w-2 h-2 bg-white/60 rounded-full animate-pulse ml-1 align-middle"></span>
               )}
             </div>
           </div>
           {welcomeText && !isStreaming && (
-            <div className="mt-3 w-full max-w-2xl mx-auto">
-              <input
-                type="text"
+            <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%' }}>
+              <div 
+                className="flex items-center gap-2 bg-[rgba(229,231,235,0.08)] px-4 py-2 border border-white/5 overflow-hidden"
+                style={{ 
+                  boxShadow: 'none',
+                  borderRadius: '1.5rem', // More rounded than rounded-2xl
+                }}
+              >
+                <textarea
+                  ref={chatInputRef}
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                  onChange={(e) => {
+                    setInputValue(e.target.value);
+                    // Auto-resize textarea
+                    if (chatInputRef.current) {
+                      chatInputRef.current.style.height = 'auto';
+                      chatInputRef.current.style.height = `${Math.min(chatInputRef.current.scrollHeight, 120)}px`;
+                    }
+                  }}
                 onFocus={() => setInputFocused(true)}
                 onBlur={() => setInputFocused(false)}
                 onKeyDown={(e) => {
@@ -1108,14 +2043,111 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     handleSendMessage();
                   }
                 }}
-              placeholder={isTutorialActive ? "Use the tutorial controls above" : "Type a message..."}
+                  placeholder={isTutorialActive ? "Use the tutorial controls above" : "Chat with Chad..."}
               disabled={homepageSending || isTutorialActive}
-                className={`w-full px-3 py-2 rounded-lg border transition-all ${
-                  inputFocused
-                    ? 'border-[var(--accent-cyan)]/40 bg-[var(--background)]/90 text-[var(--foreground)]'
-                    : 'border-[var(--foreground)]/10 bg-[var(--background)]/30 text-[var(--foreground)]/40'
-              } placeholder:text-[var(--foreground)]/20 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/30 disabled:opacity-60`}
-              />
+                  className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder:text-white/60 focus:outline-none resize-none overflow-hidden"
+                  style={{ boxShadow: 'none', padding: '0.25rem 0.5rem', minHeight: '1.5rem', maxHeight: '120px', lineHeight: '1.5rem', borderRadius: '0' }}
+                  rows={1}
+                />
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={handleToggleRecording}
+                    disabled={homepageSending || isTutorialActive || isTranscribing}
+                    aria-pressed={isRecording}
+                    title={isRecording ? "Stop recording" : "Record voice message"}
+                    className={`transition-colors flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-white/10 ${
+                      isRecording
+                        ? 'text-[#FFB347] border-[#FFB347]/60 bg-white/5'
+                        : 'text-white/70 hover:text-white hover:border-white/40'
+                    } disabled:opacity-50`}
+                    style={{ boxShadow: 'none' }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 15c1.66 0 3-1.34 3-3V7a3 3 0 0 0-6 0v5c0 1.66 1.34 3 3 3z" />
+                      <path d="M19 11v1a7 7 0 0 1-14 0v-1" />
+                      <path d="M12 19v3" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (inputValue.trim() && !homepageSending && !isTutorialActive) {
+                        handleSendMessage();
+                      }
+                    }}
+                    disabled={homepageSending || !inputValue.trim() || isTutorialActive}
+                    className={`transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full ${inputValue.trim() ? 'text-white/90 hover:text-white' : 'text-white/60 hover:text-white/80'}`}
+                    style={{ 
+                      boxShadow: 'none',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M5 12h14M12 5l7 7-7 7"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              {(voiceError || isRecording || isTranscribing) && (
+                <p className={`mt-2 text-[11px] ${voiceError ? 'text-[#FF8A8A]' : 'text-white/60'}`}>
+                  {voiceError
+                    ? voiceError
+                    : isRecording
+                      ? 'Recording… tap the mic to stop.'
+                      : 'Transcribing voice...'}
+                </p>
+              )}
+              <div className="flex items-center justify-center gap-2 mt-2">
+                <button
+                  onClick={() => {
+                    if (!homepageSending && !isTutorialActive) {
+                      handleSendMessage("Create Course");
+                    }
+                  }}
+                  disabled={homepageSending || isTutorialActive}
+                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  style={{ boxShadow: 'none' }}
+                >
+                  Create Course
+                </button>
+                <button
+                  onClick={() => {
+                    if (!homepageSending && !isTutorialActive) {
+                      setInputValue("Please create a quick learn on the subject: ");
+                      chatInputRef.current?.focus();
+                    }
+                  }}
+                  disabled={homepageSending || isTutorialActive}
+                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  style={{ boxShadow: 'none' }}
+                >
+                  Quick Learn
+                </button>
+                <button
+                  onClick={() => {
+                    if (!homepageSending && !isTutorialActive) {
+                      handleSendMessage("Do an exam snipe please.");
+                    }
+                  }}
+                  disabled={homepageSending || isTutorialActive}
+                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  style={{ boxShadow: 'none' }}
+                >
+                  Exam Snipe
+                </button>
+                <button
+                  onClick={() => {
+                    if (!homepageSending && !isTutorialActive) {
+                      handleSendMessage("Help!");
+                    }
+                  }}
+                  disabled={homepageSending || isTutorialActive}
+                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  style={{ boxShadow: 'none' }}
+                >
+                  Help!
+                </button>
+              </div>
             </div>
           )}
         </>
@@ -1128,23 +2160,25 @@ Surge is for those who want to minimize friction and get results fast. I will pr
             return (
               <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
                 {m.role === 'user' ? (
-                  <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-lg bg-[var(--accent-cyan)]/20 border border-[var(--accent-cyan)]/40">
-                    <div className="text-base text-[var(--foreground)]/90 leading-relaxed">
+                  <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-2xl bg-[rgba(229,231,235,0.15)] border border-white/10">
+                    <div className="text-sm text-white/90 leading-relaxed">
                       {m.content}
                     </div>
                   </div>
                 ) : (
-                  <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
-                    <div className="text-base text-[var(--foreground)]/90 leading-relaxed">
+                  <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-2xl bg-[rgba(229,231,235,0.08)] border border-white/5">
+                    <div className="text-sm text-white/90 leading-relaxed">
                       {isCreatingCourse && i === homepageMessages.length - 1 ? (
                         <div className="flex items-center gap-2">
-                          <span className="inline-block w-2 h-2 bg-[var(--accent-cyan)] rounded-full animate-pulse"></span>
+                          <span className="inline-block w-2 h-2 bg-white/60 rounded-full animate-pulse"></span>
                           Creating course...
                         </div>
                       ) : isWelcomeMessage ? (
                         renderTextWithSynapse(m.content)
                       ) : (
+                        <div className="chat-bubble">
                         <LessonBody body={sanitizeLessonBody(String(m.content || ''))} />
+                        </div>
                       )}
                     </div>
                     {/* Render UI elements */}
@@ -1191,19 +2225,33 @@ Surge is for those who want to minimize friction and get results fast. I will pr
           })}
           {showThinking && !isCreatingCourse && (
             <div className="flex justify-start">
-              <div className="inline-block px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)]/5 to-[var(--accent-pink)]/5 border border-[var(--accent-cyan)]/20">
-                <div className="text-base text-[var(--foreground)]/90 leading-relaxed flex items-center gap-2">
-                  <span className="inline-block w-2 h-2 bg-[var(--accent-cyan)] rounded-full animate-pulse"></span>
+              <div className="inline-block px-3 py-1.5 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5">
+                <div className="text-sm text-white/90 leading-relaxed flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 bg-white/60 rounded-full animate-pulse"></span>
                   Thinking...
                 </div>
               </div>
             </div>
           )}
-          <div className="mt-3 w-full max-w-2xl mx-auto">
-            <input
-              type="text"
+          <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%' }}>
+            <div 
+              className="flex items-center gap-2 bg-[rgba(229,231,235,0.08)] px-4 py-2 border border-white/5 overflow-hidden"
+              style={{ 
+                boxShadow: 'none',
+                borderRadius: '1.5rem', // More rounded than rounded-2xl
+              }}
+            >
+              <textarea
+                ref={chatInputRef}
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
+                onChange={(e) => {
+                  setInputValue(e.target.value);
+                  // Auto-resize textarea
+                  if (chatInputRef.current) {
+                    chatInputRef.current.style.height = 'auto';
+                    chatInputRef.current.style.height = `${Math.min(chatInputRef.current.scrollHeight, 120)}px`;
+                  }
+                }}
               onFocus={() => setInputFocused(true)}
               onBlur={() => setInputFocused(false)}
               onKeyDown={(e) => {
@@ -1212,14 +2260,111 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                   handleSendMessage();
                 }
               }}
-            placeholder={isTutorialActive ? "Use the tutorial controls above" : "Type a message..."}
+                placeholder={isTutorialActive ? "Use the tutorial controls above" : "Chat with Chad..."}
             disabled={homepageSending || isTutorialActive}
-              className={`w-full px-3 py-2 rounded-lg border transition-all ${
-                inputFocused
-                  ? 'border-[var(--accent-cyan)]/40 bg-[var(--background)]/90 text-[var(--foreground)]'
-                  : 'border-[var(--foreground)]/10 bg-[var(--background)]/30 text-[var(--foreground)]/40'
-            } placeholder:text-[var(--foreground)]/20 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/30 disabled:opacity-50`}
-            />
+                className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder:text-white/60 focus:outline-none resize-none overflow-hidden"
+                style={{ boxShadow: 'none', padding: '0.25rem 0.5rem', minHeight: '1.5rem', maxHeight: '120px', lineHeight: '1.5rem', borderRadius: '0' }}
+                rows={1}
+              />
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleToggleRecording}
+                  disabled={homepageSending || isTutorialActive || isTranscribing}
+                  aria-pressed={isRecording}
+                  title={isRecording ? "Stop recording" : "Record voice message"}
+                  className={`transition-colors flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-white/10 ${
+                    isRecording
+                      ? 'text-[#FFB347] border-[#FFB347]/60 bg-white/5'
+                      : 'text-white/70 hover:text-white hover:border-white/40'
+                  } disabled:opacity-50`}
+                  style={{ boxShadow: 'none' }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 15c1.66 0 3-1.34 3-3V7a3 3 0 0 0-6 0v5c0 1.66 1.34 3 3 3z" />
+                    <path d="M19 11v1a7 7 0 0 1-14 0v-1" />
+                    <path d="M12 19v3" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => {
+                    if (inputValue.trim() && !homepageSending && !isTutorialActive) {
+                      handleSendMessage();
+                    }
+                  }}
+                  disabled={homepageSending || !inputValue.trim() || isTutorialActive}
+                  className={`transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full ${inputValue.trim() ? 'text-white/90 hover:text-white' : 'text-white/60 hover:text-white/80'}`}
+                  style={{ 
+                    boxShadow: 'none',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M5 12h14M12 5l7 7-7 7"/>
+                  </svg>
+                </button>
+          </div>
+        </div>
+            {(voiceError || isRecording || isTranscribing) && (
+              <p className={`mt-2 text-[11px] ${voiceError ? 'text-[#FF8A8A]' : 'text-white/60'}`}>
+                {voiceError
+                  ? voiceError
+                  : isRecording
+                    ? 'Recording… tap the mic to stop.'
+                    : 'Transcribing voice...'}
+              </p>
+            )}
+            <div className="flex items-center justify-center gap-2 mt-2">
+              <button
+                onClick={() => {
+                  if (!homepageSending && !isTutorialActive) {
+                    handleSendMessage("Create Course");
+                  }
+                }}
+                disabled={homepageSending || isTutorialActive}
+                className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                style={{ boxShadow: 'none' }}
+              >
+                Create Course
+              </button>
+              <button
+                onClick={() => {
+                  if (!homepageSending && !isTutorialActive) {
+                    setInputValue("Please create a quick learn on the subject: ");
+                    chatInputRef.current?.focus();
+                  }
+                }}
+                disabled={homepageSending || isTutorialActive}
+                className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                style={{ boxShadow: 'none' }}
+              >
+                Quick Learn
+              </button>
+              <button
+                onClick={() => {
+                  if (!homepageSending && !isTutorialActive) {
+                    handleSendMessage("Do an exam snipe please.");
+                  }
+                }}
+                disabled={homepageSending || isTutorialActive}
+                className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                style={{ boxShadow: 'none' }}
+              >
+                Exam Snipe
+              </button>
+              <button
+                onClick={() => {
+                  if (!homepageSending && !isTutorialActive) {
+                    handleSendMessage("Help!");
+                  }
+                }}
+                disabled={homepageSending || isTutorialActive}
+                className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                style={{ boxShadow: 'none' }}
+              >
+                Help!
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1236,7 +2381,11 @@ function Home() {
   const [quickLearnOpen, setQuickLearnOpen] = useState(false);
   const [quickLearnQuery, setQuickLearnQuery] = useState("");
   const [quickLearnLoading, setQuickLearnLoading] = useState(false);
-  const [filesModalOpen, setFilesModalOpen] = useState<string | null>(null);
+  const [infoModalOpen, setInfoModalOpen] = useState<string | null>(null);
+  const [settingsModalFor, setSettingsModalFor] = useState<string | null>(null);
+  const [settingsNameInput, setSettingsNameInput] = useState('');
+  const [settingsLanguageInput, setSettingsLanguageInput] = useState('');
+  const [settingsUploadLoading, setSettingsUploadLoading] = useState(false);
   const [isIOSStandalone, setIsIOSStandalone] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -1244,9 +2393,17 @@ function Home() {
   const [loadingExamHistory, setLoadingExamHistory] = useState(false);
   const [examMenuOpenFor, setExamMenuOpenFor] = useState<string | null>(null);
   const [examDateUpdateTrigger, setExamDateUpdateTrigger] = useState(0); // Force re-render when exam dates change
+  const [, setCourseMetaUpdateTrigger] = useState(0);
   const [surgeButtonHovered, setSurgeButtonHovered] = useState<string | null>(null);
   const [tutorialSignal, setTutorialSignal] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const settingsFileInputRef = useRef<HTMLInputElement>(null);
+  const settingsNameSavedRef = useRef('');
+  const [calendarOpenFor, setCalendarOpenFor] = useState<string | null>(null); // slug of course for which calendar is open
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState<Date | null>(null);
+  const [calendarCurrentMonth, setCalendarCurrentMonth] = useState<Date>(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
   
   // Check authentication and sync subjects from server
   useEffect(() => {
@@ -1368,6 +2525,14 @@ function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    const handler = () => {
+      setCourseMetaUpdateTrigger((prev) => prev + 1);
+    };
+    window.addEventListener('synapse:course-language-updated', handler as EventListener);
+    return () => window.removeEventListener('synapse:course-language-updated', handler as EventListener);
+  }, []);
+
   // Close dropdown when clicking outside
   useEffect(() => {
     if (!menuOpenFor) return;
@@ -1423,7 +2588,13 @@ function Home() {
     const handleCreateCourseWithText = async (e: Event) => {
       const customEvent = e as CustomEvent;
       const { name, syllabus, topics } = customEvent.detail || {};
+      console.log('📝 handleCreateCourseWithText called:', { name, syllabus, topics });
+      
       if (name && syllabus) {
+        // DON'T set preparing state here - it's already set by handleCoursePreparing
+        // Just store the data and trigger processing
+        console.log('💾 Storing pending course data');
+        
         // Store course data to be processed when createCourse is available
         (window as any).__pendingCourseFromText = { name, syllabus, topics: topics || [] };
         // Trigger a custom event that will be handled after createCourse is defined
@@ -1435,16 +2606,41 @@ function Home() {
       setCreateOpen(true);
     };
 
+    const handleCoursePreparing = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { slug, name } = customEvent.detail || {};
+      console.log('🎯 RECEIVED course-preparing event:', { slug, name });
+      
+      if (slug) {
+        console.log('✅ Setting preparingSlug:', slug);
+        setPreparingSlug(slug);
+        
+        // Add a placeholder course to the subjects list immediately
+        // This ensures the preparing indicator appears on a visible box
+        setSubjects(prev => {
+          const filtered = prev.filter(s => s.slug !== slug);
+          console.log('➕ Adding placeholder course:', { name, slug });
+          return [{
+            name: name || 'New Course',
+            slug: slug,
+            isPlaceholder: true
+          } as any, ...filtered];
+        });
+      }
+    };
+
     document.addEventListener('synapse:create-course', handleCreateCourse as EventListener);
     document.addEventListener('synapse:create-course-with-files', handleCreateCourseWithFiles as EventListener);
     document.addEventListener('synapse:create-course-with-text', handleCreateCourseWithText as EventListener);
     document.addEventListener('synapse:open-course-modal', handleOpenCourseModal);
+    document.addEventListener('synapse:course-preparing', handleCoursePreparing as EventListener);
     
     return () => {
       document.removeEventListener('synapse:create-course', handleCreateCourse as EventListener);
       document.removeEventListener('synapse:create-course-with-files', handleCreateCourseWithFiles as EventListener);
       document.removeEventListener('synapse:create-course-with-text', handleCreateCourseWithText as EventListener);
       document.removeEventListener('synapse:open-course-modal', handleOpenCourseModal);
+      document.removeEventListener('synapse:course-preparing', handleCoursePreparing as EventListener);
     };
   }, []);
 
@@ -1537,12 +2733,13 @@ function Home() {
         if (createCourseRef.current) {
           try {
             // Create course with empty files - the syllabus contains the generated course context
-            // createCourse will set preparingSlug immediately at the start
+            // preparingSlug should already be set by handleCreateCourseWithText
             await createCourseRef.current(pending.name, pending.syllabus, []);
             // If topics were provided, we could potentially use them to pre-populate the course structure
             // For now, the course will be created and topics can be generated later from the context
           } catch (err) {
             console.error('Failed to create course from text:', err);
+            setPreparingSlug(null); // Clear preparing state on error
             alert('Failed to create course. Please try again.');
           }
         }
@@ -1557,15 +2754,40 @@ function Home() {
     };
   }, []);
 
-  // Show login page if not authenticated
-  // Don't show spinner while checking auth - let Shell's LoadingScreen handle it
-  if (checkingAuth) {
-    return null; // Return null to let Shell render and show LoadingScreen
-  }
+  const renameSubject = useCallback(async (slug: string, newName: string) => {
+    if (!newName.trim()) return;
+    const list = readSubjects();
+    const updated = list.map((s) => (s.slug === slug ? { ...s, name: newName } : s));
+    localStorage.setItem("atomicSubjects", JSON.stringify(updated));
+    setSubjects(updated);
 
-  if (!isAuthenticated) {
-    return <LoginPage />;
-  }
+    const data = loadSubjectData(slug) as StoredSubjectData | null;
+    if (data) {
+      data.subject = newName;
+      saveSubjectData(slug, data);
+    }
+
+    // Sync to server if authenticated
+    try {
+      const me = await fetch("/api/me", { credentials: "include" }).then(r => r.json().catch(() => ({})));
+      if (me?.user) {
+        await fetch("/api/subjects", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ slug, name: newName }),
+        }).catch(() => {});
+      }
+    } catch {}
+  }, [setSubjects]);
+
+  const handleSaveCourseLanguage = useCallback((slug: string, language: string) => {
+    const changed = updateCourseLanguage(slug, language);
+    if (changed) {
+      setCourseMetaUpdateTrigger((prev) => prev + 1);
+    }
+    return changed;
+  }, [setCourseMetaUpdateTrigger]);
 
   async function handleQuickLearn() {
     try {
@@ -1638,32 +2860,16 @@ function Home() {
     }
   }
 
-  const renameSubject = async (slug: string, newName: string) => {
-    if (!newName.trim()) return;
-    const list = readSubjects();
-    const updated = list.map((s) => (s.slug === slug ? { ...s, name: newName } : s));
-    localStorage.setItem("atomicSubjects", JSON.stringify(updated));
-    setSubjects(updated);
-
-    const data = loadSubjectData(slug) as StoredSubjectData | null;
-    if (data) {
-      data.subject = newName;
-      saveSubjectData(slug, data);
-    }
-
-    // Sync to server if authenticated
-    try {
-      const me = await fetch("/api/me", { credentials: "include" }).then(r => r.json().catch(() => ({})));
-      if (me?.user) {
-        await fetch("/api/subjects", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ slug, name: newName }),
-        }).catch(() => {});
-      }
-    } catch {}
-  };
+  useEffect(() => {
+    if (!settingsModalFor) return;
+    const trimmed = settingsNameInput.trim();
+    if (!trimmed || trimmed === settingsNameSavedRef.current) return;
+    const timeout = setTimeout(() => {
+      renameSubject(settingsModalFor, trimmed);
+      settingsNameSavedRef.current = trimmed;
+    }, 600);
+    return () => clearTimeout(timeout);
+  }, [renameSubject, settingsModalFor, settingsNameInput]);
 
   const createCourse = async (name: string, syllabus: string, files: File[], preferredLanguage?: string) => {
     let effectiveName = name;
@@ -1675,9 +2881,14 @@ function Home() {
       let unique = slugBase; let n = 1; const set = new Set(list.map((s) => s.slug));
       while (set.has(unique)) { n++; unique = `${slugBase}-${n}`; }
 
-      const next = [...list, { name: effectiveName, slug: unique }];
+      const next = [{ name: effectiveName, slug: unique }, ...list];
       localStorage.setItem("atomicSubjects", JSON.stringify(next));
-      setSubjects(next);
+      setSubjects(prev => {
+        if (prev.some(s => s.slug === unique)) {
+          return prev;
+        }
+        return [{ name: effectiveName, slug: unique }, ...prev];
+      });
       setPreparingSlug(unique);
       // Persist subject to server if logged in
       try {
@@ -1708,7 +2919,19 @@ function Home() {
       // For text-only courses (no files), use syllabus as the text source
       const effectiveText = files.length > 0 ? combinedText : syllabus;
 
-      const initData: StoredSubjectData = { subject: effectiveName, files: storedFiles, combinedText: effectiveText, tree: null, topics: [], nodes: {}, progress: {}, course_context: syllabus, course_language_name: preferredLanguage || undefined };
+      const normalizedCourseLanguage = normalizeLanguageName(preferredLanguage);
+      const initData: StoredSubjectData = {
+        subject: effectiveName,
+        files: storedFiles,
+        combinedText: effectiveText,
+        tree: null,
+        topics: [],
+        nodes: {},
+        progress: {},
+        course_context: syllabus,
+        course_language_name: normalizedCourseLanguage || undefined,
+        course_language_code: languageNameToCode(normalizedCourseLanguage) || undefined
+      };
       saveSubjectData(unique, initData);
 
       let documents: Array<{ name: string; text: string }> = [];
@@ -1805,6 +3028,19 @@ function Home() {
 
       // Remove preparing only after naming step is complete
       setPreparingSlug(null);
+      
+      // Remove placeholder if it exists and replace with real course
+      setSubjects(prev => {
+        // Remove placeholder with the same slug
+        const withoutPlaceholder = prev.filter(s => s.slug !== unique || !(s as any).isPlaceholder);
+        // Check if the course already exists (not a placeholder)
+        if (withoutPlaceholder.some(s => s.slug === unique)) {
+          return withoutPlaceholder;
+        }
+        // Add the real course
+        return [{ name: effectiveName, slug: unique }, ...withoutPlaceholder];
+      });
+      
       if (typeof document !== 'undefined') {
         document.dispatchEvent(new CustomEvent('synapse:course-created', {
           detail: { name: effectiveName, slug: unique }
@@ -1833,8 +3069,146 @@ function Home() {
           }
         } catch {}
       })();
+
+      // Auto-detect and process exam files using AI
+      (async () => {
+        try {
+          if (files.length === 0) return;
+
+          console.log(`Analyzing ${files.length} file(s) to detect exams...`);
+          
+          // Extract first 2000 characters from each file for AI analysis
+          const fileSnippets: Array<{ name: string; preview: string }> = [];
+          for (const file of files) {
+            try {
+              const lower = file.name.toLowerCase();
+              let preview = '';
+              
+              if (lower.endsWith('.pdf') || lower.endsWith('.docx')) {
+                // For PDFs and DOCX, use server-side extraction
+                const form = new FormData();
+                form.append('files', file);
+                const res = await fetch('/api/upload-course-files', { method: 'POST', body: form });
+                const json = await res.json().catch(() => ({}));
+                if (res.ok && json?.ok && Array.isArray(json.docs) && json.docs.length > 0) {
+                  preview = json.docs[0].text || '';
+                }
+              } else if (file.type.startsWith('text/') || lower.endsWith('.txt') || lower.endsWith('.md')) {
+                preview = await file.text();
+              }
+              
+              // Take first 2000 characters
+              if (preview) {
+                preview = preview.slice(0, 2000).trim();
+                if (preview.length > 50) {
+                  fileSnippets.push({ name: file.name, preview });
+                }
+              }
+            } catch (err) {
+              console.warn(`Failed to extract preview from ${file.name}:`, err);
+            }
+          }
+
+          if (fileSnippets.length === 0) return;
+
+          // Use AI to detect which files are exams (keepalive so it continues after navigation)
+          const detectRes = await fetch('/api/detect-exam-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileSnippets }),
+            keepalive: true,
+          });
+
+          if (!detectRes.ok) {
+            console.warn('Failed to detect exam files');
+            return;
+          }
+
+          const detectJson = await detectRes.json().catch(() => ({}));
+          if (!detectJson?.ok || !Array.isArray(detectJson.examFiles)) {
+            return;
+          }
+
+          const examFileNames = new Set(detectJson.examFiles.map((name: string) => name));
+          const examFiles = files.filter(file => examFileNames.has(file.name));
+
+          if (examFiles.length === 0) {
+            console.log('No exam files detected');
+            return;
+          }
+
+          console.log(`AI detected ${examFiles.length} exam file(s), creating exam snipe automatically...`);
+            
+          // Extract full text from exam files
+          const examTexts: { name: string; text: string }[] = [];
+          for (const file of examFiles) {
+            try {
+              const lower = file.name.toLowerCase();
+              let text = '';
+              
+              if (lower.endsWith('.pdf')) {
+                // For PDFs, use server-side extraction
+                const form = new FormData();
+                form.append('files', file);
+                const res = await fetch('/api/upload-course-files', { method: 'POST', body: form });
+                const json = await res.json().catch(() => ({}));
+                if (res.ok && json?.ok && Array.isArray(json.docs) && json.docs.length > 0) {
+                  text = json.docs[0].text || '';
+                }
+              } else if (lower.endsWith('.docx')) {
+                // For DOCX, also use server-side extraction
+                const form = new FormData();
+                form.append('files', file);
+                const res = await fetch('/api/upload-course-files', { method: 'POST', body: form });
+                const json = await res.json().catch(() => ({}));
+                if (res.ok && json?.ok && Array.isArray(json.docs) && json.docs.length > 0) {
+                  text = json.docs[0].text || '';
+                }
+              } else if (file.type.startsWith('text/') || lower.endsWith('.txt') || lower.endsWith('.md')) {
+                text = await file.text();
+              }
+              
+              if (text && text.trim().length > 100) {
+                examTexts.push({ name: file.name, text: text.trim() });
+              }
+            } catch (err) {
+              console.warn(`Failed to extract text from ${file.name}:`, err);
+            }
+          }
+
+            if (examTexts.length > 0) {
+              // Create exam snipe in background - will complete even if user navigates away
+              // Use background endpoint that processes server-side and saves automatically
+              fetch('/api/exam-snipe/background', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                  examsText: examTexts,
+                  courseName: effectiveName,
+                  subjectSlug: unique,
+                  fileNames: examFiles.map(f => f.name),
+                }),
+                keepalive: true, // Keep request alive even if page unloads
+              }).then(res => {
+                if (res.ok) {
+                  console.log(`✓ Exam snipe processing started in background for course: ${unique}`);
+                }
+              }).catch(err => {
+                console.warn('Failed to start exam snipe processing:', err);
+              });
+            }
+        } catch (err) {
+          console.warn('Failed to auto-create exam snipe:', err);
+          // Don't throw - this is a background process
+        }
+      })();
     } catch (error) {
       setPreparingSlug(null);
+      
+      // Remove placeholder on error
+      setSubjects(prev => prev.filter(s => !(s as any).isPlaceholder));
+      
       if (typeof document !== 'undefined') {
         document.dispatchEvent(new CustomEvent('synapse:course-created', {
           detail: { error: true }
@@ -1844,9 +3218,59 @@ function Home() {
     }
   };
 
+  const handleAddFilesToCourse = async (slug: string, files: File[]) => {
+    if (!slug || files.length === 0) return;
+    setSettingsUploadLoading(true);
+    try {
+      let data = loadSubjectData(slug) as StoredSubjectData | null;
+      if (!data) {
+        data = {
+          subject: subjects.find((s) => s.slug === slug)?.name || 'New Course',
+          files: [],
+          combinedText: '',
+          tree: null,
+          topics: [],
+          nodes: {},
+          progress: {},
+        };
+      }
+
+      const newFileMeta = files.map((file) => ({ name: file.name, type: file.type }));
+      data.files = [...(data.files || []), ...newFileMeta];
+
+      const textParts: string[] = [];
+      for (const file of files) {
+        try {
+          const lower = file.name.toLowerCase();
+          if (file.type.startsWith('text/') || lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.markdown')) {
+            const t = await file.text();
+            if (t) textParts.push(`--- ${file.name} ---\n${t}`);
+          } else {
+            // For unsupported binary formats (pdf/doc/etc) we keep metadata only.
+            // Users can upload these via Chad's main course creation flow which handles processing server-side.
+            continue;
+          }
+        } catch {}
+      }
+
+      if (textParts.length > 0) {
+        const combined = textParts.join('\n\n');
+        data.combinedText = data.combinedText ? `${data.combinedText}\n\n${combined}` : combined;
+      }
+
+      saveSubjectData(slug, data);
+    } finally {
+      setSettingsUploadLoading(false);
+    }
+  };
+
   // Update the ref and window property with createCourse function (runs after createCourse is defined)
-  createCourseRef.current = createCourse;
-  (window as any).__createCourseFn = createCourse;
+  useEffect(() => {
+    createCourseRef.current = createCourse;
+    if (typeof window !== "undefined") {
+      (window as any).__createCourseFn = createCourse;
+    }
+  }, [createCourse]);
 
   const createCourseFromFiles = async (files: File[]) => {
     if (files.length === 0) return;
@@ -1940,6 +3364,16 @@ function Home() {
     }
   };
 
+  // Show login page if not authenticated
+  // Don't show spinner while checking auth - let Shell's LoadingScreen handle it
+  if (checkingAuth) {
+    return null; // Return null to let Shell render and show LoadingScreen
+  }
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
+
   return (
     <div 
       className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] px-6 pt-10 pb-4 relative"
@@ -1961,37 +3395,37 @@ function Home() {
         }}
       />
       <div className="relative z-10">
-      <WelcomeMessage tutorialSignal={tutorialSignal} />
+      <WelcomeMessage 
+        tutorialSignal={tutorialSignal} 
+        onQuickLearn={(query) => {
+          setQuickLearnQuery(query);
+          handleQuickLearn();
+        }}
+      />
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
         <h1 className="text-xl font-semibold text-[var(--foreground)]">Your subjects</h1>
-        <div className="flex items-center gap-3">
           <button
             onClick={() => setTutorialSignal((prev) => prev + 1)}
-            className="inline-flex items-center rounded-full border border-[var(--accent-cyan)]/40 px-4 py-2 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--accent-cyan)]/60 hover:bg-[var(--accent-cyan)]/10 transition-colors"
+          className="inline-flex items-center rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-white/30 hover:bg-white/5 transition-colors"
           >
             Tutorial
           </button>
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="relative inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--foreground)] bg-[var(--background)]/90 backdrop-blur-md shadow-[0_2px_8px_rgba(0,0,0,0.7)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)] hover:bg-[var(--background)]/95 transition-all duration-200 ease-out"
-            aria-label="Add course"
-          >
-            <span className="text-lg leading-none text-[var(--foreground)]">+</span>
-          </button>
-        </div>
       </div>
 
       <div className="mx-auto mt-6 grid w-full max-w-5xl grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {subjects.filter((s) => s.slug !== "quicklearn").map((s) => (
+        {subjects.filter((s) => s.slug !== "quicklearn").map((s) => {
+          const lightningGradientId = `surgeLightningGradient-${s.slug}`;
+          return (
           <div
             key={s.slug}
-            className={`relative rounded-2xl bg-[var(--background)] p-5 text-[var(--foreground)] transition-all duration-200 shadow-[0_2px_8px_rgba(0,0,0,0.7)] ${
+            className={`relative rounded-2xl bg-[rgba(229,231,235,0.08)] border border-white/5 p-5 text-[var(--foreground)] transition-all duration-200 ${
               preparingSlug === s.slug
                 ? 'cursor-not-allowed opacity-75'
                 : surgeButtonHovered === s.slug
                 ? 'cursor-pointer'
-                : 'cursor-pointer hover:bg-gradient-to-r hover:from-[var(--accent-cyan)]/5 hover:to-[var(--accent-pink)]/5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.8)]'
+                : 'cursor-pointer hover:bg-[rgba(229,231,235,0.12)]'
             }`}
+            style={{ boxShadow: 'none' }}
             role="link"
             tabIndex={preparingSlug === s.slug ? -1 : 0}
             onClick={preparingSlug === s.slug ? undefined : () => router.push(`/subjects/${s.slug}`)}
@@ -2006,29 +3440,55 @@ function Home() {
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold leading-snug truncate">{s.name}</div>
                 {(() => {
-                  // Use examDateUpdateTrigger to force re-render when exam dates change
+                  // Use examDateUpdateTrigger to force re-render when metadata changes
                   const _ = examDateUpdateTrigger;
                   const data = loadSubjectData(s.slug);
                   const topicCount = data?.topics?.length || 0;
                   const daysLeft = getDaysUntilNextExam(data?.examDates);
-                  // Try to get createdAt from subject (if from server) or use current date as fallback
-                  const createdAt = (s as any).createdAt || null;
+                  const hasExamDate = data?.examDates && data.examDates.length > 0;
                   return (
                     <>
-                      {createdAt && (
-                        <div className="mt-1 text-xs text-[var(--foreground)]/20">
-                          {new Date(createdAt).toLocaleString(undefined, { dateStyle: "medium" })}
-                        </div>
-                      )}
+                      <div className="mt-1">
+                        {hasExamDate && daysLeft !== null ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const examDate = data?.examDates?.[0]?.date;
+                              if (examDate) {
+                                const date = new Date(examDate);
+                                setCalendarSelectedDate(date);
+                                setCalendarCurrentMonth(new Date(date.getFullYear(), date.getMonth(), 1));
+                              } else {
+                                const today = new Date();
+                                setCalendarCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+                              }
+                              setCalendarOpenFor(s.slug);
+                            }}
+                            className="date-button inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold tracking-wide text-white bg-white/10 border border-white/15 backdrop-blur-sm shadow-[0_0_8px_rgba(0,0,0,0.35)] hover:bg-white/15 hover:border-white/35 transition-all"
+                          >
+                            <span className="inline-block w-1 h-1 rounded-full bg-white/60 animate-pulse" />
+                            {daysLeft} day{daysLeft === 1 ? '' : 's'} left
+                          </button>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCalendarSelectedDate(null);
+                              const today = new Date();
+                              setCalendarCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+                              setCalendarOpenFor(s.slug);
+                            }}
+                            className="date-button inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold tracking-wide text-white/70 border border-white/10 hover:text-white hover:border-white/30 transition-all"
+                          >
+                            <span className="inline-block w-1 h-1 rounded-full bg-white/50" />
+                            Set Date
+                          </button>
+                        )}
+                      </div>
                       <div className="mt-3 flex items-center gap-3 flex-wrap">
                         <div className="text-xs text-[var(--foreground)]/20">
                           {topicCount} topic{topicCount === 1 ? "" : "s"}
                         </div>
-                        {daysLeft !== null && (
-                          <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-medium bg-[var(--foreground)]/5 border border-[var(--foreground)]/15 text-[var(--foreground)]/70">
-                            <span>{daysLeft} day{daysLeft === 1 ? '' : 's'} left</span>
-                          </div>
-                        )}
                       </div>
                     </>
                   );
@@ -2089,31 +3549,55 @@ function Home() {
               aria-label="Start Surge"
               title="Start Synapse Surge"
             >
-              <span className={`text-sm ${preparingSlug === s.slug ? 'text-[var(--foreground)]/30' : 'text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)]'}`}>⚡</span>
+              {preparingSlug === s.slug ? (
+                <svg 
+                  width="16" 
+                  height="16" 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="text-[var(--foreground)]/30"
+                >
+                  <g transform="translate(12 12) scale(0.8,1.1) translate(-12 -12)">
+                    <path 
+                      d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" 
+                      fill="currentColor"
+                    />
+                  </g>
+                </svg>
+              ) : (
+                <svg 
+                  width="16" 
+                  height="16" 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <defs>
+                    <linearGradient id={lightningGradientId} x1="0%" y1="0%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="rgba(255, 255, 255, 0.95)" />
+                      <stop offset="100%" stopColor="rgba(255, 255, 255, 0.7)" />
+                    </linearGradient>
+                  </defs>
+                  <g transform="translate(12 12) scale(0.8,1.1) translate(-12 -12)">
+                    <path 
+                      d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" 
+                      fill={`url(#${lightningGradientId})`}
+                    />
+                  </g>
+                </svg>
+              )}
             </button>
             
             {preparingSlug === s.slug && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--background)]/80 backdrop-blur-sm rounded-2xl z-10">
-                <div className="inline-flex items-center gap-2 rounded-full border border-[var(--accent-cyan)]/20 bg-[var(--background)]/95 px-3 py-1 text-[12px] text-[var(--foreground)] shadow-lg">
-                  <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--accent-cyan)]" /> Preparing…
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-[var(--background)]/95 px-3 py-1 text-[12px] text-[var(--foreground)] shadow-lg">
+                  <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-white/40" /> Preparing…
                 </div>
               </div>
             )}
             {menuOpenFor === s.slug && (
-              <div data-menu-dropdown className="absolute right-4 top-14 z-50 w-40 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-lg p-2 space-y-2" onClick={(e) => e.stopPropagation()}>
-                <button
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    setMenuOpenFor(null);
-                    const name = window.prompt("Rename course", s.name) || s.name;
-                    if (name !== s.name) {
-                      await renameSubject(s.slug, name);
-                    }
-                  }}
-                  className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
-                >
-                  Rename
-                </button>
+              <div data-menu-dropdown className="absolute right-4 top-14 z-50 w-40 rounded-xl border border-white/10 bg-[var(--background)]/95 backdrop-blur-md shadow-lg p-2 space-y-2" onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={async (e) => {
                     e.stopPropagation();
@@ -2146,36 +3630,31 @@ function Home() {
                   onClick={(e) => {
                     e.stopPropagation();
                     setMenuOpenFor(null);
-                    setFilesModalOpen(s.slug);
+                    setSettingsModalFor(s.slug);
+                    setSettingsNameInput(s.name);
+                    settingsNameSavedRef.current = s.name;
+                    const data = loadSubjectData(s.slug);
+                    const languageValue = normalizeLanguageName(data?.course_language_name || data?.course_language_code || '');
+                    setSettingsLanguageInput(languageValue);
                   }}
                   className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
                 >
-                  View Files
+                  Settings
                 </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    try {
-                      const raw = localStorage.getItem("atomicSubjectData:" + s.slug);
-                      const blob = new Blob([raw || "{}"], { type: "application/json" });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = `${s.slug}.json`;
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                      URL.revokeObjectURL(url);
-                    } catch {}
+                    setMenuOpenFor(null);
+                    setInfoModalOpen(s.slug);
                   }}
                   className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
                 >
-                  Export
+                  Info
                 </button>
               </div>
             )}
           </div>
-        ))}
+        );})}
         <div
           onDragEnter={(e) => {
             e.preventDefault();
@@ -2194,10 +3673,10 @@ function Home() {
             const files = Array.from(e.dataTransfer?.files || []);
             createCourseFromFiles(files);
           }}
-          className={`relative rounded-2xl border border-dashed border-[var(--accent-cyan)]/30 bg-[var(--background)]/60 p-6 text-center text-sm transition-all duration-200 min-h-[80px] flex flex-col items-center justify-center gap-2 ${
+          className={`relative rounded-2xl border border-dashed border-white/20 bg-[var(--background)]/60 p-6 text-center text-sm transition-all duration-200 min-h-[80px] flex flex-col items-center justify-center gap-2 ${
             isDragging
-              ? 'border-[var(--accent-cyan)]/60 bg-[var(--accent-cyan)]/10 shadow-[0_4px_12px_rgba(0,0,0,0.8)]'
-              : 'hover:border-[var(--accent-cyan)]/50 hover:bg-[var(--background)]/70'
+              ? 'border-white/40 bg-white/5 shadow-[0_4px_12px_rgba(0,0,0,0.8)]'
+              : 'hover:border-white/30 hover:bg-[var(--background)]/70'
           }`}
         >
           <span className="text-[var(--foreground)]/70">Drop files here to auto-create a course</span>
@@ -2239,7 +3718,7 @@ function Home() {
                   // Ensure focus works on iOS PWA
                   e.currentTarget.focus();
                 }}
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-white/30 focus:outline-none resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
                 placeholder="e.g. How does machine learning work? Or paste a question from your textbook..."
                 rows={4}
                 tabIndex={0}
@@ -2277,141 +3756,445 @@ function Home() {
         </div>
       )}
 
-      {/* Files Modal */}
-      {filesModalOpen && (() => {
-        const slug = filesModalOpen;
-        const data = loadSubjectData(slug) as StoredSubjectData | null;
-        const files = data?.files || [];
+      {/* Calendar Date Picker Modal */}
+      {calendarOpenFor && (() => {
+        const slug = calendarOpenFor;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const selectedDate = calendarSelectedDate || today;
+        
+        const year = calendarCurrentMonth.getFullYear();
+        const month = calendarCurrentMonth.getMonth();
+        
+        // Get first day of month and number of days
+        const firstDay = new Date(year, month, 1).getDay();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        
+        // Generate calendar days
+        const days: (Date | null)[] = [];
+        // Add empty cells for days before month starts
+        for (let i = 0; i < firstDay; i++) {
+          days.push(null);
+        }
+        // Add days of the month
+        for (let day = 1; day <= daysInMonth; day++) {
+          days.push(new Date(year, month, day));
+        }
+        
+        const handleDateSelect = (date: Date) => {
+          if (date < today) return; // Don't allow past dates
+          
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          const isoDate = `${year}-${month}-${day}`;
+          
+          try {
+            const data = loadSubjectData(slug);
+            if (data) {
+              data.examDates = [{ date: isoDate, name: undefined }];
+              saveSubjectData(slug, data);
+              window.dispatchEvent(new CustomEvent("synapse:exam-date-updated", { detail: { slug } }));
+              setExamDateUpdateTrigger(prev => prev + 1);
+              setCalendarOpenFor(null);
+              setCalendarSelectedDate(null);
+            }
+          } catch (err) {
+            console.error("Failed to set exam date:", err);
+          }
+        };
+        
+        const navigateMonth = (direction: number) => {
+          setCalendarCurrentMonth(prev => {
+            const newDate = new Date(prev);
+            newDate.setMonth(newDate.getMonth() + direction);
+            // Don't allow going before current month
+            const todayMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+            if (newDate < todayMonth) {
+              return todayMonth;
+            }
+            return newDate;
+          });
+        };
+        
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+            onClick={() => {
+              setCalendarOpenFor(null);
+              setCalendarSelectedDate(null);
+            }}
+          >
+            <div
+              className="rounded-2xl border border-white/10 p-6 max-w-sm w-full mx-4"
+              onClick={(e) => e.stopPropagation()}
+              style={{ 
+                boxShadow: 'none',
+                backgroundColor: 'rgb(15, 18, 22)', // Fully opaque
+              }}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <button
+                  onClick={() => navigateMonth(-1)}
+                  className="p-2 rounded-lg hover:bg-white/10 transition-colors text-white/80 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={calendarCurrentMonth <= new Date(today.getFullYear(), today.getMonth(), 1)}
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <h3 className="text-lg font-semibold text-white">
+                  {calendarCurrentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                </h3>
+                <button
+                  onClick={() => navigateMonth(1)}
+                  className="p-2 rounded-lg hover:bg-white/10 transition-colors text-white/80 hover:text-white"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+      </div>
+              
+              <div className="grid grid-cols-7 gap-1 mb-2">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                  <div key={day} className="text-center text-xs text-white/60 py-1">
+                    {day}
+    </div>
+                ))}
+              </div>
+              
+              <div className="grid grid-cols-7 gap-1">
+                {days.map((date, idx) => {
+                  if (!date) {
+                    return <div key={idx} className="aspect-square" />;
+                  }
+                  
+                  const isPast = date < today;
+                  const isSelected = selectedDate && 
+                    date.getDate() === selectedDate.getDate() &&
+                    date.getMonth() === selectedDate.getMonth() &&
+                    date.getFullYear() === selectedDate.getFullYear();
+                  const isToday = date.getDate() === today.getDate() &&
+                    date.getMonth() === today.getMonth() &&
+                    date.getFullYear() === today.getFullYear();
+                  
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => !isPast && handleDateSelect(date)}
+                      disabled={isPast}
+                      className={`aspect-square rounded-lg text-sm transition-colors ${
+                        isPast
+                          ? 'text-white/20 cursor-not-allowed'
+                          : isSelected
+                          ? 'bg-[rgba(229,231,235,0.2)] text-white font-semibold'
+                          : isToday
+                          ? 'bg-[rgba(229,231,235,0.1)] text-white hover:bg-[rgba(229,231,235,0.15)]'
+                          : 'text-white/80 hover:bg-white/10'
+                      }`}
+                    >
+                      {date.getDate()}
+                    </button>
+                  );
+                })}
+              </div>
+              
+              <button
+                onClick={() => {
+                  setCalendarOpenFor(null);
+                  setCalendarSelectedDate(null);
+                }}
+                className="mt-4 w-full rounded-lg border border-white/10 bg-[rgba(229,231,235,0.08)] px-4 py-2 text-sm text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+      
+      {settingsModalFor && (() => {
+        const slug = settingsModalFor;
+        const courseData = loadSubjectData(slug);
+        const subject = subjects.find(s => s.slug === slug);
+        const files = courseData?.files || [];
 
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setFilesModalOpen(null)}>
-            <div className="w-full max-w-2xl rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/95 backdrop-blur-sm p-6" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-[var(--foreground)]">Course Files</h3>
-                <button
-                  onClick={() => setFilesModalOpen(null)}
-                  className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] text-xl"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div className="mb-4 space-y-2 max-h-96 overflow-y-auto">
-                {files.length === 0 ? (
-                  <div className="text-sm text-[var(--foreground)]/70 py-6 text-center">
-                    No files added yet. Click "Add Files" below to upload course materials.
+          <>
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+              onClick={() => setSettingsModalFor(null)}
+            >
+              <div
+                className="w-full max-w-3xl rounded-2xl border border-white/10 bg-[rgba(15,18,22,0.97)] p-6 text-white shadow-[0_20px_80px_rgba(0,0,0,0.45)]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-white/40">Course Settings</p>
+                    <h2 className="text-xl font-semibold">{subject?.name || slug}</h2>
                   </div>
-                ) : (
-                  files.map((file, idx) => (
-                    <div key={idx} className="flex items-center justify-between rounded-lg bg-[var(--background)]/60 border border-[var(--accent-cyan)]/20 px-4 py-3">
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <svg className="flex-shrink-0 w-5 h-5 text-[var(--accent-cyan)]" fill="currentColor" viewBox="0 0 20 20">
-                          <path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" />
-                        </svg>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-[var(--foreground)] truncate">{file.name}</div>
-                          <div className="text-xs text-[var(--foreground)]/70">{file.type || 'Unknown type'}</div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          if (!window.confirm(`Remove "${file.name}" from this course?`)) return;
-                          const updatedFiles = files.filter((_, i) => i !== idx);
-                          if (data) {
-                            data.files = updatedFiles;
-                            // Also update combinedText if needed
-                            saveSubjectData(slug, data);
-                            // Sync to server if authenticated
-                            if (isAuthenticated) {
-                              fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                credentials: 'include',
-                                body: JSON.stringify({ data }),
-                              }).catch(() => {});
-                            }
-                            setFilesModalOpen(null);
-                            setTimeout(() => setFilesModalOpen(slug), 10);
+                  <button
+                    onClick={() => setSettingsModalFor(null)}
+                    className="rounded-full p-2 text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+                  >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18 18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div className="grid gap-6 md:grid-cols-2">
+                  <div className="rounded-2xl border border-white/10 bg-white/5/5 p-4 space-y-4">
+                    <h3 className="mb-3 text-sm font-semibold text-white/90">Rename Course</h3>
+                    <input
+                      value={settingsNameInput}
+                      onChange={(e) => setSettingsNameInput(e.target.value)}
+                      className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/50 focus:border-white/40 focus:outline-none"
+                      placeholder="Course name"
+                    />
+                    <p className="text-[11px] text-white/40">Changes save automatically.</p>
+                    <div>
+                      <h3 className="mb-2 text-sm font-semibold text-white/90">Course Language</h3>
+                      <select
+                        value={settingsLanguageInput}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setSettingsLanguageInput(value);
+                          if (settingsModalFor) {
+                            handleSaveCourseLanguage(settingsModalFor, value);
                           }
                         }}
-                        className="ml-3 text-[#FF2D96] hover:text-[#FF2D96]/80 text-sm font-medium"
+                        className="w-full rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-white focus:border-white/40 focus:outline-none appearance-none"
+                        style={{ color: 'white' }}
                       >
-                        Remove
+                        <option value="">(Not set)</option>
+                        {LANGUAGE_OPTIONS.map(({ label, code }) => (
+                          <option key={code} value={label} className="bg-[rgb(15,18,22)] text-white">
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-2 text-[11px] text-white/40">Selecting a language saves instantly.</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-white/5/5 p-4">
+                    <h3 className="mb-3 text-sm font-semibold text-white/90">Files</h3>
+                    <div className="max-h-40 space-y-2 overflow-y-auto pr-1 text-xs text-white/70">
+                      {files.length === 0 ? (
+                        <p className="text-white/50">No files yet.</p>
+                      ) : (
+                        files.map((file, idx) => (
+                          <div key={`${file.name}-${idx}`} className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-1.5">
+                            <span className="inline-block h-1.5 w-1.5 rounded-full bg-white/60" />
+                            {file.name}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => settingsFileInputRef.current?.click()}
+                        disabled={settingsUploadLoading}
+                        className="inline-flex items-center justify-center rounded-full border border-white/15 px-3 py-1.5 text-[11px] font-medium text-white/80 hover:text-white hover:border-white/35 transition-colors disabled:opacity-50"
+                      >
+                        {settingsUploadLoading ? 'Adding…' : 'Add Files'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          try {
+                            const raw = localStorage.getItem(`atomicSubjectData:${slug}`);
+                            const blob = new Blob([raw || '{}'], { type: 'application/json' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${slug}.json`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                          } catch {}
+                        }}
+                        className="inline-flex items-center justify-center rounded-full border border-white/15 px-3 py-1.5 text-[11px] font-medium text-white/80 hover:text-white hover:border-white/35 transition-colors"
+                      >
+                        Export JSON
                       </button>
                     </div>
-                  ))
-                )}
+                    <p className="mt-2 text-[11px] text-white/40">
+                      Tip: You can also send Chad a detailed course description and he’ll create the course from text.
+                    </p>
+                  </div>
+                </div>
               </div>
+            </div>
+          </>
+        );
+      })()}
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-[var(--accent-cyan)]/20">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  accept=".pdf,.docx,.txt,.md,.markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown"
-                  className="hidden"
-                  onChange={async (e) => {
-                    const target = e.target as HTMLInputElement;
-                    const newFiles = Array.from(target.files || []);
-                    if (newFiles.length === 0) return;
+      {settingsModalFor && (
+        <input
+          ref={settingsFileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={async (e) => {
+            const filesToAdd = Array.from(e.target.files || []);
+            if (settingsModalFor && filesToAdd.length > 0) {
+              await handleAddFilesToCourse(settingsModalFor, filesToAdd);
+            }
+            if (settingsFileInputRef.current) {
+              settingsFileInputRef.current.value = '';
+            }
+          }}
+        />
+      )}
 
-                    // Process files and extract text
-                    const storedFiles: Array<{ name: string; type: string; data?: string }> = [];
-                    let combinedText = data?.combinedText || '';
-
-                    for (const file of newFiles) {
-                      const lower = file.name.toLowerCase();
-                      let text = '';
-                      
-                      if (file.type.startsWith('text/') || lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.markdown')) {
-                        try {
-                          text = await file.text();
-                          if (text) combinedText += (combinedText ? '\n\n' : '') + `--- ${file.name} ---\n${text}`;
-                        } catch {}
-                      }
-                      
-                      storedFiles.push({ name: file.name, type: file.type, data: text || undefined });
-                    }
-
-                    // Update subject data
-                    if (data) {
-                      data.files = [...files, ...storedFiles];
-                      data.combinedText = combinedText;
-                      saveSubjectData(slug, data);
-                      
-                      // Sync to server if authenticated
-                      if (isAuthenticated) {
-                        fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          credentials: 'include',
-                          body: JSON.stringify({ data }),
-                        }).catch(() => {});
-                      }
-                      
-                      setFilesModalOpen(null);
-                      setTimeout(() => setFilesModalOpen(slug), 10);
-                    }
-                    
-                    // Reset input
-                    if (fileInputRef.current) {
-                      fileInputRef.current.value = '';
-                    }
-                  }}
-                />
+      {/* Course Info Modal */}
+      {infoModalOpen && (() => {
+        const slug = infoModalOpen;
+        const courseData = loadSubjectData(slug);
+        const subject = subjects.find(s => s.slug === slug);
+        
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+            onClick={() => setInfoModalOpen(null)}
+          >
+            <div
+              className="rounded-2xl border border-white/10 bg-[rgb(15,18,22)] p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+              style={{ boxShadow: 'none' }}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-white">
+                  Course Info: {subject?.name || slug}
+                </h2>
                 <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95"
+                  onClick={() => setInfoModalOpen(null)}
+                  className="p-2 rounded-lg hover:bg-white/10 transition-colors text-white/80 hover:text-white"
                 >
-                  Add Files
-                </button>
-                <button
-                  onClick={() => setFilesModalOpen(null)}
-                  className="rounded-lg border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/80"
-                >
-                  Close
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
               </div>
+              
+              {courseData ? (
+                <div className="space-y-4 text-sm">
+                  <div>
+                    <h3 className="text-white/90 font-semibold mb-2">Subject Name</h3>
+                    <p className="text-white/70">{courseData.subject || 'N/A'}</p>
+                  </div>
+                  
+                  {courseData.course_context && (
+                    <div>
+                      <h3 className="text-white/90 font-semibold mb-2">Course Context</h3>
+                      <p className="text-white/70 whitespace-pre-wrap">{courseData.course_context}</p>
+                    </div>
+                  )}
+                  
+                  {courseData.course_quick_summary && (
+                    <div>
+                      <h3 className="text-white/90 font-semibold mb-2">Quick Summary</h3>
+                      <p className="text-white/70 whitespace-pre-wrap">{courseData.course_quick_summary}</p>
+                    </div>
+                  )}
+                  
+                  {courseData.course_notes && (
+                    <div>
+                      <h3 className="text-white/90 font-semibold mb-2">Course Notes</h3>
+                      <p className="text-white/70 whitespace-pre-wrap">{courseData.course_notes}</p>
+                    </div>
+                  )}
+                  
+                  {courseData.topics && courseData.topics.length > 0 && (
+                    <div>
+                      <h3 className="text-white/90 font-semibold mb-2">Topics ({courseData.topics.length})</h3>
+                      <div className="space-y-1">
+                        {courseData.topics.map((topic, idx) => (
+                          <div key={idx} className="text-white/70">
+                            {idx + 1}. {topic.name}
+                            {topic.summary && <span className="text-white/50 ml-2">- {topic.summary}</span>}
+                            {(topic as any).coverage && <span className="text-white/50 ml-2">({(topic as any).coverage}%)</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {courseData.files && courseData.files.length > 0 && (
+                    <div>
+                      <h3 className="text-white/90 font-semibold mb-2">Files ({courseData.files.length})</h3>
+                      <div className="space-y-1">
+                        {courseData.files.map((file, idx) => (
+                          <div key={idx} className="text-white/70">
+                            {file.name} {file.type && <span className="text-white/50">({file.type})</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {courseData.examDates && courseData.examDates.length > 0 && (
+                    <div>
+                      <h3 className="text-white/90 font-semibold mb-2">Exam Dates</h3>
+                      <div className="space-y-1">
+                        {courseData.examDates.map((exam, idx) => (
+                          <div key={idx} className="text-white/70">
+                            {exam.date} {exam.name && <span className="text-white/50">- {exam.name}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {courseData.course_language_name && (
+                    <div>
+                      <h3 className="text-white/90 font-semibold mb-2">Language</h3>
+                      <p className="text-white/70">{courseData.course_language_name} ({courseData.course_language_code})</p>
+                    </div>
+                  )}
+                  
+                  {courseData.progress && Object.keys(courseData.progress).length > 0 && (
+                    <div>
+                      <h3 className="text-white/90 font-semibold mb-2">Progress</h3>
+                      <div className="space-y-1">
+                        {Object.entries(courseData.progress).map(([topic, prog]: [string, any]) => (
+                          <div key={topic} className="text-white/70">
+                            {topic}: {prog.completedLessons || 0}/{prog.totalLessons || 0} lessons
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {courseData.combinedText && (
+                    <div>
+                      <h3 className="text-white/90 font-semibold mb-2">Combined Text Length</h3>
+                      <p className="text-white/70">{courseData.combinedText.length.toLocaleString()} characters</p>
+                    </div>
+                  )}
+                  
+                  {courseData.surgeLog && courseData.surgeLog.length > 0 && (
+                    <div>
+                      <h3 className="text-white/90 font-semibold mb-2">Surge Log Entries ({courseData.surgeLog.length})</h3>
+                      <p className="text-white/70">See surge log for details</p>
+                    </div>
+                  )}
+                  
+                  <div>
+                    <h3 className="text-white/90 font-semibold mb-2">Raw Data (JSON)</h3>
+                    <pre className="bg-white/5 p-3 rounded-lg overflow-x-auto text-xs text-white/60">
+                      {JSON.stringify(courseData, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-white/70">No course data found for this course.</p>
+              )}
             </div>
           </div>
         );

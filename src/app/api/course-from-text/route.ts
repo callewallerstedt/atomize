@@ -26,7 +26,11 @@ export async function POST(req: Request) {
       "You are an expert course designer. Based on the user's description, create a comprehensive course outline and context.",
       "Return JSON: { courseName: string; courseContext: string; topics: { name: string; summary: string; coverage: number }[] }",
       "Generate 8-16 topics that comprehensively cover the subject described.",
-      "The courseContext should be a detailed overview of the course (2-3 paragraphs) that can be used to generate lessons.",
+      "CRITICAL: The courseContext field must be PLAIN TEXT ONLY - a natural language description (2-3 paragraphs).",
+      "DO NOT put JSON, code blocks, or the topics array in the courseContext field.",
+      "DO NOT include markdown formatting like ```json or ``` in courseContext.",
+      "The courseContext should be a readable description that explains what the course covers, suitable for generating lessons.",
+      "Topics are returned separately in the topics array - do not duplicate them in courseContext.",
       "Coverage should sum to approximately 100.",
       preferredLanguage
         ? `CRITICAL: Write all content in ${preferredLanguage}.`
@@ -59,7 +63,71 @@ export async function POST(req: Request) {
     }
 
     const finalCourseName = parsedContext.courseName || courseName || "New Course";
-    const courseContext = parsedContext.courseContext || description;
+    // Extract courseContext and clean it - remove any JSON code blocks or formatting
+    let courseContext = parsedContext.courseContext || description;
+    
+    // Remove markdown code blocks if present
+    courseContext = courseContext.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    
+    // Check if the entire courseContext is JSON (starts with { and ends with })
+    const trimmedContext = courseContext.trim();
+    if (trimmedContext.startsWith('{') && trimmedContext.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(courseContext);
+        // If it parsed successfully, it means the AI put the entire JSON response in courseContext
+        // Try to extract a meaningful description
+        if (parsed.courseContext && typeof parsed.courseContext === 'string') {
+          courseContext = parsed.courseContext;
+        } else if (parsed.subject && typeof parsed.subject === 'string') {
+          // If it's the full response object, generate a simple description from the subject
+          courseContext = `This course covers ${parsed.subject}. ${description}`;
+        } else {
+          // Fallback: use the original description
+          courseContext = description;
+        }
+      } catch {
+        // If parsing fails, try to extract text content from the JSON structure
+        // Remove all JSON structure, keeping only text content
+        courseContext = courseContext
+          .replace(/\{[^}]*"courseContext"\s*:\s*"([^"]+)"/g, '$1') // Extract courseContext value
+          .replace(/\{[^}]*"subject"\s*:\s*"([^"]+)"/g, 'This course covers $1') // Extract subject
+          .replace(/\{[^}]*\}/g, '') // Remove any remaining JSON objects
+          .replace(/\[[^\]]*\]/g, '') // Remove arrays
+          .trim() || description;
+      }
+    } else if (trimmedContext.startsWith('{')) {
+      // Partial JSON - try to extract text content
+      try {
+        const parsed = JSON.parse(courseContext);
+        if (parsed.courseContext && typeof parsed.courseContext === 'string') {
+          courseContext = parsed.courseContext;
+        } else {
+          courseContext = description;
+        }
+      } catch {
+        // Remove JSON structures but keep text
+        courseContext = courseContext
+          .replace(/\{[^}]*"courseContext"\s*:\s*"([^"]+)"/g, '$1')
+          .replace(/\{[^}]*\}/g, '')
+          .replace(/\[[^\]]*\]/g, '')
+          .trim() || description;
+      }
+    }
+    
+    // Final cleanup: remove any remaining JSON-like structures, arrays, and code blocks
+    courseContext = courseContext
+      .replace(/```json\s*/g, '')
+      .replace(/```\s*/g, '')
+      .replace(/\{[^}]*\}/g, '') // Remove any remaining JSON objects
+      .replace(/\[[^\]]*\]/g, '') // Remove arrays
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim();
+    
+    // If after all cleaning it's empty or too short, use description
+    if (!courseContext || courseContext.length < 20) {
+      courseContext = description;
+    }
+    
     const topics = Array.isArray(parsedContext.topics) ? parsedContext.topics : [];
 
     return NextResponse.json({
@@ -73,6 +141,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: err?.message || "Unknown error" }, { status: 500 });
   }
 }
+
 
 
 
