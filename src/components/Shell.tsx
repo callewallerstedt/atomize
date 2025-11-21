@@ -2481,7 +2481,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
             width: '90%',
             maxWidth: '800px',
             maxHeight: '90vh',
-            zoom: typeof window !== 'undefined' && window.innerWidth >= 768 && !(window.navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)) ? 1.4 : undefined,
+            zoom: typeof window !== 'undefined' && window.innerWidth >= 768 && !((window.navigator as any).standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)) ? 1.4 : undefined,
           }}
         >
           <div 
