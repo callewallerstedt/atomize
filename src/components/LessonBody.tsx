@@ -568,6 +568,19 @@ export function LessonBody({ body }: { body: string }) {
 	const prepared = restoreForRender(body ?? "");
 	const normalized = ensureClosedMarkdownFences(prepared);
 	
+	// Convert standalone [ ... ] blocks that contain LaTeX math to \[ ... \]
+	// This handles cases where AI outputs [ f(t) = ... ] instead of \[ f(t) = ... \]
+	// Match [ ... ] blocks that are likely math (contain LaTeX commands)
+	// Use regex to find [ followed by content with backslash commands, ending with ]
+	const withMathDelimiters = normalized.replace(/\[([^\]]*\\[a-zA-Z]+[^\]]*)\]/g, (match, content) => {
+		// Check if content contains LaTeX commands (backslash followed by letters)
+		// This is a strong indicator it's math, not a regular bracket
+		if (/\\[a-zA-Z]+/.test(content)) {
+			return `\\[${content}\\]`;
+		}
+		return match;
+	});
+	
 	// Extract code blocks before rendering
 	// Match: ```language\ncode``` or ```\ncode``` or ```language\ncode``` (with optional newline)
 	const codeBlockRegex = /```(\w+)?\n?([\s\S]*?)```/g;
@@ -578,12 +591,12 @@ export function LessonBody({ body }: { body: string }) {
 	// Find all code blocks and replace with placeholders
 	// Use HTML comment placeholders that markdown-it will preserve
 	// Put placeholder on its own line to ensure it's preserved
-	let processed = normalized;
+	let processed = withMathDelimiters;
 	codeBlockRegex.lastIndex = 0; // Reset regex
 	const matches: Array<{ match: RegExpMatchArray; placeholder: string; language: string; code: string }> = [];
 	
-	// First, collect all matches
-	while ((match = codeBlockRegex.exec(normalized)) !== null) {
+	// First, collect all matches (use withMathDelimiters to include math conversions)
+	while ((match = codeBlockRegex.exec(withMathDelimiters)) !== null) {
 		const language = match[1] || 'text';
 		const code = match[2] || '';
 		// Use HTML comment as placeholder, on its own line
@@ -601,7 +614,7 @@ export function LessonBody({ body }: { body: string }) {
 		processed = processed.slice(0, start) + placeholder + processed.slice(end);
 	}
 	
-	// Render the markdown with placeholders
+	// Render the markdown with placeholders (math conversion already applied in withMathDelimiters)
 	let html = md.render(processed);
 	
 	// Replace placeholders with React components
@@ -639,7 +652,7 @@ export function LessonBody({ body }: { body: string }) {
 	
 	// If no code blocks, just render normally
 	if (codeBlocks.length === 0) {
-		html = md.render(normalized);
+		html = md.render(withMathDelimiters);
 		return (
 			<>
 				<div className="lesson-content prose max-w-none" dangerouslySetInnerHTML={{ __html: html }} />

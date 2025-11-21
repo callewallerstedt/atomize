@@ -4,7 +4,7 @@
 :root {
   --background: #1a1a1a;
   --foreground: #E5E7EB;
-  --accent-cyan: #9CA3AF;
+  --accent-cyan: #00E5FF;
   --accent-pink: #FF2D96;
   --accent-grad: linear-gradient(90deg, var(--accent-cyan), var(--accent-pink));
 }
