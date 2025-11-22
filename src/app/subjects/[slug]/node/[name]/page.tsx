@@ -52,7 +52,7 @@ export default function NodePage({ lessonIndexFromUrl }: { lessonIndexFromUrl?: 
   const activeLessonIndex = lessonIndexFromUrl !== undefined ? lessonIndexFromUrl : currentLessonIndex;
   const [hoveredParagraph, setHoveredParagraph] = useState<string | null>(null);
   const [simplifyingParagraph, setSimplifyingParagraph] = useState<string | null>(null);
-  const [showHints, setShowHints] = useState<{ [key: number]: boolean }>({});
+  const [showHints, setShowHints] = useState<{ [key: string]: boolean }>({});
   const [showSolutions, setShowSolutions] = useState<{ [key: number]: boolean }>({});
   const [reviewedThisSession, setReviewedThisSession] = useState<Set<number>>(new Set());
   const [ratingMessage, setRatingMessage] = useState<string | null>(null);
