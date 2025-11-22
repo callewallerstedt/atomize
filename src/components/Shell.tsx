@@ -2465,7 +2465,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
           className="flex gap-2"
         >
           <input
-            ref={chatInputRef}
+            ref={chatInputRef as React.RefObject<HTMLInputElement>}
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
