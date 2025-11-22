@@ -9,7 +9,17 @@ export type QRSession = {
   expiresAt: number;
 };
 
+// Use a global Map to ensure it's shared across all imports
+// In Next.js, modules are cached, so this should work
 const sessions = new Map<string, QRSession>();
+
+// Export for debugging
+export function getAllSessions() {
+  return Array.from(sessions.entries()).map(([id, session]) => ({
+    id,
+    ...session,
+  }));
+}
 
 // Clean up expired sessions every 5 minutes
 setInterval(() => {

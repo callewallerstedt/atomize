@@ -8,12 +8,16 @@ export default function LarsCoach({ open, onClose }: { open: boolean; onClose: (
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const [sending, setSending] = useState(false);
-  const [size, setSize] = useState<{ w: number; h: number }>({ w: 520, h: 500 });
-  const [resizing, setResizing] = useState(false);
-  const [start, setStart] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastMessageContentRef = useRef<string>("");
   const [scrollTrigger, setScrollTrigger] = useState(0);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   // Auto-start with Lars asking the first question
   useEffect(() => {
@@ -53,27 +57,6 @@ export default function LarsCoach({ open, onClose }: { open: boolean; onClose: (
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     });
   }, [messages.length, sending, open, scrollTrigger]);
-
-  useEffect(() => {
-    function onMove(e: MouseEvent) {
-      if (!resizing || !start) return;
-      const dx = e.clientX - start.x;
-      const dy = e.clientY - start.y;
-      setSize({ w: Math.max(420, start.w + dx), h: Math.max(320, start.h + dy) });
-    }
-    function onUp() {
-      setResizing(false);
-      setStart(null);
-    }
-    if (resizing) {
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
-    }
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [resizing, start]);
 
   async function gatherContext(): Promise<string> {
     try {
@@ -235,87 +218,271 @@ export default function LarsCoach({ open, onClose }: { open: boolean; onClose: (
     }
   }
 
+  const appendTranscriptionText = (text: string) => {
+    const trimmed = text?.trim();
+    if (!trimmed) return;
+    setInput((prev) => {
+      if (!prev) return trimmed;
+      const needsSpace = /\s$/.test(prev) ? '' : ' ';
+      return `${prev}${needsSpace}${trimmed}`;
+    });
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  };
+
+  const cleanupMediaStream = () => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+  };
+
+  const stopActiveRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop();
+    } else {
+      cleanupMediaStream();
+    }
+  };
+
+  const transcribeAudio = async (blob: Blob) => {
+    setIsTranscribing(true);
+    setVoiceError(null);
+    try {
+      const formData = new FormData();
+      formData.append('audio', blob, 'voice-input.webm');
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || 'Failed to transcribe audio.');
+      }
+      appendTranscriptionText(String(json.text || '').trim());
+    } catch (err: any) {
+      setVoiceError(err?.message || 'Voice transcription failed.');
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  const handleToggleRecording = async () => {
+    if (isTranscribing) return;
+    if (isRecording) {
+      setIsRecording(false);
+      stopActiveRecording();
+      return;
+    }
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+      setVoiceError('Voice recording is not available in this environment.');
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof window.MediaRecorder === 'undefined') {
+      setVoiceError('Microphone recording is not supported in this browser yet.');
+      return;
+    }
+    try {
+      setVoiceError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onstop = async () => {
+        cleanupMediaStream();
+        setIsRecording(false);
+        const chunks = audioChunksRef.current.splice(0);
+        if (chunks.length === 0) return;
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        await transcribeAudio(blob);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch (err: any) {
+      console.error('Microphone access failed', err);
+      cleanupMediaStream();
+      setIsRecording(false);
+      setVoiceError(
+        err?.name === 'NotAllowedError'
+          ? 'Microphone permission was denied.'
+          : 'Unable to access the microphone.'
+      );
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      stopActiveRecording();
+      cleanupMediaStream();
+    };
+  }, []);
+
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[1000]"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 p-4"
       onClick={onClose}
       style={{ pointerEvents: "auto" }}
     >
-      {/* Window */}
+      {/* Modal */}
       <div
-        className="fixed z-[1001] rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 bg-gradient-to-br from-[#00E5FF]/20 to-[#FF2D96]/20 backdrop-blur-md shadow-2xl p-3 flex flex-col"
+        className="relative w-full max-w-3xl max-h-[90vh] rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-2xl flex flex-col"
         style={{
-          left: "50%",
-          top: "12px",
-          transform: "translateX(-50%)",
-          width: typeof window !== "undefined" && window.innerWidth < 640 ? "calc(100vw - 16px)" : size.w,
-          height: typeof window !== "undefined" && window.innerHeight < 720 ? "75vh" : size.h
+          height: typeof window !== "undefined" && window.innerHeight < 720 ? "85vh" : "80vh"
         }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--foreground)]/10">
           <div className="flex items-center gap-2">
             <div className="h-6 w-6 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
-            <div className="text-sm font-semibold">Lars</div>
+            <div className="text-sm font-semibold text-[var(--foreground)]">Lars</div>
           </div>
+          <button
+            onClick={onClose}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--foreground)]/60 hover:text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
+            aria-label="Close"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0">
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 min-h-0">
           {messages.length === 0 && (
-            <div className="text-xs text-[var(--foreground)]/60">Lars will ask you a quick question about this lesson to get you explaining.</div>
+            <div className="text-xs text-[var(--foreground)]/60 text-center py-4">
+              Lars will ask you a quick question about this lesson to get you explaining.
+            </div>
           )}
           {messages.map((m, i) => (
             <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
-              <div className="max-w-[80%]">
-                <div className="text-[10px] text-[var(--foreground)]/60 mb-1 ml-1">{m.role === "user" ? "You" : "Lars"}</div>
-                <div className={m.role === "user" ? "rounded-xl bg-[var(--accent-cyan)]/20 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--accent-cyan)]/30" : "rounded-xl bg-[var(--background)]/80 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--foreground)]/10"}>
-                  {m.role === "assistant" ? (
-                    <LessonBody body={sanitizeLessonBody(String(m.content || ""))} />
-                  ) : (
-                    <span>{m.content}</span>
-                  )}
+              {m.role === "user" ? (
+                <div 
+                  className="chat-bubble-user max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10"
+                >
+                  <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
+                    {m.content}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div 
+                  className="chat-bubble-assistant max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10"
+                >
+                  <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
+                    <LessonBody body={sanitizeLessonBody(String(m.content || ""))} />
+                  </div>
+                </div>
+              )}
             </div>
           ))}
           <div ref={messagesEndRef} />
         </div>
 
         {/* Input */}
-        <div className="mt-2 flex items-center gap-2 flex-shrink-0">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") sendMessage(); }}
-            placeholder="Explain it to Lars…"
-            className="flex-1 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
-          />
-          <button
-            onClick={askNewQuestion}
-            disabled={sending}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-[var(--foreground)] hover:bg-[var(--background)]/90 disabled:opacity-60 transition-colors"
-            title="Ask about something else"
+        <div className="px-6 py-4 border-t border-[var(--foreground)]/10">
+          <div 
+            className="chat-input-container flex items-center gap-2 px-4 py-2 border border-[var(--foreground)]/10 overflow-hidden"
+            style={{ 
+              boxShadow: 'none',
+              borderRadius: '1.5rem',
+            }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M5 12h14M12 5l7 7-7 7"/>
-            </svg>
-          </button>
-          <button
-            onClick={sendMessage}
-            disabled={sending}
-            className="inline-flex h-9 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 text-sm font-medium !text-white hover:opacity-95 disabled:opacity-60 disabled:!text-white"
-            style={{ color: "white" }}
-          >
-            {sending ? "Sending…" : "Send"}
-          </button>
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value);
+                // Auto-resize textarea
+                if (inputRef.current) {
+                  inputRef.current.style.height = 'auto';
+                  inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
+              placeholder="Explain it to Lars…"
+              disabled={sending}
+              className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden"
+              style={{ 
+                boxShadow: 'none', 
+                padding: '0.25rem 0.5rem', 
+                minHeight: '1.5rem', 
+                maxHeight: '120px', 
+                lineHeight: '1.5rem', 
+                borderRadius: '0', 
+                backgroundColor: 'transparent' 
+              }}
+              rows={1}
+            />
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleToggleRecording}
+                disabled={sending || isTranscribing}
+                aria-pressed={isRecording}
+                title={isRecording ? "Stop recording" : "Record voice message"}
+                className={`unified-button transition-colors flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10 ${
+                  isRecording
+                    ? 'text-[#FFB347] border-[#FFB347]/60'
+                    : ''
+                } disabled:opacity-50`}
+                style={{ boxShadow: 'none' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 15c1.66 0 3-1.34 3-3V7a3 3 0 0 0-6 0v5c0 1.66 1.34 3 3 3z" />
+                  <path d="M19 11v1a7 7 0 0 1-14 0v-1" />
+                  <path d="M12 19v3" />
+                </svg>
+              </button>
+              <button
+                onClick={askNewQuestion}
+                disabled={sending}
+                className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full"
+                style={{ boxShadow: 'none' }}
+                title="Ask about something else"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+              </button>
+              <button
+                onClick={sendMessage}
+                disabled={sending || !input.trim()}
+                className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border"
+                style={{ boxShadow: 'none' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          {(voiceError || isRecording || isTranscribing) && (
+            <p className={`mt-2 text-[11px] ${voiceError ? 'text-[#FF8A8A]' : 'text-[var(--foreground)]/60'}`}>
+              {voiceError
+                ? voiceError
+                : isRecording
+                  ? 'Recording… tap the mic to stop.'
+                  : 'Transcribing voice...'}
+            </p>
+          )}
         </div>
       </div>
     </div>
   );
 }
-
-

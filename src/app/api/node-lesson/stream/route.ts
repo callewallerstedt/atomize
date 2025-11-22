@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
-import { extractLessonMetadata, extractQuizSection, extractPracticeProblems } from "@/lib/lessonFormat";
-import type { LessonMetadata } from "@/types/lesson";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function POST(req: Request) {
   try {
@@ -27,7 +25,7 @@ export async function POST(req: Request) {
     const otherLessonsMeta = Array.isArray(body.otherLessonsMeta) ? body.otherLessonsMeta : [];
     const courseTopics: string[] = Array.isArray(body.courseTopics) ? body.courseTopics.slice(0, 200) : [];
     const languageName = String(body.languageName || "");
-    const mode = String(body.mode || ""); // "simplify" to rewrite easier
+    const mode = String(body.mode || "");
 
     if (!topic || lessonsMeta.length === 0) {
       return NextResponse.json({ ok: false, error: "Missing topic or lessonsMeta" }, { status: 400 });
@@ -37,7 +35,7 @@ export async function POST(req: Request) {
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    // ---- System prompt: strict, adaptive, in-depth, render-safe Markdown ----
+    // Same system prompt as non-streaming version
     const system = [
       "You produce ONE comprehensive GitHub Flavored Markdown lesson that teaches the assigned topic from zero knowledge to problem-solving ability.",
       "",
@@ -85,7 +83,6 @@ export async function POST(req: Request) {
       mode === "simplify" ? "If mode is simplify, keep scope identical but rewrite explanations to be easier, without changing the quiz meaning." : ""
     ].filter(Boolean).join("\n");
 
-    // ---- Context payload to guide content and avoid overlap ----
     const context = [
       "=".repeat(50),
       `TOPIC TO TEACH: ${topic}`,
@@ -105,50 +102,46 @@ export async function POST(req: Request) {
         : ""
     ].filter(Boolean).join("\n\n");
 
-    const completion = await client.chat.completions.create({
+    const stream = await client.chat.completions.create({
       model: "gpt-4o",
       messages: [
         { role: "system", content: system },
         { role: "user", content: context }
       ],
-      temperature: 0.5, // more deterministic pedagogy
-      max_tokens: 12000
+      temperature: 0.5,
+      max_tokens: 12000,
+      stream: true,
     });
 
-    const content = completion.choices[0]?.message?.content?.trim() || "";
-    if (!content) {
-      return NextResponse.json({ ok: false, error: "Empty model response" }, { status: 502 });
-    }
-
-    // ---- Simple body extraction ----
-    // Preserve newlines; only strip disallowed control chars (keep \n \r \t)
-    const sanitizeString = (value: string): string =>
-      value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
-
-    const bodyMarkdown = sanitizeString(content);
-    const derivedTitle = String(target.title || topic);
-
-    // Optional KaTeX validation if available
-    if (bodyMarkdown) {
-      const { validateKatexBlocks } = await import("@/lib/validateMath");
-      const result = validateKatexBlocks(bodyMarkdown);
-      if (!result.ok) {
-        return NextResponse.json({ ok: false, error: `Invalid KaTeX: ${result.errors[0] || "unknown error"}` }, { status: 422 });
-      }
-    }
-
-    // Return as-is; JSON will escape newlines, the client must decode
-    return NextResponse.json({
-      ok: true,
-      data: {
-        title: derivedTitle,
-        body: bodyMarkdown,
-        quiz: [],
-        metadata: null
+    const encoder = new TextEncoder();
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const chunk of stream) {
+            const content = chunk.choices[0]?.delta?.content || "";
+            if (content) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "text", content })}\n\n`));
+            }
+          }
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done" })}\n\n`));
+          controller.close();
+        } catch (error: any) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", error: error?.message || "Streaming error" })}\n\n`));
+          controller.close();
+        }
       },
-      raw: content
+    });
+
+    return new Response(readable, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
     });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err?.message || "Unknown error" }, { status: 500 });
   }
 }
+
+

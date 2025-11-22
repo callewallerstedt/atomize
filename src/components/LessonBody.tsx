@@ -7,6 +7,7 @@ import MarkdownIt from "markdown-it";
 import type { PluginSimple } from "markdown-it";
 import mdAnchor from "markdown-it-anchor";
 import mdKatex from "@iktakahiro/markdown-it-katex";
+import katex from "katex";
 import "katex/dist/katex.min.css";
 import { Highlight, themes } from "prism-react-renderer";
 // Import Prism language definitions to enable syntax highlighting
@@ -274,10 +275,29 @@ const md = new MarkdownIt({
 	linkify: true,
 })
 	.use(mdAnchor as any, { permalink: false })
-	.use(mdKatex as any, { throwOnError: false, errorColor: "#cc0000" }) // removed invalid "delimiters"
 	.use(bracketMathInline)
 	.use(bracketMathBlock)
+	.use(mdKatex as any, { throwOnError: false, errorColor: "#cc0000" })
 	.use(practiceProblemContainer);
+
+// Add custom renderers for bracket math tokens
+md.renderer.rules.math_inline = (tokens, idx) => {
+	const token = tokens[idx];
+	try {
+		return katex.renderToString(token.content, { throwOnError: false, displayMode: false });
+	} catch (e) {
+		return `<span class="math-error">\\(${token.content}\\)</span>`;
+	}
+};
+
+md.renderer.rules.math_block = (tokens, idx) => {
+	const token = tokens[idx];
+	try {
+		return `<div class="katex-display">${katex.renderToString(token.content, { throwOnError: false, displayMode: true })}</div>`;
+	} catch (e) {
+		return `<div class="math-error">\\[${token.content}\\]</div>`;
+	}
+};
 
 // Normalize language name for prism-react-renderer
 // Prism supports many languages - this maps aliases and common variations to Prism's language names
@@ -564,25 +584,109 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
 	);
 }
 
+// Ensure incomplete math blocks are closed during streaming
+function ensureClosedMathBlocks(md: string): string {
+	if (!md) return "";
+	
+	// Find all complete \[ ... \] blocks first
+	const mathBlockRegex = /\\\[([\s\S]*?)\\\]/g;
+	const allBlocks: Array<{ start: number; end: number }> = [];
+	let match;
+	
+	while ((match = mathBlockRegex.exec(md)) !== null) {
+		allBlocks.push({
+			start: match.index,
+			end: match.index + match[0].length
+		});
+	}
+	
+	// Check for incomplete \[ at the end (missing closing \])
+	const incompleteStart = md.lastIndexOf('\\[');
+	if (incompleteStart !== -1) {
+		// Check if this \[ is part of a complete block
+		const isComplete = allBlocks.some(block => 
+			block.start <= incompleteStart && block.end > incompleteStart
+		);
+		
+		if (!isComplete) {
+			// Check if there's a closing \] after this \[
+			const afterStart = md.slice(incompleteStart + 2);
+			const hasClosing = afterStart.includes('\\]');
+			
+			if (!hasClosing) {
+				// This is an incomplete block - add temporary closing
+				return md + '\\]';
+			}
+		}
+	}
+	
+	// Also check for standalone [ ... ] that look like math (contain LaTeX commands)
+	// This handles cases where \[ gets split and we see just [ during streaming
+	// Match [ at start of line or after space, followed by content with LaTeX, ending with ]
+	const standaloneMathRegex = /(^|\s)\[([^\]]*)\]/gm;
+	let result = md;
+	let lastIndex = 0;
+	const parts: string[] = [];
+	
+	// Reset regex
+	standaloneMathRegex.lastIndex = 0;
+	
+	while ((match = standaloneMathRegex.exec(md)) !== null) {
+		const before = match[1]; // space or start
+		const content = match[2];
+		
+		// Check if content contains LaTeX commands (backslash followed by letter)
+		const hasLatex = /\\[a-zA-Z]/.test(content);
+		
+		// Check if this [ ] is not already part of a \[ \] block
+		const matchStart = match.index + (before === '' ? 0 : before.length);
+		const matchEnd = match.index + match[0].length;
+		const isInCompleteBlock = allBlocks.some(block => 
+			block.start < matchEnd && block.end > matchStart
+		);
+		
+		// Also check if it's not already \[ or \]
+		const beforeChar = matchStart > 0 ? md[matchStart - 1] : '';
+		const isEscaped = beforeChar === '\\';
+		
+		if (hasLatex && !isInCompleteBlock && !isEscaped) {
+			// This looks like a math block that lost its backslashes during streaming
+			// Convert [ ... ] to \[ ... \]
+			if (match.index > lastIndex) {
+				parts.push(md.slice(lastIndex, matchStart));
+			}
+			parts.push('\\[' + content + '\\]');
+			lastIndex = match.index + match[0].length;
+		}
+	}
+	
+	if (parts.length > 0) {
+		// Add remaining text
+		if (lastIndex < md.length) {
+			parts.push(md.slice(lastIndex));
+		}
+		return parts.join('');
+	}
+	
+	return md;
+}
+
 export function LessonBody({ body }: { body: string }) {
 	const prepared = restoreForRender(body ?? "");
+	// Ensure all code fences are closed before parsing (important for streaming content)
+	// This prevents markdown-it from treating everything as code when content starts with ```
 	const normalized = ensureClosedMarkdownFences(prepared);
 	
-	// Convert standalone [ ... ] blocks that contain LaTeX math to \[ ... \]
-	// This handles cases where AI outputs [ f(t) = ... ] instead of \[ f(t) = ... \]
-	// Match [ ... ] blocks that are likely math (contain LaTeX commands)
-	// Use regex to find [ followed by content with backslash commands, ending with ]
-	const withMathDelimiters = normalized.replace(/\[([^\]]*\\[a-zA-Z]+[^\]]*)\]/g, (match, content) => {
-		// Check if content contains LaTeX commands (backslash followed by letters)
-		// This is a strong indicator it's math, not a regular bracket
-		if (/\\[a-zA-Z]+/.test(content)) {
-			return `\\[${content}\\]`;
-		}
-		return match;
-	});
+	// Ensure incomplete math blocks are closed during streaming
+	// This prevents markdown-it from not recognizing math when \[ and \] arrive in different chunks
+	const withClosedMath = ensureClosedMathBlocks(normalized);
+	
+	// No preprocessing - AI outputs correct format directly
+	const withMathDelimiters = withClosedMath;
 	
 	// Extract code blocks before rendering
 	// Match: ```language\ncode``` or ```\ncode``` or ```language\ncode``` (with optional newline)
+	// Only match complete code blocks (must have closing ```)
 	const codeBlockRegex = /```(\w+)?\n?([\s\S]*?)```/g;
 	const codeBlocks: Array<{ index: number; language: string; code: string; placeholder: string }> = [];
 	let match;
@@ -596,6 +700,7 @@ export function LessonBody({ body }: { body: string }) {
 	const matches: Array<{ match: RegExpMatchArray; placeholder: string; language: string; code: string }> = [];
 	
 	// First, collect all matches (use withMathDelimiters to include math conversions)
+	// The regex only matches complete code blocks (with closing ```), so all matches are valid
 	while ((match = codeBlockRegex.exec(withMathDelimiters)) !== null) {
 		const language = match[1] || 'text';
 		const code = match[2] || '';

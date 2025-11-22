@@ -88,8 +88,13 @@ export async function POST(req: Request) {
     let data: any = {};
     try {
       data = JSON.parse(content);
-    } catch {
-      data = {};
+      // Validate required fields
+      if (!data.overview_child || !Array.isArray(data.lessonsMeta)) {
+        return NextResponse.json({ ok: false, error: "Invalid response format: missing required fields" }, { status: 500 });
+      }
+    } catch (e: any) {
+      console.error("[node-plan] Failed to parse response:", e, "Content:", content);
+      return NextResponse.json({ ok: false, error: `Failed to parse lesson plan: ${e?.message || "Invalid JSON"}` }, { status: 500 });
     }
     return NextResponse.json({ ok: true, data });
   } catch (err: any) {

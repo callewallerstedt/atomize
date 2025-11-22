@@ -428,7 +428,7 @@ function CourseExamSnipeInner() {
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
       <div className="mx-auto max-w-4xl px-6 py-20">
         {/* Analysis Results Header */}
-        <div className="mb-6 rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 backdrop-blur-sm p-6">
+        <div className="mb-6 rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 backdrop-blur-sm p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-xl font-bold text-[var(--foreground)]">{examSnipe.courseName}</h2>
@@ -438,7 +438,7 @@ function CourseExamSnipeInner() {
             </div>
             <button
               onClick={() => router.push(`/subjects/${slug}`)}
-              className="rounded-lg bg-[var(--background)]/60 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/80 transition-colors border border-[var(--accent-cyan)]/20"
+              className="rounded-lg bg-[var(--background)]/60 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/80 transition-colors border border-[var(--foreground)]/20"
             >
               Back to Course
             </button>
@@ -447,7 +447,7 @@ function CourseExamSnipeInner() {
           {examSnipe.fileNames.length > 0 && (
             <div className="mb-4 text-xs text-[var(--foreground)]/60 flex flex-wrap gap-2">
               {examSnipe.fileNames.map((name, idx) => (
-                <span key={`${name}-${idx}`} className="rounded-full border border-[var(--accent-cyan)]/20 bg-[var(--background)]/70 px-3 py-1">
+                <span key={`${name}-${idx}`} className="rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-3 py-1">
                   {name}
                 </span>
               ))}
@@ -466,7 +466,7 @@ function CourseExamSnipeInner() {
           </div>
 
           {results.gradeInfo && (
-            <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--accent-cyan)]/20 mb-4">
+            <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--foreground)]/20 mb-4">
               <div className="text-sm font-semibold text-[var(--foreground)] mb-2">Grade Requirements</div>
               <div className="text-sm text-[var(--foreground)]">
                 {results.gradeInfo.split(',').map((grade: string, idx: number) => (
@@ -479,7 +479,7 @@ function CourseExamSnipeInner() {
           )}
 
           {results.patternAnalysis && (
-            <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--accent-cyan)]/20">
+            <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--foreground)]/20">
               <div className="text-sm font-semibold text-[var(--foreground)] mb-2">Pattern Analysis</div>
               <div className="text-sm text-[var(--foreground)] leading-relaxed mb-4">
                 {results.patternAnalysis}
@@ -893,7 +893,7 @@ function CourseExamSnipeInner() {
         </div>
 
         {/* Study Strategy */}
-        <div className="mt-6 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 p-6">
+        <div className="mt-6 rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/60 p-6">
           <h3 className="text-base font-semibold text-[var(--foreground)] mb-3">Study Strategy</h3>
           <p className="text-sm text-[var(--foreground)] mb-4">
             Move through the concepts in order—they build from foundational understanding to advanced exam execution.
@@ -906,7 +906,7 @@ function CourseExamSnipeInner() {
         </div>
 
         {/* Footer Tips */}
-        <div className="mt-4 rounded-lg bg-[var(--background)]/60 border border-[var(--accent-cyan)]/20 p-4">
+        <div className="mt-4 rounded-lg bg-[var(--background)]/60 border border-[var(--foreground)]/20 p-4">
           <div className="text-xs text-[var(--foreground)]/70">
             <strong className="text-[var(--foreground)]">Pro Tips:</strong><br/>
             • Begin with the foundation concept to anchor the big picture<br/>

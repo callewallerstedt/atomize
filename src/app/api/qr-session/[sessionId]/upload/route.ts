@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, addImagesToSession, deleteSession } from "@/lib/qr-session-store";
+import { getSession, addImagesToSession, deleteSession, getAllSessions } from "@/lib/qr-session-store";
 
 export async function POST(
   req: NextRequest,
@@ -7,9 +7,26 @@ export async function POST(
 ) {
   try {
     const { sessionId } = await params;
+    
+    if (!sessionId) {
+      return NextResponse.json(
+        { error: "Session ID is required" },
+        { status: 400 }
+      );
+    }
+    
+    console.log("Upload request for session:", sessionId);
     const session = getSession(sessionId);
+    
+    console.log("Session found:", !!session);
+    if (session) {
+      console.log("Session expires at:", new Date(session.expiresAt).toISOString());
+      console.log("Current time:", new Date().toISOString());
+    }
 
     if (!session) {
+      const allSessions = getAllSessions();
+      console.error("Session not found in store. Available sessions:", allSessions.map(s => s.id));
       return NextResponse.json(
         { error: "Session not found" },
         { status: 404 }

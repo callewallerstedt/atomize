@@ -27,9 +27,10 @@ export async function POST(req: Request) {
       "Return STRICT JSON with this shape:",
       "{ name: string; overview: string; insertPath: string[] }",
       "Rules:",
-      "- name: concise (2–5 words).",
-      "- overview: 2–4 sentences describing the topic in context; KaTeX math allowed ($...$, $$...$$).",
-      "- insertPath: array of ancestor topic names from root to the parent where this topic should be placed. Use existing names from the provided tree. Return [] to place at top-level.",
+      "- name: REQUIRED. Must be a concise topic name (2–5 words). This field is MANDATORY and must never be empty or missing.",
+      "- overview: REQUIRED. Must be 2–4 sentences describing the topic in context; KaTeX math allowed ($...$, $$...$$).",
+      "- insertPath: REQUIRED. Must be an array of ancestor topic names from root to the parent where this topic should be placed. Use existing names from the provided tree. Return [] to place at top-level.",
+      "CRITICAL: The 'name' field is REQUIRED and must always be present in your response. Never return a response without a name field.",
     ].join("\n");
 
     // Build Responses API input with files + text
@@ -52,15 +53,41 @@ export async function POST(req: Request) {
 
     const resp = await client.responses.create({
       model: "gpt-4o-mini",
-      instructions: system + "\nReturn STRICT JSON only: { name: string; overview: string; insertPath: string[] }.",
+      instructions: system + "\n\nCRITICAL: Return STRICT JSON only with ALL required fields: { name: string; overview: string; insertPath: string[] }. The 'name' field is MANDATORY and must never be empty.",
       input: [ { role: "user", content: blocks } ],
       temperature: 0.3,
       max_output_tokens: 700,
     });
 
-    const content = resp.output_text || "{}";
+    let content = resp.output_text || "{}";
+    
+    // Strip markdown code blocks if present
+    content = content.trim();
+    if (content.startsWith("```")) {
+      // Remove opening ```json or ```
+      content = content.replace(/^```(?:json)?\s*/i, "");
+      // Remove closing ```
+      content = content.replace(/\s*```$/g, "");
+      content = content.trim();
+    }
+    
     let data: any = {};
-    try { data = JSON.parse(content); } catch { data = {}; }
+    try {
+      data = JSON.parse(content);
+      // Validate required fields
+      if (!data.name || typeof data.name !== 'string') {
+        return NextResponse.json({ ok: false, error: "Invalid response format: missing or invalid 'name' field" }, { status: 500 });
+      }
+      if (!data.overview || typeof data.overview !== 'string') {
+        return NextResponse.json({ ok: false, error: "Invalid response format: missing or invalid 'overview' field" }, { status: 500 });
+      }
+      if (!Array.isArray(data.insertPath)) {
+        return NextResponse.json({ ok: false, error: "Invalid response format: missing or invalid 'insertPath' field" }, { status: 500 });
+      }
+    } catch (e: any) {
+      console.error("[topic-suggest] Failed to parse response:", e, "Content:", content);
+      return NextResponse.json({ ok: false, error: `Failed to parse topic suggestion: ${e?.message || "Invalid JSON"}` }, { status: 500 });
+    }
     return NextResponse.json({ ok: true, data });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err?.message || "Unknown error" }, { status: 500 });

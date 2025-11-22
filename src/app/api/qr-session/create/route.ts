@@ -7,7 +7,8 @@ export async function POST(req: NextRequest) {
     const sessionId = randomUUID();
     const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
 
-    createSession(sessionId, expiresAt);
+    const session = createSession(sessionId, expiresAt);
+    console.log("Created QR session:", sessionId, "expires at:", new Date(expiresAt).toISOString());
 
     // Get the origin from the request
     const origin = req.headers.get("origin") || req.headers.get("host") || "localhost:25565";

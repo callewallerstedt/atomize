@@ -11,6 +11,7 @@ export type TopicGeneratedLesson = {
   title: string;
   body: string;
   quiz: { question: string; answer?: string }[];
+  practiceProblems?: Array<{ problem: string; solution: string }>; // Practice problems with solutions
   // Optional persisted quiz state
   userAnswers?: string[];
   quizResults?: { [index: number]: QuizResult };

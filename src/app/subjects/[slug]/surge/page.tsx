@@ -11,6 +11,7 @@ import remarkGfm from "remark-gfm";
 import "katex/dist/katex.min.css";
 import { LessonBody } from "@/components/LessonBody";
 import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
+import { extractQuizSection } from "@/lib/lessonFormat";
 import WordPopover from "@/components/WordPopover";
 import { ensureClosedMarkdownFences } from "@/lib/markdownFences";
 import {
@@ -166,117 +167,10 @@ type SurgePhase = "repeat" | "learn" | "quiz" | "complete";
 
 const PRACTICE_LOG_PREFIX = "atomicPracticeLog:";
 
-type LessonPart = { header: string; content: string };
-
 const TOPIC_SUGGESTION_TARGET = 4;
 const MIN_TOPIC_SUGGESTIONS = TOPIC_SUGGESTION_TARGET;
 
-function splitLessonContentIntoParts(fullMessage: string, fallbackHeader: string): LessonPart[] {
-  if (!fullMessage) return [];
-
-  const trySplit = (headerType: "h1" | "h2") => {
-    const headerRegex =
-      headerType === "h1"
-        ? /^#(?!#)\s+(.+)$/
-        : /^##(?!#)\s+(.+)$/;
-
-    const parts: LessonPart[] = [];
-    const lines = fullMessage.split("\n");
-
-    let currentHeader: string | null = null;
-    let currentContent: string[] = [];
-    let inFence = false;
-    let fenceChar: "`" | "~" | null = null;
-    let fenceLength = 0;
-
-    const ensureHeader = () => {
-      if (currentHeader === null) {
-        currentHeader = fallbackHeader || "Lesson";
-        currentContent = [];
-      }
-    };
-
-    const flushCurrent = () => {
-      if (currentHeader !== null && currentContent.length > 0) {
-        const content = currentContent.join("\n").trim();
-        if (content) {
-          parts.push({ header: currentHeader, content });
-        }
-      }
-    };
-
-    const fenceRegex = /^(\s*)(`{3,}|~{3,})/;
-
-    for (const line of lines) {
-      const trimmedLine = line.trim();
-      const fenceMatch = line.match(fenceRegex);
-      if (fenceMatch) {
-        const marker = fenceMatch[2];
-        const char = marker[0] as "`" | "~";
-        if (!inFence) {
-          inFence = true;
-          fenceChar = char;
-          fenceLength = marker.length;
-        } else if (fenceChar === char && marker.length >= fenceLength) {
-          inFence = false;
-          fenceChar = null;
-          fenceLength = 0;
-        }
-        ensureHeader();
-        currentContent.push(line);
-        continue;
-      }
-
-      if (inFence) {
-        ensureHeader();
-        currentContent.push(line);
-        continue;
-      }
-
-      const headerMatch = trimmedLine.match(headerRegex);
-      if (headerMatch) {
-        if (currentHeader !== null && currentContent.length > 0) {
-          const content = currentContent.join("\n").trim();
-          if (content) {
-            parts.push({ header: currentHeader, content });
-          }
-        }
-        currentHeader = headerMatch[1]?.trim() || fallbackHeader || "Lesson";
-        currentContent = [];
-        continue;
-      }
-
-      if (currentHeader === null && trimmedLine) {
-        currentHeader = fallbackHeader || "Lesson";
-        currentContent = [];
-      }
-
-      if (currentHeader !== null) {
-        currentContent.push(line);
-      }
-    }
-
-    flushCurrent();
-    return parts;
-  };
-
-  const h1Parts = trySplit("h1");
-  if (h1Parts.length > 0) {
-    return h1Parts;
-  }
-
-  const h2Parts = trySplit("h2");
-  if (h2Parts.length > 0) {
-    return h2Parts;
-  }
-
-  const trimmed = fullMessage.trim();
-  if (trimmed.length > 100) {
-    return [{ header: fallbackHeader || "Lesson", content: fullMessage }];
-  }
-
-  return [];
-}
+// Removed page splitting - lessons are now displayed as single continuous documents
 
 function extractTopicSuggestions(text: string, requiredCount = TOPIC_SUGGESTION_TARGET): string[] {
   const uniqueTopics: string[] = [];
@@ -537,124 +431,53 @@ function buildSurgeContext(
       lines.push("- NO dashes, NO bullets, NO markdown formatting - just the 4 TOPIC_SUGGESTION lines");
       lines.push("- If you write anything other than the 4 TOPIC_SUGGESTION lines, it will break the system");
     } else {
-      lines.push("⚡ SYNAPSE SURGE MODE — LEARN PHASE");
+      // LEARN phase teaching prompt (Surge) – prose-only, no quiz or practice questions in body
+      lines.push("You produce ONE comprehensive GitHub Flavored Markdown lesson that teaches the assigned topic from zero knowledge to problem-solving ability.");
       lines.push("");
-      lines.push("You are generating a structured lesson for a selected topic. Always follow these rules:");
+      lines.push("LENGTH:");
+      lines.push("- Minimum 3000 words of prose (explanations only). Target 4000–6000 if needed for full understanding.");
+      lines.push("- Do not count code blocks, LaTeX delimiters, JSON, or formatting.");
+      lines.push("- No filler. Use real explanatory depth.");
       lines.push("");
-      lines.push("====================================================");
-      lines.push("1. LESSON STRUCTURE");
-      lines.push("====================================================");
+      lines.push("OUTPUT:");
+      lines.push("- Output a single Markdown document only.");
+      lines.push("- The lesson body MUST NOT contain any explicit quiz section, numbered practice problem list, or unsolved questions.");
+      lines.push("- You may include fully worked examples (with both problem and solution) when they genuinely help understanding.");
       lines.push("");
-      lines.push("• Output a single Markdown document.");
-      lines.push("• CRITICAL: Create exactly 3–6 chapters using Markdown H1 headings. Every chapter MUST start with a line like '# Chapter 1: [Short Title]'. The leading '# ' is mandatory.");
-      lines.push("• Do NOT write plain text headings like 'Chapter 1: ...' without the '# ' prefix. That is incorrect and will break the system.");
-      lines.push("• Use H2/H3 for sections and subsections under each chapter.");
-      lines.push("• For every chapter and every H2/H3 section, write multiple full paragraphs (3–6 sentences each). Do NOT output only headings or bullet lists.");
-      lines.push("• Lists are allowed, but most of the lesson MUST be normal prose paragraphs, not lists.");
-      lines.push("• Include tables and LaTeX math when relevant.");
-      lines.push("• Code examples: ONLY include code examples if the topic is about programming, coding, or software development. Do NOT force code examples into non-coding subjects.");
-      lines.push("• Provide 3–5 worked examples with complete step-by-step solutions.");
-      lines.push("• Include practice problems using EXACTLY this format:");
+      lines.push("MARKDOWN RULES:");
+      lines.push("- Use headings: #, ##, ### only.");
+      lines.push("- Use blank lines around headings, lists, tables, code fences, and display math.");
+      lines.push("- Tables must use pipe-syntax.");
+      lines.push("- Code fences must specify language and be runnable.");
+      lines.push("- Math uses inline $...$ and display \\[ ... \\]. No environments (align etc.).");
+      lines.push("- No links, images, Mermaid, or HTML.");
       lines.push("");
-      lines.push(":::practice-problem");
-      lines.push("[problem text]");
-      lines.push(":::");
+      lines.push("PEDAGOGY:");
+      lines.push("- Assume zero prior knowledge. Define all symbols and notation when first used.");
+      lines.push("- Structure adaptively depending on the topic. No rigid template.");
+      lines.push("- Build from intuition → formal definitions → deeper understanding → applications.");
+      lines.push("- Include multiple worked examples if they genuinely help the topic. Each example must be complete and step-by-step.");
       lines.push("");
-      lines.push("[solution here, outside the box]");
+      lines.push("SYMBOL TABLE:");
+      lines.push("- At the very bottom, you may add a small Markdown table listing symbols, notations, or short concepts ONLY if the lesson introduced non-obvious symbols that students must keep track of.");
       lines.push("");
-      lines.push("====================================================");
-      lines.push("2. TONE AND CONTENT BOUNDARIES");
-      lines.push("====================================================");
+      lines.push("SCOPE:");
+      lines.push("- Stay strictly on the assigned topic.");
+      lines.push("- If course_context mentions a specific practice question, emphasize the method relevant to that question while still covering the full topic.");
       lines.push("");
-      lines.push("Do NOT include:");
-      lines.push("• Long intros");
-      lines.push("• Generic fluff (\"In this chapter we will explore…\")");
-      lines.push("• Meta commentary");
-      lines.push("• Philosophical filler");
-      lines.push("• Repeated definitions");
-      lines.push("• Academic padding");
-      lines.push("• Empty narrative text");
+      lines.push("LANGUAGE:");
+      if (courseLanguageName) {
+        lines.push(`- Write all lesson prose in ${courseLanguageName}.`);
+      } else {
+        lines.push("- Write all lesson prose in English.");
+      }
       lines.push("");
-      lines.push("Use clear, direct, beginner-friendly language:");
-      lines.push("• No prior knowledge assumed");
-      lines.push("• Define every technical term immediately");
-      lines.push("• Use concrete examples before abstract ideas");
-      lines.push("• Keep transitions short and functional");
-      lines.push("• Explain why each step is taken");
-      lines.push("");
-      lines.push("====================================================");
-      lines.push("3. LENGTH REQUIREMENTS");
-      lines.push("====================================================");
-      lines.push("");
-      lines.push("• At least 3000 words of actual prose.");
-      lines.push("• Maximum around 6000 words.");
-      lines.push("• If the topic needs more than 3000 words, continue naturally.");
-      lines.push("");
-      lines.push("====================================================");
-      lines.push("4. COURSE CONTEXT USAGE (MANDATORY)");
-      lines.push("====================================================");
-      lines.push("");
-      lines.push("You will receive COURSE CONTEXT with:");
-      lines.push("• course files");
-      lines.push("• course summary");
-      lines.push("• topic list");
-      lines.push("");
-      lines.push("You must:");
-      lines.push("• Match terminology and notation from the course files");
-      lines.push("• Base examples on course material when appropriate");
-      lines.push("• Connect custom topics to the course structure");
-      lines.push("• Reference related topics where useful");
-      lines.push("");
-      lines.push("====================================================");
-      lines.push("5. EXAM SNIPE INTEGRATION (MANDATORY)");
-      lines.push("====================================================");
-      lines.push("");
-      lines.push("You will receive EXAM SNIPE ANALYSIS.");
-      lines.push("");
-      lines.push("You must:");
-      lines.push("• Prioritize exam-tested concepts");
-      lines.push("• Build examples around common exam patterns");
-      lines.push("• Teach solutions in exam-style formats");
-      lines.push("• Highlight recurring exam structures");
-      lines.push("• Explain typical pitfalls and how to avoid them");
-      lines.push("");
-      lines.push("====================================================");
-      lines.push("6. TEACHING LOGIC");
-      lines.push("====================================================");
-      lines.push("");
-      lines.push("• Begin simple, increase difficulty gradually");
-      lines.push("• Break ideas into small steps");
-      lines.push("• Move from intuition → concept → technique → exam usage");
-      lines.push("• Always provide fully solved examples");
-      lines.push("• Never assume unmentioned prerequisites");
-      lines.push("");
-      lines.push("====================================================");
-      lines.push("7. WHAT NOT TO DO");
-      lines.push("====================================================");
-      lines.push("");
-      lines.push("• Do NOT suggest topics");
-      lines.push("• Do NOT ask for instructions");
-      lines.push("• Do NOT summarize the context");
-      lines.push("• Do NOT repeat the rules");
-      lines.push("• Do NOT switch languages unless told");
-      lines.push("• Do NOT include unverifiable claims");
-      lines.push("• Do NOT write chapter headings without a leading '# '. Always use '# Chapter X: [Title]' for chapter starts.");
-      lines.push("• Do NOT create fewer than 3 chapters or more than 6 chapters");
-      lines.push("• Do NOT include code examples unless the topic is about programming/coding");
-      lines.push("");
-      lines.push("====================================================");
-      lines.push("CONTEXT PROMPT");
-      lines.push("====================================================");
+      lines.push("FINAL RULE:");
+      lines.push("- If the prose is under 3000 words when finished, extend explanations or add more depth until requirements are satisfied.");
       lines.push("");
       lines.push("SURGE MODE ACTIVE FOR COURSE \"" + courseName + "\"");
       lines.push("CURRENT PHASE: LEARN");
       lines.push("TEACHING TOPIC: " + currentTopic);
-      lines.push("");
-      if (courseLanguageName) {
-        lines.push("Generate the lesson immediately in the language: " + courseLanguageName);
-      } else {
-        lines.push("Generate the lesson immediately. Detect the dominant language of the course materials and write in that language.");
-      }
       lines.push("");
       lines.push("Use:");
       lines.push("• COURSE CONTEXT");
@@ -909,10 +732,7 @@ export default function SurgePage() {
   const initialPhaseSetRef = useRef(false); // Track if initial phase has been set to prevent override
   const [dataLoaded, setDataLoaded] = useState(false);
   const [examSnipeLoaded, setExamSnipeLoaded] = useState(false);
-  const [lessonParts, setLessonParts] = useState<LessonPart[]>([]);
-  const [currentPartIndex, setCurrentPartIndex] = useState(0);
   const [showLessonCard, setShowLessonCard] = useState(false);
-  const currentPartIndexRef = useRef(0);
 
   const scrollLessonToTop = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -1342,12 +1162,6 @@ export default function SurgePage() {
   const buildLessonPayload = () => {
     const recordedLesson = sessionData.newTopicLesson?.trim();
     if (recordedLesson) return recordedLesson;
-
-    if (lessonParts.length > 0) {
-      return lessonParts
-        .map((part) => `# ${part.header}\n${part.content}`)
-        .join("\n\n");
-    }
 
     if (lastAssistantMessage.trim().length > 0) {
       return lastAssistantMessage;
@@ -1939,7 +1753,6 @@ export default function SurgePage() {
     setConversation([]);
     conversationRef.current = [];
     setCurrentQuestion("");
-    setLessonParts([]);
     setShowLessonCard(false);
     setShowTopicSelection(false);
     setShowCustomInput(false);
@@ -2297,66 +2110,8 @@ export default function SurgePage() {
                     newTopicLesson: fullMessage,
                   }));
                   
-                  const shouldAttemptSplit = /^#\s+/m.test(fullMessage) || fullMessage.length > 50 || fullMessage.includes("#");
-                  
-                  if (shouldAttemptSplit) {
-                    const fallbackHeaderTitle = activeTopic || currentTopic || "Lesson";
-                    const parts = splitLessonContentIntoParts(fullMessage, fallbackHeaderTitle);
-                    
-                    if (parts.length > 0) {
-                      const wasEmpty = lessonParts.length === 0;
-                      const refIdx = currentPartIndexRef.current;
-                      
-                      setLessonParts(parts);
-                      
-                      if (wasEmpty && refIdx === 0) {
-                        setCurrentPartIndex(0);
-                        currentPartIndexRef.current = 0;
-                      } else if (refIdx >= parts.length) {
-                        const lastIdx = parts.length - 1;
-                        setCurrentPartIndex(lastIdx);
-                        currentPartIndexRef.current = lastIdx;
-                      } else {
-                        setCurrentPartIndex(prev => {
-                          if (prev !== refIdx) {
-                            console.log("🔄 PAGE SWAP: Streaming update preserving user navigation - refIdx:", refIdx, "prev state:", prev, "new parts:", parts.length);
-                            return refIdx;
-                          }
-                          return prev;
-                        });
-                      }
-                      setShowLessonCard(true);
-                    } else if (fullMessage.length > 100) {
-                      const singlePart = [{ header: fallbackHeaderTitle, content: fullMessage }];
-                      const wasEmpty = lessonParts.length === 0;
-                      const refIdx = currentPartIndexRef.current;
-                      setLessonParts(singlePart);
-                      if (wasEmpty && refIdx === 0) {
-                        setCurrentPartIndex(0);
-                        currentPartIndexRef.current = 0;
-                      } else if (refIdx >= 0 && refIdx < singlePart.length) {
-                        setCurrentPartIndex(prev => prev !== refIdx ? refIdx : prev);
-                      } else {
-                        setCurrentPartIndex(0);
-                        currentPartIndexRef.current = 0;
-                      }
-                      setShowLessonCard(true);
-                    }
-                  } else if (fullMessage.length > 100) {
-                    const fallbackHeaderTitle = activeTopic || currentTopic || "Lesson";
-                    const singlePart = [{ header: fallbackHeaderTitle, content: fullMessage }];
-                    const wasEmpty = lessonParts.length === 0;
-                    const refIdx = currentPartIndexRef.current;
-                    setLessonParts(singlePart);
-                    if (wasEmpty && refIdx === 0) {
-                      setCurrentPartIndex(0);
-                      currentPartIndexRef.current = 0;
-                    } else if (refIdx >= 0 && refIdx < singlePart.length) {
-                      setCurrentPartIndex(prev => prev !== refIdx ? refIdx : prev);
-                    } else {
-                      setCurrentPartIndex(0);
-                      currentPartIndexRef.current = 0;
-                    }
+                  // Show lesson card when we have content (no page splitting)
+                  if (fullMessage.length > 100) {
                     setShowLessonCard(true);
                   }
                 }
@@ -2412,119 +2167,9 @@ export default function SurgePage() {
                   }
                 }
                 
-                // Final parse of lesson parts after streaming is complete
-                // Use currentTopic directly (set when topic is selected)
+                // Final parse - just ensure lesson card is shown
                 if (phase === "learn" && currentTopic && accumulated.length > 100) {
-                  const parts: Array<{ header: string; content: string }> = [];
-                  
-                  // Split by H1 markdown headers (# Chapter Title)
-                  // Use line-by-line parsing for more reliability
-                  const lines = accumulated.split('\n');
-                  let currentHeader: string | null = null;
-                  let currentContent: string[] = [];
-                  
-                  for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i];
-                    // Check if this is an H1 header: starts with # followed by space (not ##)
-                    // More precise check: line starts with exactly one # followed by space
-                    const trimmedLine = line.trim();
-                    if (trimmedLine.startsWith('# ') && !trimmedLine.startsWith('##')) {
-                      // Save previous part if we have one
-                      if (currentHeader !== null && currentContent.length > 0) {
-                        const content = currentContent.join('\n').trim();
-                        if (content) {
-                          parts.push({ header: currentHeader, content });
-                        }
-                      }
-                      // Start new part - extract header text (remove # and any leading/trailing spaces)
-                      currentHeader = trimmedLine.replace(/^#\s+/, '').trim();
-                      currentContent = [];
-                    } else if (currentHeader !== null) {
-                      // Add to current part (including empty lines to preserve formatting)
-                      currentContent.push(line);
-                    } else if (currentHeader === null && trimmedLine) {
-                      // Content before first header - start with topic name
-                      if (parts.length === 0) {
-                        // Get topic from closure or currentTopic state
-                        const topicForHeader = currentTopic || (conversationRef.current.find(msg => 
-                          msg.role === "user" && msg.content.includes("Generate a comprehensive lesson")
-                        )?.content.match(/Generate a comprehensive lesson on "(.+?)"/)?.[1] || "") || "Lesson";
-                        currentHeader = topicForHeader;
-                        currentContent = [line];
-                      }
-                    }
-                  }
-                  
-                  // Add final part
-                  if (currentHeader !== null && currentContent.length > 0) {
-                    const content = currentContent.join('\n').trim();
-                    if (content) {
-                      parts.push({ header: currentHeader, content });
-                    }
-                  }
-                  
-                  // Fallback: if no H1 headers found, try H2
-                  if (parts.length === 0) {
-                    currentHeader = null;
-                    currentContent = [];
-                    for (let i = 0; i < lines.length; i++) {
-                      const line = lines[i];
-                      if (line.match(/^##\s+/)) {
-                        if (currentHeader !== null && currentContent.length > 0) {
-                          const content = currentContent.join('\n').trim();
-                          if (content) {
-                            parts.push({ header: currentHeader, content });
-                          }
-                        }
-                        currentHeader = line.replace(/^##\s+/, '').trim();
-                        currentContent = [];
-                      } else if (currentHeader !== null) {
-                        currentContent.push(line);
-                      }
-                    }
-                    if (currentHeader !== null && currentContent.length > 0) {
-                      const content = currentContent.join('\n').trim();
-                      if (content) {
-                        parts.push({ header: currentHeader, content });
-                      }
-                    }
-                  }
-                  
-                  // Final fallback: treat entire message as one part
-                  if (parts.length === 0 && accumulated.length > 200) {
-                    parts.push({ header: currentTopic || "Lesson", content: accumulated });
-                  }
-                  
-                  if (parts.length > 0) {
-                    const wasEmpty = lessonParts.length === 0;
-                    // ALWAYS use the ref - it's the source of truth for user navigation
-                    const refIdx = currentPartIndexRef.current;
-                    
-                    setLessonParts(parts);
-                    // CRITICAL: NEVER reset index if user has navigated (refIdx > 0)
-                    // Only reset if this is the FIRST time (wasEmpty) AND ref is still 0
-                    if (wasEmpty && refIdx === 0) {
-                      // First time, no navigation yet - reset to 0
-                      setCurrentPartIndex(0);
-                      currentPartIndexRef.current = 0;
-                    } else if (refIdx >= parts.length) {
-                      // Out of bounds, go to last part
-                      const lastIdx = parts.length - 1;
-                      setCurrentPartIndex(lastIdx);
-                      currentPartIndexRef.current = lastIdx;
-                    } else {
-                      // User has navigated OR streaming update - ALWAYS preserve ref
-                      // This ensures user navigation is NEVER overwritten by streaming
-                      setCurrentPartIndex(prev => {
-                        if (prev !== refIdx) {
-                          console.log("🔄 PAGE SWAP: Final parse preserving user navigation - refIdx:", refIdx, "prev state:", prev, "new parts:", parts.length);
-                          return refIdx;
-                        }
-                        return prev;
-                      });
-                    }
-                    setShowLessonCard(true);
-                  }
+                  setShowLessonCard(true);
                 }
                 
                 return updated;
@@ -2604,9 +2249,6 @@ export default function SurgePage() {
     setConversation([]);
     conversationRef.current = [];
     setCurrentQuestion("");
-    setLessonParts([]);
-    setCurrentPartIndex(0);
-    currentPartIndexRef.current = 0;
     setShowLessonCard(false);
     // Reset trigger so we can send a new message
     topicSuggestionTriggered.current = false;
@@ -2628,9 +2270,6 @@ export default function SurgePage() {
       // Also reset lesson state to ensure clean start
       setConversation([userMessage, { role: "assistant", content: "" }]);
       conversationRef.current = [userMessage, { role: "assistant", content: "" }];
-      setLessonParts([]);
-      setCurrentPartIndex(0);
-      currentPartIndexRef.current = 0;
       setShowLessonCard(false);
       
       // Send with the updated context directly and the topic to prevent topic suggestions
@@ -2646,54 +2285,7 @@ export default function SurgePage() {
     }
   };
 
-  // Keyboard navigation for lesson parts
-  useEffect(() => {
-    if (!showLessonCard || lessonParts.length === 0) return;
-
-    function handleKeyDown(e: KeyboardEvent) {
-      // Only handle arrow keys when lesson card is visible and not typing in an input
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
-
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        const currentIdx = currentPartIndexRef.current;
-        if (currentIdx > 0) {
-          const newIdx = currentIdx - 1;
-          currentPartIndexRef.current = newIdx;
-          setCurrentPartIndex(newIdx);
-          scrollLessonToTop();
-          console.log("🔄 PAGE SWAP: ArrowLeft key - navigating to part", newIdx + 1, "of", lessonParts.length, "| ref:", newIdx, "state:", newIdx);
-        }
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        const currentIdx = currentPartIndexRef.current;
-        if (currentIdx < lessonParts.length - 1) {
-          const newIdx = currentIdx + 1;
-          currentPartIndexRef.current = newIdx;
-          setCurrentPartIndex(newIdx);
-          scrollLessonToTop();
-          console.log("🔄 PAGE SWAP: ArrowRight key - navigating to part", newIdx + 1, "of", lessonParts.length, "| ref:", newIdx, "state:", newIdx);
-        } else {
-          // Last part, move to quiz phase - but only if not sending
-          if (!sending && phase === "learn") {
-            setTimeout(() => {
-              setPhase("quiz");
-              setConversation([]);
-              conversationRef.current = [];
-              setCurrentQuestion("");
-            }, 0);
-          }
-        }
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [showLessonCard, lessonParts.length, phase, scrollLessonToTop]);
+  // Removed keyboard navigation for lesson parts - lessons are now single continuous documents
 
   // Hide hover effect and cursor on scroll
   useEffect(() => {
@@ -3922,36 +3514,15 @@ export default function SurgePage() {
             )}
 
             {/* Lesson Card View */}
-            {phase === "learn" && showLessonCard && lessonParts.length > 0 ? (
-              <div className="space-y-4" key={`lesson-card-${currentPartIndex}`}>
+            {phase === "learn" && showLessonCard ? (
+              <div className="space-y-4">
                 <div 
                   className="rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 p-6 min-h-[500px] flex flex-col lesson-content surge-lesson-card" 
-                  key={`lesson-part-${currentPartIndex}`}
                   data-topic={currentTopic}
-                  data-part-index={currentPartIndex}
-                  data-total-parts={lessonParts.length}
                 >
-                  {/* Part Header */}
-                  <div className="mb-4 pb-4 border-b border-[var(--foreground)]/10">
-                    <div className="text-xs text-[var(--foreground)]/50 mb-1">
-                      Part {currentPartIndex + 1} of {lessonParts.length}
-                    </div>
-                    <h2 className="text-xl font-bold text-[var(--foreground)]">
-                      {(() => {
-                        const part = lessonParts[currentPartIndex];
-                        if (!part) {
-                          console.log("🔄 PAGE SWAP: Render - currentPartIndex:", currentPartIndex, "lessonParts.length:", lessonParts.length, "ref:", currentPartIndexRef.current);
-                          return "Loading...";
-                        }
-                        return part.header?.replace(/^Chapter\s+\d+:\s*/i, '').trim() || "Loading...";
-                      })()}
-                    </h2>
-                  </div>
-                  
-                  {/* Part Content */}
+                  {/* Lesson Content */}
                   <div 
                     className="flex-1 overflow-y-auto mb-4 lesson-content relative"
-                    key={`lesson-content-${currentPartIndex}`}
                     style={{ cursor: (isScrolling || cursorHidden) ? 'none' : (hoverWordRects.length > 0 ? 'pointer' : 'default') }}
                     onClick={(e) => {
                       try {
@@ -4141,7 +3712,7 @@ export default function SurgePage() {
                     }}
                     onMouseLeave={() => setHoverWordRects([])}
                   >
-                    <LessonBody key={`lesson-body-${currentPartIndex}`} body={sanitizeLessonBody(lessonParts[currentPartIndex]?.content || "")} />
+                    <LessonBody body={sanitizeLessonBody(lastAssistantMessage || conversationRef.current.find(msg => msg.role === "assistant")?.content || "")} />
                     <style jsx global>{`
                       .lesson-content p { margin: 0.45rem 0 !important; }
                       .lesson-content ul, .lesson-content ol { margin: 0.4rem 0 !important; }
@@ -4150,68 +3721,21 @@ export default function SurgePage() {
                     `}</style>
                   </div>
                   
-                  {/* Navigation */}
-                  <div className="flex items-center justify-between pt-4 border-t border-[var(--foreground)]/10">
+                  {/* Start Quiz Button */}
+                  <div className="flex items-center justify-center pt-4 border-t border-[var(--foreground)]/10">
                     <button
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        // Always check ref to get latest value
-                        const currentIdx = currentPartIndexRef.current;
-                        
-                        if (currentIdx > 0) {
-                          const newIdx = currentIdx - 1;
-                          // Update both state and ref immediately
-                          currentPartIndexRef.current = newIdx;
-                          setCurrentPartIndex(newIdx);
-                          scrollLessonToTop();
-                          console.log("🔄 PAGE SWAP: Previous button clicked - navigating to part", newIdx + 1, "of", lessonParts.length, "| ref:", newIdx, "state:", newIdx);
+                        if (!sending) {
+                          handlePhaseTransition();
                         }
                       }}
-                      disabled={currentPartIndex === 0}
-                      className="p-2 rounded-lg bg-[var(--foreground)]/5 hover:bg-[var(--foreground)]/10 text-[var(--foreground)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-                      aria-label="Previous part"
+                      disabled={sending}
+                      className="p-3 rounded-lg bg-[var(--accent-cyan)]/20 hover:bg-[var(--accent-cyan)]/30 text-[var(--foreground)] transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label="Start Quiz"
                     >
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                      </svg>
-                    </button>
-                    <div className="text-sm text-[var(--foreground)]/60">
-                      {currentPartIndex + 1} / {lessonParts.length}
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        // Always check current state and ref to get latest value
-                        const currentIdx = currentPartIndexRef.current;
-                        const maxIdx = lessonParts.length - 1;
-                        
-                        if (currentIdx < maxIdx) {
-                          const newIdx = currentIdx + 1;
-                          // Update both state and ref immediately
-                          currentPartIndexRef.current = newIdx;
-                          setCurrentPartIndex(newIdx);
-                          scrollLessonToTop();
-                          console.log("🔄 PAGE SWAP: Next button clicked - navigating to part", newIdx + 1, "of", lessonParts.length, "| ref:", newIdx, "state:", newIdx);
-                        } else {
-                          // Last part, move to quiz phase (only if not sending)
-                          if (!sending) {
-                            handlePhaseTransition();
-                          }
-                        }
-                      }}
-                      disabled={currentPartIndex === lessonParts.length - 1 && sending}
-                      className="p-2 rounded-lg bg-[var(--accent-cyan)]/20 hover:bg-[var(--accent-cyan)]/30 text-[var(--foreground)] transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
-                      aria-label={currentPartIndex < lessonParts.length - 1 ? "Next part" : "Start Quiz"}
-                    >
-                      {currentPartIndex < lessonParts.length - 1 ? (
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                        </svg>
-                      ) : (
-                        <span className="text-sm font-medium">{sending ? "Generating..." : "Start Quiz"}</span>
-                      )}
+                      <span className="text-sm font-medium">{sending ? "Generating..." : "Start Quiz"}</span>
                     </button>
                   </div>
                 </div>
@@ -4262,7 +3786,12 @@ export default function SurgePage() {
                         {/* Use LessonBody for better markdown/LaTeX rendering like lesson pages */}
                         {phase === "learn" && currentTopic ? (
                           <div className="prose prose-invert max-w-none [&_*]:text-[var(--foreground)]">
-                            <LessonBody body={sanitizeLessonBody(msg.content.replace(/TOPIC_SUGGESTION:\s*/gi, ''))} />
+                            {(() => {
+                              const cleanedContent = msg.content.replace(/TOPIC_SUGGESTION:\s*/gi, '');
+                              // Extract and remove quiz section from lesson body (quiz questions go to dropdown, not displayed in text)
+                              const { bodyWithoutQuiz } = extractQuizSection(cleanedContent);
+                              return <LessonBody body={sanitizeLessonBody(bodyWithoutQuiz || cleanedContent)} />;
+                            })()}
                           </div>
                         ) : (
                           <div className="w-full text-left prose prose-invert max-w-none text-sm [&_*]:text-[var(--foreground)]">

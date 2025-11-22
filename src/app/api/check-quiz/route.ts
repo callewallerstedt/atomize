@@ -50,7 +50,11 @@ Rules:
 - Be VERY lenient - accept answers that show understanding even if terminology isn't perfect
 - Write in a friendly, encouraging tone
 - For the fullSolution, use numbered steps and explain the "why" at each step
-- CRITICAL: If using LaTeX math, use \\text{} for text (NOT \\t which is a tab character)
+- FORMATTING: You CAN and SHOULD use Markdown and LaTeX in fullSolution, explanation, and hint
+  - Use Markdown: **bold**, *italics*, numbered lists, bullet points, code blocks
+  - Use LaTeX math: inline math with $...$ (e.g., $f(x) = x^2$)
+  - Use LaTeX display math: $$...$$ or \\[ ... \\] (e.g., $$\\int_0^1 x^2 dx$$)
+  - CRITICAL: If using LaTeX math, use \\text{} for text (NOT \\t which is a tab character)
 - Use the lesson content and course context to determine correctness
 - Number keys starting from 0 for each question index
 - Return only valid JSON, no additional text

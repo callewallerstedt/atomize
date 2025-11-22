@@ -5,11 +5,41 @@ import { useParams } from "next/navigation";
 
 export default function QRCameraPage() {
   const params = useParams<{ sessionId: string }>();
-  const sessionId = params.sessionId as string;
+  const sessionId = params?.sessionId as string;
   const [images, setImages] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Verify session exists on mount
+  useEffect(() => {
+    if (!sessionId) {
+      setError("Invalid session ID");
+      return;
+    }
+    
+    // Verify session exists
+    const verifySession = async () => {
+      try {
+        const response = await fetch(`/api/qr-session/${sessionId}/images`);
+        if (!response.ok) {
+          const data = await response.json();
+          if (response.status === 404) {
+            setError("Session not found. The QR code may have expired. Please generate a new one.");
+          } else if (response.status === 410) {
+            setError("Session expired. Please generate a new QR code.");
+          } else {
+            setError(data.error || "Failed to verify session");
+          }
+        }
+      } catch (err) {
+        console.error("Error verifying session:", err);
+        setError("Failed to verify session. Please check your connection.");
+      }
+    };
+    
+    verifySession();
+  }, [sessionId]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -71,6 +101,11 @@ export default function QRCameraPage() {
 
   const uploadImages = async () => {
     if (images.length === 0) return;
+    
+    if (!sessionId) {
+      setError("Invalid session ID");
+      return;
+    }
 
     setUploading(true);
     setError(null);
@@ -88,8 +123,17 @@ export default function QRCameraPage() {
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || "Upload failed");
+        if (response.status === 404) {
+          throw new Error("Session not found. The QR code may have expired. Please generate a new one.");
+        } else if (response.status === 410) {
+          throw new Error("Session expired. Please generate a new QR code.");
+        } else {
+          throw new Error(data.error || "Upload failed");
+        }
       }
+
+      const result = await response.json();
+      console.log("Upload successful:", result);
 
       setUploaded(true);
       setUploading(false);
@@ -148,29 +192,28 @@ export default function QRCameraPage() {
 
         {/* Camera Controls */}
         <div className="mb-4 flex gap-2">
-          {!cameraActive ? (
-            <button
-              onClick={startCamera}
-              className="flex-1 px-4 py-3 rounded-lg bg-[var(--accent-cyan)] text-white font-semibold"
-            >
-              Open Camera
-            </button>
-          ) : (
-            <button
-              onClick={() => {
-                if (streamRef.current) {
-                  streamRef.current.getTracks().forEach((track) => track.stop());
-                  setCameraActive(false);
-                }
-              }}
-              className="flex-1 px-4 py-3 rounded-lg bg-gray-600 text-white font-semibold"
-            >
-              Close Camera
-            </button>
-          )}
+          <button
+            onClick={() => {
+              // Create a new file input that opens native camera
+              const cameraInput = document.createElement('input');
+              cameraInput.type = 'file';
+              cameraInput.accept = 'image/*';
+              cameraInput.capture = 'environment'; // Opens native camera
+              cameraInput.multiple = true;
+              cameraInput.onchange = (e) => {
+                const target = e.target as HTMLInputElement;
+                const files = Array.from(target.files || []);
+                setImages((prev) => [...prev, ...files]);
+              };
+              cameraInput.click();
+            }}
+            className="btn-grey flex-1 px-4 py-3 rounded-lg font-semibold"
+          >
+            Open Camera
+          </button>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex-1 px-4 py-3 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-[var(--foreground)] font-semibold"
+            className="btn-grey flex-1 px-4 py-3 rounded-lg font-semibold"
           >
             Choose Files
           </button>
@@ -180,7 +223,6 @@ export default function QRCameraPage() {
           ref={fileInputRef}
           type="file"
           accept="image/*"
-          capture="environment"
           multiple
           onChange={handleFileSelect}
           className="hidden"
@@ -216,7 +258,7 @@ export default function QRCameraPage() {
         <button
           onClick={uploadImages}
           disabled={images.length === 0 || uploading || uploaded}
-          className="w-full px-4 py-3 rounded-lg bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+          className="btn-grey w-full px-4 py-3 rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {uploading
             ? "Uploading..."

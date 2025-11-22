@@ -248,7 +248,7 @@ function PomodoroTimer() {
               e.preventDefault();
               e.currentTarget.blur();
             }}
-            className="relative inline-flex items-center justify-center px-1.5 py-1.5
+            className="unified-button relative inline-flex items-center justify-center px-1.5 py-1.5
                        focus:outline-none focus:ring-0 focus-visible:outline-none
                        transition-all duration-300 ease-out"
             style={{ 
@@ -261,12 +261,11 @@ function PomodoroTimer() {
               height: '32px',
               width: '32px',
               boxShadow: 'none',
-              background: 'rgba(229, 231, 235, 0.08)',
             }}
             aria-label="Pomodoro Timer"
             title="Pomodoro Timer"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
               <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
               <path d="M12 6v6l4 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
@@ -605,13 +604,19 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
   const [start, setStart] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastMessageContentRef = useRef<string>('');
-  const chatInputRef = useRef<HTMLInputElement>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   const chatDropdownRef = useRef<HTMLDivElement>(null);
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
   const lastSavedRef = useRef<string>('');
   const isLoadingFromHistoryRef = useRef<boolean>(false);
   const pendingWelcomeMessageRef = useRef<{ welcomeMessage: string; userMessage: string } | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   // Don't render anything in fullscreen mode (handled elsewhere)
   if (fullscreen) {
@@ -781,6 +786,113 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
     lastSavedRef.current = '';
     setCurrentChatId(null);
   }
+
+  const appendTranscriptionText = (text: string) => {
+    const trimmed = text?.trim();
+    if (!trimmed) return;
+    setInput((prev) => {
+      if (!prev) return trimmed;
+      const needsSpace = /\s$/.test(prev) ? '' : ' ';
+      return `${prev}${needsSpace}${trimmed}`;
+    });
+    requestAnimationFrame(() => {
+      chatInputRef.current?.focus();
+    });
+  };
+
+  const cleanupMediaStream = () => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+  };
+
+  const stopActiveRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop();
+    } else {
+      cleanupMediaStream();
+    }
+  };
+
+  const transcribeAudio = async (blob: Blob) => {
+    setIsTranscribing(true);
+    setVoiceError(null);
+    try {
+      const formData = new FormData();
+      formData.append('audio', blob, 'voice-input.webm');
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || 'Failed to transcribe audio.');
+      }
+      appendTranscriptionText(String(json.text || '').trim());
+    } catch (err: any) {
+      setVoiceError(err?.message || 'Voice transcription failed.');
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  const handleToggleRecording = async () => {
+    if (isTranscribing) return;
+    if (isRecording) {
+      setIsRecording(false);
+      stopActiveRecording();
+      return;
+    }
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+      setVoiceError('Voice recording is not available in this environment.');
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof window.MediaRecorder === 'undefined') {
+      setVoiceError('Microphone recording is not supported in this browser yet.');
+      return;
+    }
+    try {
+      setVoiceError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onstop = async () => {
+        cleanupMediaStream();
+        setIsRecording(false);
+        const chunks = audioChunksRef.current.splice(0);
+        if (chunks.length === 0) return;
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        await transcribeAudio(blob);
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch (err: any) {
+      console.error('Microphone access failed', err);
+      cleanupMediaStream();
+      setIsRecording(false);
+      setVoiceError(
+        err?.name === 'NotAllowedError'
+          ? 'Microphone permission was denied.'
+          : 'Unable to access the microphone.'
+      );
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      stopActiveRecording();
+      cleanupMediaStream();
+    };
+  }, []);
 
   function loadChat(chat: ChatHistory) {
     isLoadingFromHistoryRef.current = true;
@@ -2387,31 +2499,41 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
       {/* Chat pill under header - appears when typing */}
       {typeof document !== 'undefined' && open && !showFullChat ? createPortal(
         <div
-          style={{
-            position: 'fixed',
-            top: 'calc(3.5rem + max(3px, calc(env(safe-area-inset-top, 0px) / 2)) + 1.5rem)',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 9998,
-            pointerEvents: 'auto',
-            opacity: 1,
-            transition: 'opacity 0.2s ease-out',
+          className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => {
+            setOpen(false);
           }}
         >
           <div 
-            data-chat-pill
-            className="flex items-center gap-3 rounded-full bg-[rgba(229,231,235,0.08)] px-5 py-3 border border-white/5"
+            className="flex flex-col items-center gap-2"
             style={{ 
-              boxShadow: 'none',
-              minWidth: '400px',
-              maxWidth: '700px',
+              minWidth: '520px',
+              maxWidth: '910px',
+              width: '100%',
             }}
+            onClick={(e) => e.stopPropagation()}
           >
-            <input
-              ref={chatInputRef}
+            <div 
+              data-chat-pill
+              className="chat-input-container flex items-center gap-2 px-4 py-2 border border-[var(--foreground)]/10 overflow-hidden w-full"
+              style={{ 
+                boxShadow: 'none',
+                borderRadius: '1.5rem',
+              }}
+            >
+            <textarea
+              ref={chatInputRef as React.RefObject<HTMLTextAreaElement>}
               data-chat-input
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                // Auto-resize textarea
+                if (chatInputRef.current && 'scrollHeight' in chatInputRef.current) {
+                  const textarea = chatInputRef.current as HTMLTextAreaElement;
+                  textarea.style.height = 'auto';
+                  textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
+                }
+              }}
               onKeyDown={(e) => { 
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -2419,27 +2541,67 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                 }
               }}
               placeholder="Chat with Chad..."
-              className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder:text-white/60 focus:outline-none"
-              style={{ boxShadow: 'none' }}
-            />
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (input.trim()) {
-                  sendMessage();
-                }
-              }}
-              disabled={sending || !input.trim()}
-              className={`transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full ${input.trim() ? 'text-white/90 hover:text-white' : 'text-white/60 hover:text-white/80'}`}
+              disabled={sending}
+              className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden"
               style={{ 
-                boxShadow: 'none',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
+                boxShadow: 'none', 
+                padding: '0.25rem 0.5rem', 
+                minHeight: '1.5rem', 
+                maxHeight: '120px', 
+                lineHeight: '1.5rem', 
+                borderRadius: '0', 
+                backgroundColor: 'transparent' 
               }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M5 12h14M12 5l7 7-7 7"/>
-              </svg>
-            </button>
+              rows={1}
+            />
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleToggleRecording}
+                disabled={sending || isTranscribing}
+                aria-pressed={isRecording}
+                title={isRecording ? "Stop recording" : "Record voice message"}
+                className={`unified-button transition-colors flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10 ${
+                  isRecording
+                    ? 'text-[#FFB347] border-[#FFB347]/60'
+                    : ''
+                } disabled:opacity-50`}
+                style={{ boxShadow: 'none' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 15c1.66 0 3-1.34 3-3V7a3 3 0 0 0-6 0v5c0 1.66 1.34 3 3 3z" />
+                  <path d="M19 11v1a7 7 0 0 1-14 0v-1" />
+                  <path d="M12 19v3" />
+                </svg>
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (input.trim()) {
+                    sendMessage();
+                  }
+                }}
+                disabled={sending || !input.trim()}
+                className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10"
+                style={{ 
+                  boxShadow: 'none',
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+              </button>
+            </div>
+            </div>
+            {(voiceError || isRecording || isTranscribing) && (
+              <p className={`text-[11px] text-center w-full ${voiceError ? 'text-[#FF8A8A]' : 'text-[var(--foreground)]/60'}`}>
+                {voiceError
+                  ? voiceError
+                  : isRecording
+                    ? 'Recording… tap the mic to stop.'
+                    : 'Transcribing voice...'}
+              </p>
+            )}
           </div>
         </div>,
         document.body
@@ -2455,15 +2617,14 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
               chatInputRef.current?.focus();
             });
           }}
-          className="fixed bottom-6 right-6 z-50 inline-flex items-center justify-center w-12 h-12 rounded-full transition-all duration-300 ease-out"
+          className="unified-button fixed bottom-6 right-6 z-50 inline-flex items-center justify-center w-12 h-12 rounded-full transition-all duration-300 ease-out"
           style={{ 
-            background: 'rgba(229, 231, 235, 0.08)',
             boxShadow: 'none',
           }}
           aria-label="Open chat"
           title="Open chat"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
         </button>,
@@ -2472,51 +2633,45 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
       {/* Full chat dropdown */}
       {typeof document !== 'undefined' && showFullChat ? createPortal(
         <div
-          style={{
-            position: 'fixed',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            zIndex: 9999,
-            width: '90%',
-            maxWidth: '800px',
-            maxHeight: '90vh',
-            zoom: typeof window !== 'undefined' && window.innerWidth >= 768 && !((window.navigator as any).standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)) ? 1.4 : undefined,
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => {
+            setShowFullChat(false);
+            setOpen(false);
           }}
         >
           <div 
             ref={chatDropdownRef}
             data-chat-dropdown
-            className="rounded-2xl border border-white/5 flex flex-col"
-            style={{ 
-              boxShadow: 'none',
-              background: 'rgba(15, 18, 22, 0.95)',
-              height: 'min(750px, 90vh)',
-              maxHeight: '90vh',
+            className="relative w-full max-w-3xl max-h-[90vh] rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-2xl flex flex-col"
+            style={{
+              height: typeof window !== "undefined" && window.innerHeight < 720 ? "85vh" : "80vh"
             }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between p-4 flex-shrink-0 border-b border-white/5">
-              <h2 className="text-lg font-semibold text-white">Chat</h2>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--foreground)]/10">
+              <div className="flex items-center gap-2">
+                <div className="h-6 w-6 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
+                <div className="text-sm font-semibold text-[var(--foreground)]">Chad</div>
+              </div>
               <button
                 onClick={() => {
                   setShowFullChat(false);
                   setOpen(false);
                 }}
-                className="text-white/60 hover:text-white/80 transition-colors !shadow-none"
-                title="Close chat"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--foreground)]/60 hover:text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
+                aria-label="Close"
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 6L6 18M6 6l12 12"/>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
                 </svg>
               </button>
             </div>
             
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto space-y-3 p-4 min-h-0">
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 min-h-0">
               {messages.length === 0 && (
-                <div className="text-xs text-white/60">Ask a question about this page. I'll use the current page content as context.</div>
+                <div className="text-xs text-[var(--foreground)]/60">Ask a question about this page. I'll use the current page content as context.</div>
               )}
               {messages.map((m, i) => {
                 if (m.role === 'system' || m.hidden) return null;
@@ -2524,9 +2679,11 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                 if (m.isLoading) {
                   return (
                     <div key={i} className="flex justify-start">
-                      <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5">
-                        <div className="text-sm text-white/90 leading-relaxed flex items-center gap-2">
-                          <span className="inline-block w-2 h-2 bg-white/60 rounded-full animate-pulse"></span>
+                      <div 
+                        className="chat-bubble-assistant max-w-[80%] inline-block px-3 py-1.5 rounded-full border border-[var(--foreground)]/10"
+                      >
+                        <div className="text-sm text-[var(--foreground)]/90 leading-relaxed flex items-center gap-2">
+                          <span className="inline-block w-2 h-2 bg-[var(--foreground)]/60 rounded-full animate-pulse"></span>
                           Thinking...
                         </div>
                       </div>
@@ -2537,14 +2694,18 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                 return (
                   <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
                     {m.role === 'user' ? (
-                      <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-2xl bg-[rgba(229,231,235,0.15)] border border-white/10">
-                        <div className="text-sm text-white/90 leading-relaxed">
+                      <div 
+                        className="chat-bubble-user max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/15"
+                      >
+                        <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
                           {m.content}
                         </div>
                       </div>
                     ) : (
-                      <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-2xl bg-[rgba(229,231,235,0.08)] border border-white/5">
-                        <div className="text-sm text-white/90 leading-relaxed">
+                      <div 
+                        className="chat-bubble-assistant max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10"
+                      >
+                        <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
                           {m.role === 'assistant' ? (
                             <>
                               <div className="chat-bubble">
@@ -2564,19 +2725,28 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
             </div>
             
             {/* Chat pill at bottom */}
-            <div className="p-4 border-t border-white/5 flex-shrink-0">
+            <div className="px-6 py-4 border-t border-[var(--foreground)]/10 flex-shrink-0">
               <div 
                 data-chat-pill
-                className="flex items-center gap-3 rounded-full bg-[rgba(229,231,235,0.08)] px-5 py-3 border border-white/5"
+                className="chat-input-container flex items-center gap-2 px-4 py-2 border border-[var(--foreground)]/10 overflow-hidden"
                 style={{ 
                   boxShadow: 'none',
+                  borderRadius: '1.5rem',
                 }}
               >
-                <input
-                  ref={chatInputRef}
+                <textarea
+                  ref={chatInputRef as React.RefObject<HTMLTextAreaElement>}
                   data-chat-input
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    // Auto-resize textarea
+                    if (chatInputRef.current && 'scrollHeight' in chatInputRef.current) {
+                      const textarea = chatInputRef.current as HTMLTextAreaElement;
+                      textarea.style.height = 'auto';
+                      textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
+                    }
+                  }}
                   onKeyDown={(e) => { 
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
@@ -2584,28 +2754,65 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                     }
                   }}
                   placeholder="Chat with Chad..."
-                  className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder:text-white/60 focus:outline-none"
-                  style={{ boxShadow: 'none' }}
-                />
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (input.trim()) {
-                      sendMessage();
-                    }
-                  }}
-                  disabled={sending || !input.trim()}
-                  className={`transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full ${input.trim() ? 'text-white/90 hover:text-white' : 'text-white/60 hover:text-white/80'}`}
+                  disabled={sending}
+                  className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden"
                   style={{ 
-                    boxShadow: 'none',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    boxShadow: 'none', 
+                    padding: '0.25rem 0.5rem', 
+                    minHeight: '1.5rem', 
+                    maxHeight: '120px', 
+                    lineHeight: '1.5rem', 
+                    borderRadius: '0', 
+                    backgroundColor: 'transparent' 
                   }}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M5 12h14M12 5l7 7-7 7"/>
-                  </svg>
-                </button>
+                  rows={1}
+                />
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={handleToggleRecording}
+                    disabled={sending || isTranscribing}
+                    aria-pressed={isRecording}
+                    title={isRecording ? "Stop recording" : "Record voice message"}
+                    className={`unified-button transition-colors flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10 ${
+                      isRecording
+                        ? 'text-[#FFB347] border-[#FFB347]/60'
+                        : ''
+                    } disabled:opacity-50`}
+                    style={{ boxShadow: 'none' }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 15c1.66 0 3-1.34 3-3V7a3 3 0 0 0-6 0v5c0 1.66 1.34 3 3 3z" />
+                      <path d="M19 11v1a7 7 0 0 1-14 0v-1" />
+                      <path d="M12 19v3" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (input.trim()) {
+                        sendMessage();
+                      }
+                    }}
+                    disabled={sending || !input.trim()}
+                    className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border"
+                    style={{ boxShadow: 'none' }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M5 12h14M12 5l7 7-7 7"/>
+                    </svg>
+                  </button>
+                </div>
               </div>
+              {(voiceError || isRecording || isTranscribing) && (
+                <p className={`mt-2 text-[11px] ${voiceError ? 'text-[#FF8A8A]' : 'text-[var(--foreground)]/60'}`}>
+                  {voiceError
+                    ? voiceError
+                    : isRecording
+                      ? 'Recording… tap the mic to stop.'
+                      : 'Transcribing voice...'}
+                </p>
+              )}
             </div>
           </div>
         </div>,
@@ -2653,6 +2860,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [surgeLogModalOpen, setSurgeLogModalOpen] = useState(false);
   const [surgeLogRefreshKey, setSurgeLogRefreshKey] = useState(0); // Force re-render when data changes
   const [surgeLogData, setSurgeLogData] = useState<any[]>([]); // Store surge log data in state
+  const [devToolsModalOpen, setDevToolsModalOpen] = useState(false);
   const [expandedSurgeTopics, setExpandedSurgeTopics] = useState<Set<string>>(new Set());
   const [expandedSurgeQuestionTypes, setExpandedSurgeQuestionTypes] = useState<Set<string>>(new Set());
   const [expandedSurgeQuestions, setExpandedSurgeQuestions] = useState<Set<string>>(new Set());
@@ -2953,7 +3161,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       {/* Main content */}
       <div className="flex min-h-screen w-full flex-col">
         {authChecked && isAuthenticated && (
-        <header className="sticky top-0 z-50" style={{ paddingTop: 0, backgroundColor: 'rgba(15, 18, 22, 0.92)', backdropFilter: 'blur(10px) saturate(180%)', WebkitBackdropFilter: 'blur(10px) saturate(180%)', isolation: 'isolate' }}>
+        <header className="sticky top-0 z-50" style={{ paddingTop: 0, backgroundColor: 'var(--background)', backdropFilter: 'blur(10px) saturate(180%)', WebkitBackdropFilter: 'blur(10px) saturate(180%)', isolation: 'isolate' }}>
           <nav className="relative flex h-14 items-center px-3 sm:px-4 gap-2">
             <div className="flex items-center gap-3 min-w-0 flex-shrink-0">
               <button
@@ -3004,7 +3212,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                           e.preventDefault();
                           e.currentTarget.blur();
                         }}
-                        className="relative inline-flex items-center justify-center px-1.5 py-1.5
+                        className="unified-button relative inline-flex items-center justify-center px-1.5 py-1.5
                                    focus:outline-none focus:ring-0 focus-visible:outline-none
                                    transition-all duration-300 ease-out"
                         style={{ 
@@ -3017,15 +3225,47 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                           height: '32px',
                           width: '32px',
                           boxShadow: 'none',
-                          background: 'rgba(229, 231, 235, 0.08)',
                         }}
                         aria-label="Surge Log"
                         title="Surge Log"
                       >
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                       </button>
+                  )}
+                  {/* DevTools button - only for Tester subscription */}
+                  {subscriptionLevel === "Tester" && (
+                    <button
+                      onClick={() => {
+                        setDevToolsModalOpen(true);
+                      }}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.blur();
+                      }}
+                      className="unified-button relative inline-flex items-center justify-center px-1.5 py-1.5
+                                 focus:outline-none focus:ring-0 focus-visible:outline-none
+                                 transition-all duration-300 ease-out"
+                      style={{ 
+                        outline: 'none', 
+                        WebkitTapHighlightColor: 'transparent', 
+                        transform: 'none !important',
+                        borderRadius: '50%',
+                        margin: 0,
+                        display: 'flex',
+                        height: '32px',
+                        width: '32px',
+                        boxShadow: 'none',
+                      }}
+                      aria-label="DevTools"
+                      title="DevTools"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    </button>
                   )}
                   {/* Pomodoro Timer */}
                   <PomodoroTimer />
@@ -3039,7 +3279,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       e.preventDefault();
                       e.currentTarget.blur();
                     }}
-                    className="relative inline-flex items-center justify-center px-1.5 py-1.5
+                    className="unified-button relative inline-flex items-center justify-center px-1.5 py-1.5
                                focus:outline-none focus:ring-0 focus-visible:outline-none
                                transition-all duration-300 ease-out"
                     style={{ 
@@ -3052,17 +3292,16 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       height: '32px',
                       width: '32px',
                       boxShadow: 'none',
-                      background: 'rgba(229, 231, 235, 0.08)',
                     }}
                     aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
                     title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
                   >
                     {isFullscreen ? (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
                       </svg>
                     ) : (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
                       </svg>
                     )}
@@ -3074,7 +3313,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       e.preventDefault();
                       e.currentTarget.blur();
                     }}
-                    className="relative inline-flex items-center justify-center px-1.5 py-1.5
+                    className="unified-button relative inline-flex items-center justify-center px-1.5 py-1.5
                                focus:outline-none focus:ring-0 focus-visible:outline-none
                                transition-all duration-300 ease-out"
                     style={{ 
@@ -3087,12 +3326,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       height: '32px',
                       width: '32px',
                       boxShadow: 'none',
-                      background: 'rgba(229, 231, 235, 0.08)',
                     }}
                     aria-label="Info"
                     title="About this app"
                   >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
                       <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
                       <path d="M12 8.5a.75.75 0 100-1.5.75.75 0 000 1.5z" fill="currentColor"/>
                       <path d="M11.25 10.5h1.5v6h-1.5z" fill="currentColor"/>
@@ -3105,7 +3343,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       e.preventDefault();
                       e.currentTarget.blur();
                     }}
-                    className="relative inline-flex items-center justify-center px-1.5 py-1.5
+                    className="unified-button relative inline-flex items-center justify-center px-1.5 py-1.5
                                focus:outline-none focus:ring-0 focus-visible:outline-none
                                transition-all duration-300 ease-out"
                     style={{ 
@@ -3118,12 +3356,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       height: '32px',
                       width: '32px',
                       boxShadow: 'none',
-                      background: 'rgba(229, 231, 235, 0.08)',
                     }}
                     aria-label="Settings"
                     title="Settings"
                   >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
                       <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" stroke="currentColor" strokeWidth="1.5"/>
                       <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5"/>
                     </svg>
@@ -3193,7 +3430,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                             router.push('/exam-snipe');
                             setMobileMenuOpen(false);
                           }}
-                          className="w-full rounded-lg bg-[var(--background)]/70 px-3 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/85 transition-colors"
+                          className="btn-grey w-full rounded-lg px-3 py-2 text-left text-sm transition-colors"
                         >
                           Exam Snipe
                         </button>
@@ -3202,7 +3439,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                             router.push('/quicklearn');
                             setMobileMenuOpen(false);
                           }}
-                          className="w-full rounded-lg bg-[var(--background)]/70 px-3 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/85 transition-colors"
+                          className="btn-grey w-full rounded-lg px-3 py-2 text-left text-sm transition-colors"
                         >
                           Quick Learn
                         </button>
@@ -3211,7 +3448,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                             router.push('/readassist');
                             setMobileMenuOpen(false);
                           }}
-                          className="w-full rounded-lg bg-[var(--background)]/70 px-3 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/85 transition-colors"
+                          className="btn-grey w-full rounded-lg px-3 py-2 text-left text-sm transition-colors"
                         >
                           Read Assist
                         </button>
@@ -3231,7 +3468,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                           setMobileMenuOpen(false);
                           document.dispatchEvent(new CustomEvent('synapse:open-chat'));
                         }}
-                        className="w-full rounded-lg bg-gradient-to-r from-[#00E5FF]/20 to-[#FF2D96]/20 px-3 py-2 text-left text-sm text-[var(--foreground)] hover:from-[#00E5FF]/30 hover:to-[#FF2D96]/30 transition-colors"
+                        className="btn-grey w-full rounded-lg px-3 py-2 text-left text-sm transition-colors"
                       >
                         Open Chat
                       </button>
@@ -3240,7 +3477,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                           setMobileMenuOpen(false);
                           setInfoOpen(true);
                         }}
-                        className="w-full rounded-lg bg-[var(--background)]/70 px-3 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/85 transition-colors"
+                        className="btn-grey w-full rounded-lg px-3 py-2 text-left text-sm transition-colors"
                       >
                         App Info
                       </button>
@@ -3249,7 +3486,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                           setMobileMenuOpen(false);
                           setSettingsOpen(true);
                         }}
-                        className="w-full rounded-lg bg-[var(--background)]/70 px-3 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/85 transition-colors"
+                        className="btn-grey w-full rounded-lg px-3 py-2 text-left text-sm transition-colors"
                       >
                         Settings
                       </button>
@@ -4189,6 +4426,43 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           </div>
         );
       })()}
+
+      {/* DevTools Modal */}
+      <Modal
+        open={devToolsModalOpen}
+        onClose={() => setDevToolsModalOpen(false)}
+        title="DevTools"
+        footer={
+          <div className="flex items-center justify-end">
+            <button
+              onClick={() => setDevToolsModalOpen(false)}
+              className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium !text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
+            >
+              Close
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-sm font-medium text-[var(--foreground)] mb-3">Tools</h3>
+            <button
+              onClick={() => {
+                // Dispatch custom event to trigger tutorial on home page
+                window.dispatchEvent(new CustomEvent('synapse:tutorial-trigger'));
+                setDevToolsModalOpen(false);
+                // Navigate to home if not already there
+                if (pathname !== '/') {
+                  router.push('/');
+                }
+              }}
+              className="inline-flex items-center rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-white/30 hover:bg-white/5 transition-colors"
+            >
+              Tutorial
+            </button>
+          </div>
+        </div>
+      </Modal>
 
     </div>
     </>

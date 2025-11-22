@@ -29,6 +29,7 @@ export function ensureClosedMarkdownFences(md: string): string {
   if (inFence) {
     const closingChar = fenceChar ?? "`";
     const closingLength = fenceLength || 3;
+    // Add closing fence on a new line
     return `${md}\n${closingChar.repeat(closingLength)}`;
   }
 

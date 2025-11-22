@@ -1159,7 +1159,16 @@ function ExamSnipeInner() {
                 </div>
 
                 <div
-                  className={`w-full max-w-2xl rounded-2xl border-2 border-dashed border-[#3A4454] bg-transparent text-center hover:border-[#00E5FF]/50 transition-colors cursor-pointer ${examFiles.length === 0 ? 'p-20' : 'p-8'}`}
+                  className={`w-full max-w-2xl rounded-2xl border-2 border-dashed border-[var(--foreground)]/20 text-center hover:border-[var(--foreground)]/30 transition-colors cursor-pointer ${examFiles.length === 0 ? 'p-20' : 'p-8'}`}
+                  style={{
+                    backgroundColor: 'color-mix(in srgb, var(--foreground) 8%, transparent)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--foreground) 12%, transparent)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--foreground) 8%, transparent)';
+                  }}
                   onClick={() => fileInputRef.current?.click()}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
@@ -1185,7 +1194,7 @@ function ExamSnipeInner() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      <div className="text-[#00E5FF] font-semibold text-lg mb-4">{examFiles.length} file(s) selected</div>
+                      <div className="text-[var(--foreground)]/90 font-semibold text-lg mb-4">{examFiles.length} file(s) selected</div>
                       {examFiles.map((f, i) => (
                         <div key={i} className="text-[var(--foreground)] text-sm">
                           {f.name}
@@ -1208,7 +1217,7 @@ function ExamSnipeInner() {
                         console.log('Course selected:', value);
                         setSelectedSubjectSlug(value);
                       }}
-                      className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-3 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                      className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-3 text-sm text-[var(--foreground)] focus:border-[var(--foreground)]/40 focus:outline-none"
                     >
                       <option value="">No course selected</option>
                       {subjects.map((subject) => (
@@ -1305,7 +1314,7 @@ function ExamSnipeInner() {
                               {fileCount} exam{fileCount === 1 ? "" : "s"}
                               {topConcept ? ` • Top concept: ${topConcept}` : ""}
                             </div>
-                            <div className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-[var(--accent-cyan)]/80">
+                            <div className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-[var(--foreground)]/70">
                               <span>Open analysis</span>
                               <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path d="M5 12h14M13 6l6 6-6 6" />
@@ -1314,7 +1323,7 @@ function ExamSnipeInner() {
                             {examMenuOpenFor === record.slug && (
                               <div
                                 data-menu-dropdown
-                                className="absolute right-4 top-14 z-50 w-40 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-lg p-2 space-y-2"
+                                className="absolute right-4 top-14 z-50 w-40 rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-lg p-2 space-y-2"
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <button
@@ -1412,7 +1421,7 @@ function ExamSnipeInner() {
         ) : (
           <Fragment>
             {/* Analysis Results Header */}
-            <div className="mb-6 rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 backdrop-blur-sm p-6">
+            <div className="mb-6 rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 backdrop-blur-sm p-6">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-xl font-bold text-[var(--foreground)]">{activeHistoryMeta?.courseName || "Analysis Results"}</h2>
@@ -1429,7 +1438,7 @@ function ExamSnipeInner() {
                     setActiveHistoryMeta(null);
                     setCurrentFileNames([]);
                   }}
-                  className="rounded-lg bg-[var(--background)]/60 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/80 transition-colors border border-[var(--accent-cyan)]/20"
+                  className="rounded-lg bg-[var(--background)]/60 px-4 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/80 transition-colors border border-[var(--foreground)]/20"
                 >
                   Analyze New Exams
                 </button>
@@ -1438,7 +1447,7 @@ function ExamSnipeInner() {
               {currentFileNames.length > 0 && (
                 <div className="mb-4 text-xs text-[var(--foreground)]/60 flex flex-wrap gap-2">
                   {currentFileNames.map((name, idx) => (
-                    <span key={`${name}-${idx}`} className="rounded-full border border-[var(--accent-cyan)]/20 bg-[var(--background)]/70 px-3 py-1">
+                    <span key={`${name}-${idx}`} className="rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-3 py-1">
                       {name}
                     </span>
                   ))}
@@ -1457,7 +1466,7 @@ function ExamSnipeInner() {
               </div>
 
               {examResults.gradeInfo && (
-                <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--accent-cyan)]/20 mb-4">
+                <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--foreground)]/20 mb-4">
                   <div className="text-sm font-semibold text-[var(--foreground)] mb-2">Grade Requirements</div>
                   <div className="text-sm text-[var(--foreground)]">
                     {examResults.gradeInfo.split(',').map((grade: string, idx: number) => (
@@ -1470,7 +1479,7 @@ function ExamSnipeInner() {
               )}
 
               {examResults.patternAnalysis && (
-                <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--accent-cyan)]/20">
+                <div className="rounded-lg bg-[var(--background)]/60 p-4 border border-[var(--foreground)]/20">
                   <div className="text-sm font-semibold text-[var(--foreground)] mb-2">Pattern Analysis</div>
                   <div className="text-sm text-[var(--foreground)] leading-relaxed mb-4">
                     {examResults.patternAnalysis}
@@ -1897,7 +1906,7 @@ function ExamSnipeInner() {
             </div>
 
             {/* Study Strategy */}
-            <div className="mt-6 rounded-xl border border-[var(--accent-cyan)]/20 bg-[var(--background)]/60 p-6">
+            <div className="mt-6 rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/60 p-6">
               <h3 className="text-base font-semibold text-[var(--foreground)] mb-3">Study Strategy</h3>
               <p className="text-sm text-[var(--foreground)] mb-4">
                 Move through the concepts in order—they build from foundational understanding to advanced exam execution.
@@ -1910,7 +1919,7 @@ function ExamSnipeInner() {
             </div>
 
             {/* Footer Tips */}
-            <div className="mt-4 rounded-lg bg-[var(--background)]/60 border border-[var(--accent-cyan)]/20 p-4">
+            <div className="mt-4 rounded-lg bg-[var(--background)]/60 border border-[var(--foreground)]/20 p-4">
               <div className="text-xs text-[var(--foreground)]/70">
                 <strong className="text-[var(--foreground)]">Pro Tips:</strong><br/>
                 • Begin with the foundation concept to anchor the big picture<br/>

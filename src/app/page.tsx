@@ -368,9 +368,24 @@ function HomepageFileUploadArea({
         onDrop={handleDrop}
         className={`rounded-lg border-2 border-dashed p-4 cursor-pointer transition-colors ${
           isDragging
-            ? 'border-white/30 bg-white/5'
-            : 'border-white/20 bg-[var(--background)]/60 hover:border-white/30 hover:bg-[var(--background)]/80'
+            ? 'border-[var(--foreground)]/40'
+            : 'border-[var(--foreground)]/20 hover:border-[var(--foreground)]/30'
         }`}
+        style={{
+          backgroundColor: isDragging
+            ? 'color-mix(in srgb, var(--foreground) 12%, transparent)'
+            : 'color-mix(in srgb, var(--foreground) 8%, transparent)',
+        }}
+        onMouseEnter={(e) => {
+          if (!isDragging) {
+            e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--foreground) 12%, transparent)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isDragging) {
+            e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--foreground) 8%, transparent)';
+          }
+        }}
       >
         <div className="text-xs text-[var(--foreground)]/70 text-center">
           {isDragging ? 'Drop files here' : (message || 'Upload files or drag and drop')}
@@ -556,6 +571,17 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     if (!tutorialSignal) return;
     startTutorial();
   }, [tutorialSignal, startTutorial]);
+
+  // Listen for tutorial trigger from DevTools
+  useEffect(() => {
+    const handleTutorialTrigger = () => {
+      setTutorialSignal((prev) => prev + 1);
+    };
+    window.addEventListener('synapse:tutorial-trigger', handleTutorialTrigger);
+    return () => {
+      window.removeEventListener('synapse:tutorial-trigger', handleTutorialTrigger);
+    };
+  }, []);
   // Load saved homepage chat history on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -688,11 +714,27 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     setAiName(obj.content);
                   } else if (obj.type === "text" && obj.content) {
                     fullText += obj.content;
+                    // Update welcome text as it streams
+                    setWelcomeText(fullText);
+                    // Add or update welcome message in messages list immediately
+                    setHomepageMessages((prev) => {
+                      if (prev.length === 0 || prev[0].role !== 'assistant') {
+                        return [{ role: 'assistant', content: fullText }];
+                      }
+                      return [{ ...prev[0], content: fullText }, ...prev.slice(1)];
+                    });
                   } else if (obj.type === "done") {
                     // If streaming hasn't started yet, show immediately
                     if (!streamingPromise) {
                       setWelcomeText(fullText);
                       setIsStreaming(false);
+                      // Add welcome message to messages list
+                      setHomepageMessages((prev) => {
+                        if (prev.length === 0 || prev[0].role !== 'assistant') {
+                          return [{ role: 'assistant', content: fullText }];
+                        }
+                        return [{ ...prev[0], content: fullText }, ...prev.slice(1)];
+                      });
                     }
                   }
                 } catch {}
@@ -701,16 +743,38 @@ Surge is for those who want to minimize friction and get results fast. I will pr
 
             // If we collected all text before starting to stream, check if we should stream or show immediately
             if (fullText.length > 0) {
-              // If text is very short or already complete, show immediately
+              // If text is very short or already complete, show immediately and add to messages
               if (fullText.length <= 20) {
                 setWelcomeText(fullText);
                 setIsStreaming(false);
+                // Add welcome message to messages list immediately
+                setHomepageMessages((prev) => {
+                  if (prev.length === 0 || prev[0].role !== 'assistant') {
+                    return [{ role: 'assistant', content: fullText }];
+                  }
+                  return [{ ...prev[0], content: fullText }, ...prev.slice(1)];
+                });
               } else {
                 // Stream character by character with faster delay
                 const streamDelay = 10; // Faster: 10ms instead of 30ms
+                // Add welcome message to messages list immediately when streaming starts
+                setHomepageMessages((prev) => {
+                  if (prev.length === 0 || prev[0].role !== 'assistant') {
+                    return [{ role: 'assistant', content: '' }];
+                  }
+                  return prev;
+                });
                 for (let i = 0; i < fullText.length; i++) {
                   await new Promise(resolve => setTimeout(resolve, streamDelay));
-                  setWelcomeText(fullText.slice(0, i + 1));
+                  const currentText = fullText.slice(0, i + 1);
+                  setWelcomeText(currentText);
+                  // Update the message in the list
+                  setHomepageMessages((prev) => {
+                    if (prev.length === 0 || prev[0].role !== 'assistant') {
+                      return [{ role: 'assistant', content: currentText }];
+                    }
+                    return [{ ...prev[0], content: currentText }, ...prev.slice(1)];
+                  });
                 }
                 setIsStreaming(false);
               }
@@ -1997,7 +2061,8 @@ Surge is for those who want to minimize friction and get results fast. I will pr
           {homepageMessages.length > 0 && (
             <button
               onClick={resetHomepageChat}
-              className="text-xs font-semibold text-[var(--foreground)]/60 hover:text-[var(--foreground)] transition-colors"
+              className="new-chat-button text-xs font-semibold text-[var(--foreground)]/60 transition-colors"
+              style={{ boxShadow: 'none' }}
               aria-label="Start a new chat"
             >
               New chat
@@ -2007,34 +2072,35 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       )}
       {homepageMessages.length === 0 ? (
         <>
-          <div className="inline-block px-3 py-1.5 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5">
-            <div className="text-sm text-white/90 leading-relaxed">
+          <div 
+            className="chat-bubble-assistant inline-block px-3 py-1.5 rounded-full border border-[var(--foreground)]/10"
+          >
+            <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
               {renderTextWithSynapse(welcomeText)}
               {isStreaming && (
-                <span className="inline-block w-2 h-2 bg-white/60 rounded-full animate-pulse ml-1 align-middle"></span>
+                <span className="inline-block w-2 h-2 bg-[var(--foreground)]/60 rounded-full animate-pulse ml-1 align-middle"></span>
               )}
             </div>
           </div>
-          {welcomeText && !isStreaming && (
-            <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%' }}>
-              <div 
-                className="flex items-center gap-2 bg-[rgba(229,231,235,0.08)] px-4 py-2 border border-white/5 overflow-hidden"
-                style={{ 
-                  boxShadow: 'none',
-                  borderRadius: '1.5rem', // More rounded than rounded-2xl
-                }}
-              >
-                <textarea
-                  ref={chatInputRef}
+          <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%' }}>
+            <div 
+              className="chat-input-container flex items-center gap-2 px-4 py-2 border border-[var(--foreground)]/10 overflow-hidden"
+              style={{ 
+                boxShadow: 'none',
+                borderRadius: '1.5rem', // More rounded than rounded-2xl
+              }}
+            >
+              <textarea
+                ref={chatInputRef}
                 value={inputValue}
-                  onChange={(e) => {
-                    setInputValue(e.target.value);
-                    // Auto-resize textarea
-                    if (chatInputRef.current) {
-                      chatInputRef.current.style.height = 'auto';
-                      chatInputRef.current.style.height = `${Math.min(chatInputRef.current.scrollHeight, 120)}px`;
-                    }
-                  }}
+                onChange={(e) => {
+                  setInputValue(e.target.value);
+                  // Auto-resize textarea
+                  if (chatInputRef.current) {
+                    chatInputRef.current.style.height = 'auto';
+                    chatInputRef.current.style.height = `${Math.min(chatInputRef.current.scrollHeight, 120)}px`;
+                  }
+                }}
                 onFocus={() => setInputFocused(true)}
                 onBlur={() => setInputFocused(false)}
                 onKeyDown={(e) => {
@@ -2043,61 +2109,60 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     handleSendMessage();
                   }
                 }}
-                  placeholder={isTutorialActive ? "Use the tutorial controls above" : "Chat with Chad..."}
-              disabled={homepageSending || isTutorialActive}
-                  className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder:text-white/60 focus:outline-none resize-none overflow-hidden"
-                  style={{ boxShadow: 'none', padding: '0.25rem 0.5rem', minHeight: '1.5rem', maxHeight: '120px', lineHeight: '1.5rem', borderRadius: '0' }}
-                  rows={1}
-                />
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={handleToggleRecording}
-                    disabled={homepageSending || isTutorialActive || isTranscribing}
-                    aria-pressed={isRecording}
-                    title={isRecording ? "Stop recording" : "Record voice message"}
-                    className={`transition-colors flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-white/10 ${
-                      isRecording
-                        ? 'text-[#FFB347] border-[#FFB347]/60 bg-white/5'
-                        : 'text-white/70 hover:text-white hover:border-white/40'
-                    } disabled:opacity-50`}
-                    style={{ boxShadow: 'none' }}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 15c1.66 0 3-1.34 3-3V7a3 3 0 0 0-6 0v5c0 1.66 1.34 3 3 3z" />
-                      <path d="M19 11v1a7 7 0 0 1-14 0v-1" />
-                      <path d="M12 19v3" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (inputValue.trim() && !homepageSending && !isTutorialActive) {
-                        handleSendMessage();
-                      }
-                    }}
-                    disabled={homepageSending || !inputValue.trim() || isTutorialActive}
-                    className={`transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full ${inputValue.trim() ? 'text-white/90 hover:text-white' : 'text-white/60 hover:text-white/80'}`}
-                    style={{ 
-                      boxShadow: 'none',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
-                    }}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M5 12h14M12 5l7 7-7 7"/>
-                    </svg>
-                  </button>
-                </div>
+                placeholder={isTutorialActive ? "Use the tutorial controls above" : "Chat with Chad..."}
+                disabled={homepageSending || isTutorialActive}
+                className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden"
+                style={{ boxShadow: 'none', padding: '0.25rem 0.5rem', minHeight: '1.5rem', maxHeight: '120px', lineHeight: '1.5rem', borderRadius: '0', backgroundColor: 'transparent' }}
+                rows={1}
+              />
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleToggleRecording}
+                  disabled={homepageSending || isTutorialActive || isTranscribing}
+                  aria-pressed={isRecording}
+                  title={isRecording ? "Stop recording" : "Record voice message"}
+                  className={`unified-button transition-colors flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10 ${
+                    isRecording
+                      ? 'text-[#FFB347] border-[#FFB347]/60'
+                      : ''
+                  } disabled:opacity-50`}
+                  style={{ boxShadow: 'none' }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 15c1.66 0 3-1.34 3-3V7a3 3 0 0 0-6 0v5c0 1.66 1.34 3 3 3z" />
+                    <path d="M19 11v1a7 7 0 0 1-14 0v-1" />
+                    <path d="M12 19v3" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => {
+                    if (inputValue.trim() && !homepageSending && !isTutorialActive) {
+                      handleSendMessage();
+                    }
+                  }}
+                  disabled={homepageSending || !inputValue.trim() || isTutorialActive}
+                  className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10"
+                  style={{ 
+                    boxShadow: 'none',
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M5 12h14M12 5l7 7-7 7"/>
+                  </svg>
+                </button>
               </div>
-              {(voiceError || isRecording || isTranscribing) && (
-                <p className={`mt-2 text-[11px] ${voiceError ? 'text-[#FF8A8A]' : 'text-white/60'}`}>
-                  {voiceError
-                    ? voiceError
-                    : isRecording
-                      ? 'Recording… tap the mic to stop.'
-                      : 'Transcribing voice...'}
-                </p>
-              )}
-              <div className="flex items-center justify-center gap-2 mt-2">
+            </div>
+            {(voiceError || isRecording || isTranscribing) && (
+              <p className={`mt-2 text-[11px] ${voiceError ? 'text-[#FF8A8A]' : 'text-[var(--foreground)]/60'}`}>
+                {voiceError
+                  ? voiceError
+                  : isRecording
+                    ? 'Recording… tap the mic to stop.'
+                    : 'Transcribing voice...'}
+              </p>
+            )}
+            <div className="flex items-center justify-center gap-2 mt-2">
                 <button
                   onClick={() => {
                     if (!homepageSending && !isTutorialActive) {
@@ -2105,7 +2170,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     }
                   }}
                   disabled={homepageSending || isTutorialActive}
-                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
                   style={{ boxShadow: 'none' }}
                 >
                   Create Course
@@ -2118,7 +2183,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     }
                   }}
                   disabled={homepageSending || isTutorialActive}
-                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
                   style={{ boxShadow: 'none' }}
                 >
                   Quick Learn
@@ -2130,7 +2195,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     }
                   }}
                   disabled={homepageSending || isTutorialActive}
-                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
                   style={{ boxShadow: 'none' }}
                 >
                   Exam Snipe
@@ -2142,14 +2207,13 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     }
                   }}
                   disabled={homepageSending || isTutorialActive}
-                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
                   style={{ boxShadow: 'none' }}
                 >
                   Help!
                 </button>
               </div>
             </div>
-          )}
         </>
       ) : (
         <div className="space-y-3">
@@ -2160,14 +2224,18 @@ Surge is for those who want to minimize friction and get results fast. I will pr
             return (
               <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
                 {m.role === 'user' ? (
-                  <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-2xl bg-[rgba(229,231,235,0.15)] border border-white/10">
-                    <div className="text-sm text-white/90 leading-relaxed">
+                  <div 
+                    className="chat-bubble-user max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10"
+                  >
+                    <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
                       {m.content}
                     </div>
                   </div>
                 ) : (
-                  <div className="max-w-[80%] inline-block px-3 py-1.5 rounded-2xl bg-[rgba(229,231,235,0.08)] border border-white/5">
-                    <div className="text-sm text-white/90 leading-relaxed">
+                  <div 
+                    className="chat-bubble-assistant max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10"
+                  >
+                    <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
                       {isCreatingCourse && i === homepageMessages.length - 1 ? (
                         <div className="flex items-center gap-2">
                           <span className="inline-block w-2 h-2 bg-white/60 rounded-full animate-pulse"></span>
@@ -2225,9 +2293,9 @@ Surge is for those who want to minimize friction and get results fast. I will pr
           })}
           {showThinking && !isCreatingCourse && (
             <div className="flex justify-start">
-              <div className="inline-block px-3 py-1.5 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5">
-                <div className="text-sm text-white/90 leading-relaxed flex items-center gap-2">
-                  <span className="inline-block w-2 h-2 bg-white/60 rounded-full animate-pulse"></span>
+              <div className="chat-bubble-assistant inline-block px-3 py-1.5 rounded-full border border-[var(--foreground)]/10">
+                <div className="text-sm text-[var(--foreground)]/90 leading-relaxed flex items-center gap-2">
+                  <span className="inline-block w-2 h-2 bg-[var(--foreground)]/60 rounded-full animate-pulse"></span>
                   Thinking...
                 </div>
               </div>
@@ -2235,7 +2303,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
           )}
           <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%' }}>
             <div 
-              className="flex items-center gap-2 bg-[rgba(229,231,235,0.08)] px-4 py-2 border border-white/5 overflow-hidden"
+              className="chat-input-container flex items-center gap-2 px-4 py-2 border border-[var(--foreground)]/10 overflow-hidden"
               style={{ 
                 boxShadow: 'none',
                 borderRadius: '1.5rem', // More rounded than rounded-2xl
@@ -2262,8 +2330,8 @@ Surge is for those who want to minimize friction and get results fast. I will pr
               }}
                 placeholder={isTutorialActive ? "Use the tutorial controls above" : "Chat with Chad..."}
             disabled={homepageSending || isTutorialActive}
-                className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder:text-white/60 focus:outline-none resize-none overflow-hidden"
-                style={{ boxShadow: 'none', padding: '0.25rem 0.5rem', minHeight: '1.5rem', maxHeight: '120px', lineHeight: '1.5rem', borderRadius: '0' }}
+                className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden"
+                style={{ boxShadow: 'none', padding: '0.25rem 0.5rem', minHeight: '1.5rem', maxHeight: '120px', lineHeight: '1.5rem', borderRadius: '0', backgroundColor: 'transparent' }}
                 rows={1}
               />
               <div className="flex items-center gap-1">
@@ -2273,10 +2341,10 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                   disabled={homepageSending || isTutorialActive || isTranscribing}
                   aria-pressed={isRecording}
                   title={isRecording ? "Stop recording" : "Record voice message"}
-                  className={`transition-colors flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-white/10 ${
+                  className={`unified-button transition-colors flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10 ${
                     isRecording
-                      ? 'text-[#FFB347] border-[#FFB347]/60 bg-white/5'
-                      : 'text-white/70 hover:text-white hover:border-white/40'
+                      ? 'text-[#FFB347] border-[#FFB347]/60'
+                      : ''
                   } disabled:opacity-50`}
                   style={{ boxShadow: 'none' }}
                 >
@@ -2293,10 +2361,9 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     }
                   }}
                   disabled={homepageSending || !inputValue.trim() || isTutorialActive}
-                  className={`transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full ${inputValue.trim() ? 'text-white/90 hover:text-white' : 'text-white/60 hover:text-white/80'}`}
+                  className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10"
                   style={{ 
                     boxShadow: 'none',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
                   }}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -3404,12 +3471,6 @@ function Home() {
       />
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
         <h1 className="text-xl font-semibold text-[var(--foreground)]">Your subjects</h1>
-          <button
-            onClick={() => setTutorialSignal((prev) => prev + 1)}
-          className="inline-flex items-center rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-white/30 hover:bg-white/5 transition-colors"
-          >
-            Tutorial
-          </button>
       </div>
 
       <div className="mx-auto mt-6 grid w-full max-w-5xl grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -3418,14 +3479,26 @@ function Home() {
           return (
           <div
             key={s.slug}
-            className={`relative rounded-2xl bg-[rgba(229,231,235,0.08)] border border-white/5 p-5 text-[var(--foreground)] transition-all duration-200 ${
+            className={`course-box relative rounded-2xl border border-[var(--foreground)]/10 p-5 text-[var(--foreground)] transition-all duration-200 ${
               preparingSlug === s.slug
                 ? 'cursor-not-allowed opacity-75'
                 : surgeButtonHovered === s.slug
                 ? 'cursor-pointer'
-                : 'cursor-pointer hover:bg-[rgba(229,231,235,0.12)]'
+                : 'cursor-pointer'
             }`}
-            style={{ boxShadow: 'none' }}
+            style={{ 
+              boxShadow: 'none',
+            }}
+            onMouseEnter={(e) => {
+              if (preparingSlug !== s.slug && surgeButtonHovered !== s.slug) {
+                e.currentTarget.classList.add('hover');
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (preparingSlug !== s.slug && surgeButtonHovered !== s.slug) {
+                e.currentTarget.classList.remove('hover');
+              }
+            }}
             role="link"
             tabIndex={preparingSlug === s.slug ? -1 : 0}
             onClick={preparingSlug === s.slug ? undefined : () => router.push(`/subjects/${s.slug}`)}
@@ -3464,9 +3537,9 @@ function Home() {
                               }
                               setCalendarOpenFor(s.slug);
                             }}
-                            className="date-button inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold tracking-wide text-white bg-white/10 border border-white/15 backdrop-blur-sm shadow-[0_0_8px_rgba(0,0,0,0.35)] hover:bg-white/15 hover:border-white/35 transition-all"
+                            className="date-button inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold tracking-wide text-[var(--foreground)] bg-[color-mix(in_srgb,var(--foreground)_8%,transparent)] border border-[var(--foreground)]/20 backdrop-blur-sm shadow-[0_1px_2px_rgba(0,0,0,0.2)] hover:bg-[color-mix(in_srgb,var(--foreground)_12%,transparent)] hover:border-[var(--foreground)]/30 transition-all"
                           >
-                            <span className="inline-block w-1 h-1 rounded-full bg-white/60 animate-pulse" />
+                            <span className="inline-block w-1 h-1 rounded-full bg-[var(--foreground)]/60 animate-pulse" />
                             {daysLeft} day{daysLeft === 1 ? '' : 's'} left
                           </button>
                         ) : (
@@ -3573,16 +3646,11 @@ function Home() {
                   fill="none" 
                   xmlns="http://www.w3.org/2000/svg"
                 >
-                  <defs>
-                    <linearGradient id={lightningGradientId} x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor="rgba(255, 255, 255, 0.95)" />
-                      <stop offset="100%" stopColor="rgba(255, 255, 255, 0.7)" />
-                    </linearGradient>
-                  </defs>
                   <g transform="translate(12 12) scale(0.8,1.1) translate(-12 -12)">
                     <path 
                       d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" 
-                      fill={`url(#${lightningGradientId})`}
+                      fill="currentColor"
+                      className="text-[var(--foreground)]"
                     />
                   </g>
                 </svg>
@@ -3673,11 +3741,14 @@ function Home() {
             const files = Array.from(e.dataTransfer?.files || []);
             createCourseFromFiles(files);
           }}
-          className={`relative rounded-2xl border border-dashed border-white/20 bg-[var(--background)]/60 p-6 text-center text-sm transition-all duration-200 min-h-[80px] flex flex-col items-center justify-center gap-2 ${
+          className={`drop-files-area relative rounded-2xl border border-dashed p-6 text-center text-sm transition-all duration-200 min-h-[80px] flex flex-col items-center justify-center gap-2 ${
             isDragging
-              ? 'border-white/40 bg-white/5 shadow-[0_4px_12px_rgba(0,0,0,0.8)]'
-              : 'hover:border-white/30 hover:bg-[var(--background)]/70'
+              ? 'border-[var(--foreground)]/40 shadow-[0_4px_12px_rgba(0,0,0,0.8)] dragging'
+              : 'border-[var(--foreground)]/20 hover:border-[var(--foreground)]/30'
           }`}
+          style={{
+            boxShadow: 'none',
+          }}
         >
           <span className="text-[var(--foreground)]/70">Drop files here to auto-create a course</span>
           <span className="text-xs text-[var(--foreground)]/50">We’ll scan the files and name it for you</span>
@@ -3718,7 +3789,7 @@ function Home() {
                   // Ensure focus works on iOS PWA
                   e.currentTarget.focus();
                 }}
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-white/30 focus:outline-none resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--foreground)]/40 focus:outline-none resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
                 placeholder="e.g. How does machine learning work? Or paste a question from your textbook..."
                 rows={4}
                 tabIndex={0}
@@ -3827,29 +3898,29 @@ function Home() {
             }}
           >
             <div
-              className="rounded-2xl border border-white/10 p-6 max-w-sm w-full mx-4"
+              className="rounded-2xl border border-[var(--foreground)]/20 p-6 max-w-sm w-full mx-4"
               onClick={(e) => e.stopPropagation()}
               style={{ 
                 boxShadow: 'none',
-                backgroundColor: 'rgb(15, 18, 22)', // Fully opaque
+                backgroundColor: 'var(--background)',
               }}
             >
               <div className="flex items-center justify-between mb-4">
                 <button
                   onClick={() => navigateMonth(-1)}
-                  className="p-2 rounded-lg hover:bg-white/10 transition-colors text-white/80 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="unified-button p-2 rounded-lg transition-colors text-[var(--foreground)]/80 hover:text-[var(--foreground)] disabled:opacity-50 disabled:cursor-not-allowed"
                   disabled={calendarCurrentMonth <= new Date(today.getFullYear(), today.getMonth(), 1)}
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                   </svg>
                 </button>
-                <h3 className="text-lg font-semibold text-white">
+                <h3 className="text-lg font-semibold text-[var(--foreground)]">
                   {calendarCurrentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
                 </h3>
                 <button
                   onClick={() => navigateMonth(1)}
-                  className="p-2 rounded-lg hover:bg-white/10 transition-colors text-white/80 hover:text-white"
+                  className="unified-button p-2 rounded-lg transition-colors text-[var(--foreground)]/80 hover:text-[var(--foreground)]"
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -3859,7 +3930,7 @@ function Home() {
               
               <div className="grid grid-cols-7 gap-1 mb-2">
                 {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                  <div key={day} className="text-center text-xs text-white/60 py-1">
+                  <div key={day} className="text-center text-xs text-[var(--foreground)]/60 py-1">
                     {day}
     </div>
                 ))}
@@ -3885,15 +3956,16 @@ function Home() {
                       key={idx}
                       onClick={() => !isPast && handleDateSelect(date)}
                       disabled={isPast}
-                      className={`aspect-square rounded-lg text-sm transition-colors ${
+                      className={`aspect-square rounded-lg text-sm transition-colors flex items-center justify-center ${
                         isPast
-                          ? 'text-white/20 cursor-not-allowed'
+                          ? 'bg-[var(--foreground)]/10 text-[var(--foreground)]/10 cursor-not-allowed'
                           : isSelected
-                          ? 'bg-[rgba(229,231,235,0.2)] text-white font-semibold'
+                          ? 'bg-[var(--accent-cyan)]/30 text-[var(--foreground)] font-semibold'
                           : isToday
-                          ? 'bg-[rgba(229,231,235,0.1)] text-white hover:bg-[rgba(229,231,235,0.15)]'
-                          : 'text-white/80 hover:bg-white/10'
+                          ? 'bg-[var(--foreground)]/10 text-[var(--foreground)] hover:bg-[var(--foreground)]/15'
+                          : 'date-button-default'
                       }`}
+                      style={{ boxShadow: 'none', padding: 0 }}
                     >
                       {date.getDate()}
                     </button>
@@ -3906,7 +3978,7 @@ function Home() {
                   setCalendarOpenFor(null);
                   setCalendarSelectedDate(null);
                 }}
-                className="mt-4 w-full rounded-lg border border-white/10 bg-[rgba(229,231,235,0.08)] px-4 py-2 text-sm text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors"
+                className="btn-grey mt-4 w-full rounded-lg px-4 py-2 text-sm transition-colors"
               >
                 Cancel
               </button>

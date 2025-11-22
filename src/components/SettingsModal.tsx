@@ -9,22 +9,43 @@ type Theme = {
   accentCyan: string;
   accentPink: string;
   isLightMode?: boolean;
+  themeName?: string;
 };
 
 const DARK_DEFAULTS: Theme = {
-  background: "#0F1216",
+  background: "#1a1a1a",
   foreground: "#E5E7EB",
   accentCyan: "#00E5FF",
   accentPink: "#FF2D96",
   isLightMode: false,
+  themeName: "dark",
+};
+
+const SOFT_DEFAULTS: Theme = {
+  background: "#3a3630",
+  foreground: "#E5E7EB",
+  accentCyan: "#00E5FF",
+  accentPink: "#FF2D96",
+  isLightMode: false,
+  themeName: "soft",
 };
 
 const LIGHT_DEFAULTS: Theme = {
   background: "#F8FAFC",
   foreground: "#1E293B",
-  accentCyan: "#0EA5E9",
-  accentPink: "#EC4899",
+  accentCyan: "#00E5FF",
+  accentPink: "#FF2D96",
   isLightMode: true,
+  themeName: "light",
+};
+
+const PINK_PASTEL_DEFAULTS: Theme = {
+  background: "#FFDEE6",
+  foreground: "#4A1E3D",
+  accentCyan: "#00E5FF",
+  accentPink: "#FF6B9D",
+  isLightMode: true,
+  themeName: "pink",
 };
 
 function applyTheme(t: Theme) {
@@ -63,6 +84,7 @@ export default function SettingsModal({
 }) {
   const [theme, setTheme] = useState<Theme>(DARK_DEFAULTS);
   const [isLightMode, setIsLightMode] = useState(false);
+  const [currentThemeName, setCurrentThemeName] = useState<string>("dark");
   const [username, setUsername] = useState<string | null>(null);
   const [subscriptionLevel, setSubscriptionLevel] = useState<string>(subscriptionLevelProp);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
@@ -83,12 +105,28 @@ export default function SettingsModal({
     try {
       const raw = localStorage.getItem("atomicTheme");
       const saved = raw ? (JSON.parse(raw) as Theme) : DARK_DEFAULTS;
+      const themeName = saved.themeName || (saved.isLightMode ? "light" : "dark");
       const mode = saved.isLightMode ?? false;
       setIsLightMode(mode);
-      setTheme({ ...(mode ? LIGHT_DEFAULTS : DARK_DEFAULTS), ...saved });
+      setCurrentThemeName(themeName);
+      
+      // Load the correct theme defaults
+      let baseTheme: Theme;
+      if (themeName === "soft") {
+        baseTheme = SOFT_DEFAULTS;
+      } else if (themeName === "light") {
+        baseTheme = LIGHT_DEFAULTS;
+      } else if (themeName === "pink") {
+        baseTheme = PINK_PASTEL_DEFAULTS;
+      } else {
+        baseTheme = DARK_DEFAULTS;
+      }
+      
+      setTheme({ ...baseTheme, ...saved });
     } catch {
       setTheme(DARK_DEFAULTS);
       setIsLightMode(false);
+      setCurrentThemeName("dark");
     }
     
     // Fetch user info if authenticated (only for username, subscription level comes from prop)
@@ -128,12 +166,20 @@ export default function SettingsModal({
     }
   }, [open, isAuthenticated, subscriptionLevelProp]);
 
-  function toggleLightMode() {
-    const newMode = !isLightMode;
-    console.log('Toggling to:', newMode ? 'light' : 'dark');
-    setIsLightMode(newMode);
-    const newTheme = { ...(newMode ? LIGHT_DEFAULTS : DARK_DEFAULTS), isLightMode: newMode };
-    console.log('New theme:', newTheme);
+  function setThemeByName(themeName: string) {
+    let newTheme: Theme;
+    if (themeName === "soft") {
+      newTheme = { ...SOFT_DEFAULTS };
+    } else if (themeName === "light") {
+      newTheme = { ...LIGHT_DEFAULTS };
+    } else if (themeName === "pink") {
+      newTheme = { ...PINK_PASTEL_DEFAULTS };
+    } else {
+      newTheme = { ...DARK_DEFAULTS };
+    }
+    
+    setIsLightMode(newTheme.isLightMode ?? false);
+    setCurrentThemeName(themeName);
     setTheme(newTheme);
     applyTheme(newTheme);
     localStorage.setItem("atomicTheme", JSON.stringify(newTheme));
@@ -346,29 +392,98 @@ export default function SettingsModal({
         </div>
       )}
 
-      {/* Light/Dark Mode Toggle */}
+      {/* Theme Selector */}
       <div className="mb-6">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-[var(--foreground)]">Theme</span>
+        <span className="text-sm font-medium text-[var(--foreground)] mb-3 block">Theme</span>
+        <div className="flex gap-2">
+          {/* Dark Theme Preview */}
           <button
             onClick={(e) => {
               e.stopPropagation();
-              toggleLightMode();
+              if (currentThemeName === "dark") return;
+              setThemeByName("dark");
             }}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              isLightMode ? 'bg-[#0EA5E9]' : 'bg-[#374151]'
+            className={`flex-1 rounded-lg border-2 transition-all ${
+              currentThemeName === "dark"
+                ? 'border-[var(--accent-cyan)] ring-2 ring-[var(--accent-cyan)]/30' 
+                : 'border-[var(--foreground)]/20 hover:border-[var(--foreground)]/40'
             }`}
           >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                isLightMode ? 'translate-x-6' : 'translate-x-1'
-              }`}
-            />
+            <div className="p-2">
+              <div 
+                className="w-full h-10 rounded mb-1.5"
+                style={{ backgroundColor: '#1a1a1a' }}
+              />
+              <div className="text-[10px] font-medium text-[var(--foreground)] text-center">Dark</div>
+            </div>
+          </button>
+          
+          {/* Soft Theme Preview */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (currentThemeName === "soft") return;
+              setThemeByName("soft");
+            }}
+            className={`flex-1 rounded-lg border-2 transition-all ${
+              currentThemeName === "soft"
+                ? 'border-[var(--accent-cyan)] ring-2 ring-[var(--accent-cyan)]/30' 
+                : 'border-[var(--foreground)]/20 hover:border-[var(--foreground)]/40'
+            }`}
+          >
+            <div className="p-2">
+              <div 
+                className="w-full h-10 rounded mb-1.5"
+                style={{ backgroundColor: '#3a3630' }}
+              />
+              <div className="text-[10px] font-medium text-[var(--foreground)] text-center">Soft</div>
+            </div>
+          </button>
+          
+          {/* Light Theme Preview */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (currentThemeName === "light") return;
+              setThemeByName("light");
+            }}
+            className={`flex-1 rounded-lg border-2 transition-all ${
+              currentThemeName === "light"
+                ? 'border-[var(--accent-cyan)] ring-2 ring-[var(--accent-cyan)]/30' 
+                : 'border-[var(--foreground)]/20 hover:border-[var(--foreground)]/40'
+            }`}
+          >
+            <div className="p-2">
+              <div 
+                className="w-full h-10 rounded mb-1.5"
+                style={{ backgroundColor: '#F8FAFC' }}
+              />
+              <div className="text-[10px] font-medium text-[var(--foreground)] text-center">Light</div>
+            </div>
+          </button>
+          
+          {/* Pink Pastel Theme Preview */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (currentThemeName === "pink") return;
+              setThemeByName("pink");
+            }}
+            className={`flex-1 rounded-lg border-2 transition-all ${
+              currentThemeName === "pink"
+                ? 'border-[var(--accent-cyan)] ring-2 ring-[var(--accent-cyan)]/30' 
+                : 'border-[var(--foreground)]/20 hover:border-[var(--foreground)]/40'
+            }`}
+          >
+            <div className="p-2">
+              <div 
+                className="w-full h-10 rounded mb-1.5"
+                style={{ backgroundColor: '#FFDEE6' }}
+              />
+              <div className="text-[10px] font-medium text-[var(--foreground)] text-center">Pink</div>
+            </div>
           </button>
         </div>
-        <p className="mt-1 text-xs text-[#A7AFBE]">
-          {isLightMode ? 'Light mode' : 'Dark mode'}
-        </p>
       </div>
 
       {/* Logout Button */}
