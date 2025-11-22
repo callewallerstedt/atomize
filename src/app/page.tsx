@@ -428,7 +428,7 @@ function HomepageFileUploadArea({
   );
 }
 
-function WelcomeMessage({ tutorialSignal, onQuickLearn }: { tutorialSignal: number; onQuickLearn?: (query: string) => void }) {
+function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn }: { tutorialSignal: number; setTutorialSignal: (updater: (prev: number) => number) => void; onQuickLearn?: (query: string) => void }) {
   const router = useRouter();
   const [welcomeText, setWelcomeText] = useState("");
   const [aiName, setAiName] = useState("");
@@ -581,7 +581,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     return () => {
       window.removeEventListener('synapse:tutorial-trigger', handleTutorialTrigger);
     };
-  }, []);
+  }, [setTutorialSignal]);
   // Load saved homepage chat history on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -3463,7 +3463,8 @@ function Home() {
       />
       <div className="relative z-10">
       <WelcomeMessage 
-        tutorialSignal={tutorialSignal} 
+        tutorialSignal={tutorialSignal}
+        setTutorialSignal={setTutorialSignal}
         onQuickLearn={(query) => {
           setQuickLearnQuery(query);
           handleQuickLearn();
