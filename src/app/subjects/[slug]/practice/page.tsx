@@ -256,21 +256,43 @@ function FileUploadArea({
   return (
     <div className="space-y-2">
       <div
-        onClick={() => fileInputRef.current?.click()}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          fileInputRef.current?.click();
+        }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`rounded-lg border-2 border-dashed p-4 cursor-pointer transition-colors ${
+        className={`rounded-lg border-2 border-dashed p-4 cursor-pointer transition-colors relative ${
           isDragging
             ? 'border-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10'
             : 'border-[var(--accent-cyan)]/40 bg-[var(--background)]/60 hover:border-[var(--accent-cyan)]/60 hover:bg-[var(--background)]/80'
         }`}
+        style={{ pointerEvents: 'auto' }}
       >
-        <div className="text-xs text-[var(--foreground)]/70 text-center">
-          {isDragging ? 'Drop files here' : (message || 'Upload files or drag and drop')}
+        <div className="flex items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              fileInputRef.current?.click();
+            }}
+            className="unified-button flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10"
+            style={{ boxShadow: 'none', pointerEvents: 'auto' }}
+            aria-label="Add files"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 5v14M5 12h14"/>
+            </svg>
+          </button>
+          <div className="text-xs text-[var(--foreground)]/70 text-center flex-1">
+            {isDragging ? 'Drop files here' : (message || 'Upload files or drag and drop')}
+          </div>
         </div>
         {files.length > 0 && (
-          <div className="mt-2 text-xs text-[var(--foreground)]/60">
+          <div className="mt-2 text-xs text-[var(--foreground)]/60 text-center">
             {files.length} file{files.length !== 1 ? 's' : ''} selected
           </div>
         )}
@@ -3171,11 +3193,16 @@ Respond with ONLY the specific topic name, no explanation.`;
           <div className="flex items-center gap-3">
             <div className="flex-1 relative">
               {/* Plus button for dropdown */}
-              <div className="absolute left-2 top-1/2 -translate-y-1/2 z-10" data-qr-dropdown>
+              <div className="absolute left-2 top-1/2 -translate-y-1/2 z-20" data-qr-dropdown style={{ pointerEvents: 'auto' }}>
                 <button
                   type="button"
-                  onClick={() => setShowQrDropdown(!showQrDropdown)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setShowQrDropdown(!showQrDropdown);
+                  }}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-base leading-none text-[var(--foreground)] hover:bg-[var(--background)]/70 disabled:opacity-50 transition-colors"
+                  style={{ pointerEvents: 'auto' }}
                   aria-label="More options"
                   title="More options"
                 >
@@ -3218,6 +3245,17 @@ Respond with ONLY the specific topic name, no explanation.`;
                         className="absolute inset-0 w-full resize-none rounded-xl border border-[var(--foreground)]/10 bg-transparent pl-12 pr-20 py-4.5 text-sm text-transparent placeholder:text-transparent focus:border-[var(--accent-cyan)] focus:outline-none z-10"
                         style={{
                           caretColor: 'var(--foreground)',
+                        }}
+                        onPointerDown={(e) => {
+                          // If clicking in the left area where the plus button is (first 50px), don't capture the event
+                          const target = e.target as HTMLElement;
+                          const rect = target.getBoundingClientRect();
+                          const clickX = e.clientX - rect.left;
+                          // If clicking in the left area where plus button is, let the event pass through
+                          if (clickX < 50) {
+                            e.stopPropagation();
+                            return;
+                          }
                         }}
                       />
                       {/* Visible overlay showing text and images */}
