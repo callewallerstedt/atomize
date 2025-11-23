@@ -458,6 +458,7 @@ function PomodoroTimer() {
 type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  id?: string; // For identifying messages (e.g., for updating loading states)
   uiElements?: Array<{
     type: 'button' | 'file_upload';
     id: string;
