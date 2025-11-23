@@ -25,9 +25,9 @@ export default function QRCameraPage() {
         if (!response.ok) {
           const data = await response.json();
           if (response.status === 404) {
-            setError("Session not found. The QR code may have expired. Please generate a new one.");
+            setError(data.error || "Session not found. The QR code may have expired. Please generate a new one.");
           } else if (response.status === 410) {
-            setError("Session expired. Please generate a new QR code.");
+            setError(data.error || "Session expired. Please generate a new QR code.");
           } else {
             setError(data.error || "Failed to verify session");
           }
@@ -124,9 +124,9 @@ export default function QRCameraPage() {
       if (!response.ok) {
         const data = await response.json();
         if (response.status === 404) {
-          throw new Error("Session not found. The QR code may have expired. Please generate a new one.");
+          throw new Error(data.error || "Session not found. The QR code may have expired. Please generate a new one.");
         } else if (response.status === 410) {
-          throw new Error("Session expired. Please generate a new QR code.");
+          throw new Error(data.error || "Session expired. Please generate a new QR code.");
         } else {
           throw new Error(data.error || "Upload failed");
         }
@@ -144,15 +144,46 @@ export default function QRCameraPage() {
         setCameraActive(false);
       }
 
-      // Show success message briefly, then could redirect or show confirmation
+      // Redirect to sent page after brief delay
       setTimeout(() => {
-        // Could close window or show success message
-      }, 2000);
+        window.location.href = `/qr-camera/${sessionId}/sent`;
+      }, 1000);
     } catch (err: any) {
       setError(err.message || "Failed to upload images");
       setUploading(false);
     }
   };
+
+  // If uploaded, don't show the form
+  if (uploaded) {
+    return (
+      <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] p-4 flex items-center justify-center">
+        <div className="max-w-md mx-auto text-center">
+          <div className="mb-6">
+            <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-green-500/20 flex items-center justify-center">
+              <svg
+                className="w-10 h-10 text-green-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold mb-2">Sent pictures</h1>
+            <p className="text-sm text-[var(--foreground)]/70">
+              Your pictures have been sent successfully.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)] p-4">
@@ -164,12 +195,6 @@ export default function QRCameraPage() {
         {error && (
           <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/40 text-red-200 text-sm">
             {error}
-          </div>
-        )}
-
-        {uploaded && (
-          <div className="mb-4 p-3 rounded-lg bg-green-500/10 border border-green-500/40 text-green-200 text-sm text-center">
-            ✓ Images sent successfully!
           </div>
         )}
 

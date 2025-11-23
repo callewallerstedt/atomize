@@ -1148,7 +1148,10 @@ function toggleStar(flashcardId: string) {
           </div>
         ) : content && content.lessons && content.lessons[activeLessonIndex]?.body ? (
             <div className="space-y-6">
-              
+              {/* Flashcard tip */}
+              <p className="text-xs text-[var(--foreground)]/50 italic">
+                Tip: Ask Chad to create flashcards about any lesson you are on.
+              </p>
               <div className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-5 text-[var(--foreground)] shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
               
               <div className="flex items-center gap-2 mb-4">
@@ -1773,6 +1776,18 @@ function toggleStar(flashcardId: string) {
                           // Get CSS zoom factor and compensate coordinates
                           const htmlZoom = parseFloat(window.getComputedStyle(document.documentElement).zoom || '1');
                           
+                          // Check if mouse is actually within the word's bounding rect
+                          // This ensures we only highlight when directly over the word, not just on the same line
+                          const isMouseOverWord = boundingRect && 
+                            x >= boundingRect.left && 
+                            x <= boundingRect.right && 
+                            y >= boundingRect.top && 
+                            y <= boundingRect.bottom;
+                          
+                          if (!isMouseOverWord) {
+                            return setHoverWordRects([]);
+                          }
+                          
                           if (boundingRect && boundingRect.width > 0 && boundingRect.height > 0) {
                             // Compensate for CSS zoom: divide coordinates by zoom factor
                             // getBoundingClientRect() returns coordinates in zoomed space, but fixed positioning uses unzoomed space
@@ -1793,6 +1808,20 @@ function toggleStar(flashcardId: string) {
                           } else {
                             // Fallback to getClientRects for multi-line words
                             if (!clientRects || clientRects.length === 0) return setHoverWordRects([]);
+                            
+                            // Check if mouse is over any of the client rects
+                            let isMouseOverAnyRect = false;
+                            for (let i = 0; i < clientRects.length; i++) {
+                              const rect = clientRects[i];
+                              if (rect && rect.width > 0 && rect.height > 0) {
+                                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                                  isMouseOverAnyRect = true;
+                                  break;
+                                }
+                              }
+                            }
+                            if (!isMouseOverAnyRect) return setHoverWordRects([]);
+                            
                             const validRects: Array<{ left: number; top: number; width: number; height: number }> = [];
                             for (let i = 0; i < clientRects.length; i++) {
                               const rect = clientRects[i];

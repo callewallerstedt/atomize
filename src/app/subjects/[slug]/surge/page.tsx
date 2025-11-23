@@ -278,8 +278,11 @@ function extractQuizQuestionsFromJson(raw: string): SurgeQuizQuestion[] {
     const optionsRaw: any[] = Array.isArray(item?.options) ? item.options : [];
     const options = optionsRaw.map((opt) => {
       let text = (opt ?? "").toString().trim();
-      // Remove letter prefixes like "A) ", "B) ", etc. if they exist
-      text = text.replace(/^[A-D]\)\s*/i, "");
+      // Remove letter prefixes like "A) ", "B) ", "AA) ", "BB) ", etc. if they exist
+      // Matches any combination of letters followed by ) and optional whitespace
+      text = text.replace(/^[A-Z]+\s*\)\s*/i, "");
+      // Also remove if it's just a single letter followed by period or colon
+      text = text.replace(/^[A-Z]\s*[\.:]\s*/i, "");
       return text;
     }).filter(Boolean).slice(0, 4);
     const correctOption = (item?.correctOption ?? item?.correct ?? item?.answer ?? "").toString().trim().charAt(0).toUpperCase();
@@ -431,7 +434,7 @@ function buildSurgeContext(
       lines.push("- NO dashes, NO bullets, NO markdown formatting - just the 4 TOPIC_SUGGESTION lines");
       lines.push("- If you write anything other than the 4 TOPIC_SUGGESTION lines, it will break the system");
     } else {
-      // LEARN phase teaching prompt (Surge) – prose-only, no quiz or practice questions in body
+      // LEARN phase teaching prompt (Surge) – use same prompt as normal lessons
       lines.push("You produce ONE comprehensive GitHub Flavored Markdown lesson that teaches the assigned topic from zero knowledge to problem-solving ability.");
       lines.push("");
       lines.push("LENGTH:");
@@ -441,8 +444,8 @@ function buildSurgeContext(
       lines.push("");
       lines.push("OUTPUT:");
       lines.push("- Output a single Markdown document only.");
-      lines.push("- The lesson body MUST NOT contain any explicit quiz section, numbered practice problem list, or unsolved questions.");
-      lines.push("- You may include fully worked examples (with both problem and solution) when they genuinely help understanding.");
+      lines.push("- Do NOT include any JSON metadata block.");
+      lines.push("- Just write the lesson content directly in Markdown.");
       lines.push("");
       lines.push("MARKDOWN RULES:");
       lines.push("- Use headings: #, ##, ### only.");
@@ -459,17 +462,20 @@ function buildSurgeContext(
       lines.push("- Include multiple worked examples if they genuinely help the topic. Each example must be complete and step-by-step.");
       lines.push("");
       lines.push("SYMBOL TABLE:");
-      lines.push("- At the very bottom, you may add a small Markdown table listing symbols, notations, or short concepts ONLY if the lesson introduced non-obvious symbols that students must keep track of.");
+      lines.push("- At the very bottom, create a small Markdown table listing symbols, notations, or short concepts ONLY if the lesson introduced non-obvious symbols that students must keep track of.");
       lines.push("");
       lines.push("SCOPE:");
-      lines.push("- Stay strictly on the assigned topic.");
+      lines.push("- CRITICAL: Focus EXCLUSIVELY on the assigned topic. Do NOT teach other topics, even if they are related.");
+      lines.push("- Do NOT introduce concepts from other topics in the course unless they are absolutely prerequisite and already covered.");
+      lines.push("- If the topic is part of a larger subject, teach ONLY this specific topic in depth. Reference other topics only if necessary for context, but do not teach them.");
       lines.push("- If course_context mentions a specific practice question, emphasize the method relevant to that question while still covering the full topic.");
+      lines.push("- Every example, explanation, and concept must directly relate to the assigned topic.");
       lines.push("");
       lines.push("LANGUAGE:");
       if (courseLanguageName) {
-        lines.push(`- Write all lesson prose in ${courseLanguageName}.`);
+        lines.push(`- Write all metadata and prose in ${courseLanguageName}.`);
       } else {
-        lines.push("- Write all lesson prose in English.");
+        lines.push("- Write all metadata and prose in English.");
       }
       lines.push("");
       lines.push("FINAL RULE:");
@@ -970,6 +976,39 @@ export default function SurgePage() {
       return;
     }
     
+    // Check if all topics are reviewed - if so, don't reset phase
+    const currentDataForReview = loadSubjectData(slug);
+    const reviewedTopics = currentDataForReview?.reviewedTopics || {};
+    const allSurgeLogs = getSurgeLog(slug);
+    const courseName = currentDataForReview?.subject || "";
+    const allTopics = new Set<string>();
+    allSurgeLogs.forEach(entry => {
+      if (entry.repeatedTopics && Array.isArray(entry.repeatedTopics)) {
+        entry.repeatedTopics.forEach(rt => {
+          if (rt?.topic && rt.topic !== courseName) {
+            allTopics.add(rt.topic);
+          }
+        });
+      }
+      if (entry.newTopic && entry.newTopic !== courseName) {
+        allTopics.add(entry.newTopic);
+      }
+      if (entry.quizResults && Array.isArray(entry.quizResults)) {
+        entry.quizResults.forEach(result => {
+          if (result.topic && result.topic !== courseName) {
+            allTopics.add(result.topic);
+          }
+        });
+      }
+    });
+    const topicsToReview = Array.from(allTopics);
+    const allReviewed = topicsToReview.length > 0 && topicsToReview.every(topic => reviewedTopics[topic]);
+    
+    // If all topics are reviewed, don't reset phase (user can manually navigate)
+    if (allReviewed) {
+      return;
+    }
+    
     if (lastSurge) {
       const lastDate = new Date(lastSurge.timestamp);
       const today = new Date();
@@ -994,7 +1033,7 @@ export default function SurgePage() {
       // Don't automatically switch to learn phase
       // The introduction will be shown when there are no topics to review
     }
-  }, [lastSurgeTimestamp, phase, currentTopic, sending, conversationLength]); // Use stable extracted values
+  }, [lastSurgeTimestamp, phase, currentTopic, sending, conversationLength, slug]); // Use stable extracted values
 
   // Build context when phase or data changes
   useEffect(() => {
@@ -1220,7 +1259,10 @@ export default function SurgePage() {
         }
       });
       
-      const topicsToReview = Array.from(allTopics);
+      // Filter out already reviewed topics
+      const currentDataForQuestions = loadSubjectData(slug);
+      const reviewedTopicsForQuestions = currentDataForQuestions?.reviewedTopics || {};
+      const topicsToReview = Array.from(allTopics).filter(topic => !reviewedTopicsForQuestions[topic]);
       
       // If no topics to review, don't try to generate questions
       if (topicsToReview.length === 0) {
@@ -1273,7 +1315,8 @@ export default function SurgePage() {
 - Be COMPLETELY DIFFERENT from all previous questions (check: ${previousQuestions.length} previous questions)
 - Focus on deep understanding, not just memorization
 - Help reinforce key concepts through active recall
-- Be suitable for spaced repetition practice`,
+- Be suitable for spaced repetition practice
+- CRITICAL: All incorrect options (distractors) must be plausible with minor details wrong, not obviously wrong. Use common misconceptions or subtle errors that require careful understanding to identify.`,
           }),
         });
         
@@ -1780,7 +1823,31 @@ export default function SurgePage() {
       const isLastReview = currentReviewIndex === reviewQuestions.length - 1;
       
       if (isLastReview) {
-        // Review complete - transition to learn phase
+        // Review complete - save reviewed topics and transition to learn phase
+        const reviewedTopicsSet = new Set<string>();
+        reviewQuestions.forEach(q => {
+          const topic = (q as any).topic;
+          if (topic) {
+            reviewedTopicsSet.add(topic);
+          }
+        });
+        
+        // Save reviewed topics to subject data
+        if (reviewedTopicsSet.size > 0) {
+          const currentData = loadSubjectData(slug);
+          if (currentData) {
+            const reviewedTopics = currentData.reviewedTopics || {};
+            const now = Date.now();
+            reviewedTopicsSet.forEach(topic => {
+              reviewedTopics[topic] = now;
+            });
+            currentData.reviewedTopics = reviewedTopics;
+            saveSubjectDataAsync(slug, currentData).catch(err => {
+              console.error("Failed to save reviewed topics:", err);
+            });
+          }
+        }
+        
         setPhase("learn");
         setQuizQuestions([]);
         setQuizResponses({});
@@ -1795,6 +1862,7 @@ export default function SurgePage() {
       );
       if (nextReviewIdx !== -1) {
         setCurrentQuizIndex(nextReviewIdx);
+        setShortAnswer("");
       }
       return;
     }
@@ -1809,6 +1877,7 @@ export default function SurgePage() {
       );
       if (nextMcIdx !== -1) {
         setCurrentQuizIndex(nextMcIdx);
+        setShortAnswer("");
         // If we're moving to the last MC question (question 5), trigger harder questions generation
         const nextQ = quizQuestions[nextMcIdx];
         const nextMcIndex = mcQuestions.findIndex((q) => q.id === nextQ.id);
@@ -2241,7 +2310,7 @@ export default function SurgePage() {
     return sendMessageWithContext(messages);
   };
 
-  const handleTopicSelect = (topic: string) => {
+  const handleTopicSelect = async (topic: string) => {
     setCurrentTopic(topic);
     setSessionData(prev => ({ ...prev, newTopic: topic }));
     setShowTopicSelection(false);
@@ -2252,29 +2321,94 @@ export default function SurgePage() {
     setShowLessonCard(false);
     // Reset trigger so we can send a new message
     topicSuggestionTriggered.current = false;
-    // Wait for state to update, then rebuild context and send system message
-    setTimeout(() => {
-      // Rebuild context with the new topic - use current state values
-      const updatedContext = buildSurgeContext(slug, data, practiceLog, lastSurge, examSnipeData, phase, topic);
-      setSurgeContext(updatedContext);
+    
+    // Use the same endpoint as normal lessons for consistency
+    try {
+      setSending(true);
+      setError(null);
       
-      // Send a user message to trigger lesson generation
-      // The context already includes all the lesson generation instructions
-      // We'll hide this message from the UI, but it triggers the lesson generation
-      const userMessage: ChatMessage = { 
-        role: "user", 
-        content: `Generate a comprehensive lesson on "${topic}". Use H1 headings (#) for chapters. The context contains all instructions.` 
-      };
-      
-      // Initialize assistant message immediately so user sees generation starting
-      // Also reset lesson state to ensure clean start
-      setConversation([userMessage, { role: "assistant", content: "" }]);
-      conversationRef.current = [userMessage, { role: "assistant", content: "" }];
+      // Initialize conversation state for streaming
+      setConversation([{ role: "assistant", content: "" }]);
+      conversationRef.current = [{ role: "assistant", content: "" }];
       setShowLessonCard(false);
       
-      // Send with the updated context directly and the topic to prevent topic suggestions
-      sendMessageWithContext([userMessage], updatedContext, topic);
-    }, 300);
+      const res = await fetch("/api/node-lesson/stream", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: data?.subject || slug,
+          topic: topic,
+          course_context: data?.course_context || "",
+          combinedText: data?.combinedText || "",
+          topicSummary: "", // Surge doesn't use topic summaries
+          lessonsMeta: [{ type: "Full Lesson", title: topic }], // Single full lesson
+          lessonIndex: 0,
+          previousLessons: [],
+          generatedLessons: [],
+          otherLessonsMeta: [],
+          courseTopics: [], // Not needed for Surge
+          languageName: data?.course_language_name || "",
+        })
+      });
+      
+      if (!res.ok) {
+        const errorJson = await res.json().catch(() => ({}));
+        throw new Error(errorJson?.error || `Server error (${res.status})`);
+      }
+      
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      
+      const decoder = new TextDecoder();
+      let accumulated = "";
+      
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6);
+          if (!payload) continue;
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed.type === "text") {
+              accumulated += parsed.content;
+              
+              // Update conversation state
+              setConversation([{ role: "assistant", content: accumulated }]);
+              conversationRef.current = [{ role: "assistant", content: accumulated }];
+              
+              // Update lesson card state
+              if (accumulated.length > 100) {
+                setShowLessonCard(true);
+              }
+              
+              // Update session data
+              setSessionData(prev => ({
+                ...prev,
+                newTopicLesson: accumulated,
+              }));
+            } else if (parsed.type === "done") {
+              setSending(false);
+            } else if (parsed.type === "error") {
+              throw new Error(parsed.error || "Streaming error");
+            }
+          } catch (e) {
+            console.error("Error parsing stream chunk:", e);
+          }
+        }
+      }
+      
+      setSending(false);
+    } catch (err: any) {
+      console.error("Error generating lesson:", err);
+      setError(err?.message || "Failed to generate lesson");
+      setSending(false);
+    }
   };
 
   const handleCustomTopicSubmit = () => {
@@ -2952,7 +3086,7 @@ export default function SurgePage() {
                 Quiz
               </button>
             </div>
-            <div className={`flex-1 h-2 rounded-full mt-1 ${phase === "repeat" || phase === "learn" || phase === "quiz" || phase === "complete" ? "bg-[var(--accent-cyan)]/10" : "bg-[var(--foreground)]/10"}`}>
+            <div className="flex-1 h-2 rounded-full mt-1 chat-input-container">
               <div 
                 className={`h-full rounded-full transition-all ${phase === "repeat" || phase === "learn" || phase === "quiz" || phase === "complete" ? "bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)]" : ""}`} 
                 style={{ width: phase === "repeat" ? "15%" : phase === "learn" ? "50%" : phase === "quiz" ? "85%" : "100%" }} 
@@ -2990,43 +3124,14 @@ export default function SurgePage() {
                     // Get all surge log entries and extract all unique topics
                     const allSurgeLogs = getSurgeLog(slug);
                     
-                    // Get the course/subject name to filter it out
-                    const courseName = data?.subject || "";
-                    
-                    // Extract all unique topics from all surge log entries
-                    const allTopics = new Set<string>();
-                    allSurgeLogs.forEach(entry => {
-                      // Add topics from repeatedTopics
-                      if (entry.repeatedTopics && Array.isArray(entry.repeatedTopics)) {
-                        entry.repeatedTopics.forEach(rt => {
-                          if (rt?.topic && rt.topic !== courseName) {
-                            allTopics.add(rt.topic);
-                          }
-                        });
-                      }
-                      // Add newTopic (but not if it's the course name)
-                      if (entry.newTopic && entry.newTopic !== courseName) {
-                        allTopics.add(entry.newTopic);
-                      }
-                      // Add topics from quizResults (but not if it's the course name)
-                      if (entry.quizResults && Array.isArray(entry.quizResults)) {
-                        entry.quizResults.forEach(result => {
-                          if (result.topic && result.topic !== courseName) {
-                            allTopics.add(result.topic);
-                          }
-                        });
-                      }
-                    });
-                    
-                    const topicsToReview = Array.from(allTopics);
-                    
-                    if (topicsToReview.length === 0) {
-                      // No topics to review - show introduction aligned with homepage styling
+                    // If log is empty, show welcome message immediately
+                    if (!allSurgeLogs || allSurgeLogs.length === 0) {
+                      // No surge log entries - show introduction aligned with homepage styling
                       return (
                         <div className="rounded-[28px] border border-white/10 bg-[var(--background)] px-6 py-8 md:px-10 md:py-10">
                           <div className="flex flex-col gap-6">
                             <div className="text-center space-y-2">
-                              <h2 className="text-2xl md:text-[32px] font-semibold text-white leading-tight">
+                              <h2 className="text-2xl md:text-[32px] font-semibold leading-tight text-[var(--foreground)]/80">
                                 Welcome to Surge
                               </h2>
                               <p className="text-sm text-white/60 max-w-2xl mx-auto">
@@ -3083,6 +3188,7 @@ export default function SurgePage() {
                             <div className="flex flex-wrap items-center justify-center gap-3">
                               <button
                                 onClick={() => {
+                                  userSetPhaseRef.current = true; // Mark that user manually set the phase
                                   setPhase("learn");
                                   setCurrentTopic("");
                                   setSuggestedTopics([]);
@@ -3092,6 +3198,129 @@ export default function SurgePage() {
                                   conversationRef.current = [];
                                   setCurrentQuestion("");
                                   topicSuggestionTriggered.current = false;
+                                  // Clear quiz state if any
+                                  setQuizQuestions([]);
+                                  setQuizResponses({});
+                                  setCurrentQuizIndex(0);
+                                  setShortAnswer("");
+                                }}
+                                className="inline-flex h-10 items-center rounded-full border border-white/15 bg-white/5 px-6 text-sm font-semibold text-white/90 hover:bg-white/10 transition-colors"
+                              >
+                                Continue
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                    
+                    // Get the course/subject name to filter it out
+                    const courseName = data?.subject || "";
+                    
+                    // Extract all unique topics from all surge log entries
+                    const allTopics = new Set<string>();
+                    allSurgeLogs.forEach(entry => {
+                      // Add topics from repeatedTopics
+                      if (entry.repeatedTopics && Array.isArray(entry.repeatedTopics)) {
+                        entry.repeatedTopics.forEach(rt => {
+                          if (rt?.topic && rt.topic !== courseName) {
+                            allTopics.add(rt.topic);
+                          }
+                        });
+                      }
+                      // Add newTopic (but not if it's the course name)
+                      if (entry.newTopic && entry.newTopic !== courseName) {
+                        allTopics.add(entry.newTopic);
+                      }
+                      // Add topics from quizResults (but not if it's the course name)
+                      if (entry.quizResults && Array.isArray(entry.quizResults)) {
+                        entry.quizResults.forEach(result => {
+                          if (result.topic && result.topic !== courseName) {
+                            allTopics.add(result.topic);
+                          }
+                        });
+                      }
+                    });
+                    
+                    const topicsToReview = Array.from(allTopics);
+                    
+                    // If no topics found after processing, show welcome message
+                    if (topicsToReview.length === 0) {
+                      return (
+                        <div className="rounded-[28px] border border-white/10 bg-[var(--background)] px-6 py-8 md:px-10 md:py-10">
+                          <div className="flex flex-col gap-6">
+                            <div className="text-center space-y-2">
+                              <h2 className="text-2xl md:text-[32px] font-semibold leading-tight text-[var(--foreground)]/80">
+                                Welcome to Surge
+                              </h2>
+                              <p className="text-sm text-white/60 max-w-2xl mx-auto">
+                                Let Chad take control of your learning, and just focus on understanding.
+                              </p>
+                            </div>
+
+                            <div className="flex flex-col md:flex-row gap-3">
+                              {[
+                                {
+                                  label: "Review",
+                                  icon: (
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                                      <path d="M21 3v5h-5" />
+                                      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                                      <path d="M3 21v-5h5" />
+                                    </svg>
+                                  ),
+                                },
+                                {
+                                  label: "Learn",
+                                  icon: (
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+                                      <path d="M8 7h6" />
+                                      <path d="M8 11h8" />
+                                      <path d="M8 15h4" />
+                                    </svg>
+                                  ),
+                                },
+                                {
+                                  label: "Quiz",
+                                  icon: (
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M9 11l3 3L22 4" />
+                                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                                    </svg>
+                                  ),
+                                },
+                              ].map((item, idx) => (
+                                <div
+                                  key={item.label}
+                                  className="flex-1 flex items-center gap-3 rounded-2xl border border-white/10 bg-[var(--background)]/80 px-5 py-4 text-white/75"
+                                >
+                                  <div className="text-white/50 flex-shrink-0">
+                                    {item.icon}
+                                  </div>
+                                  <div className="text-sm font-medium text-white">{item.label}</div>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-center gap-3">
+                              <button
+                                onClick={() => {
+                                  userSetPhaseRef.current = true;
+                                  setPhase("learn");
+                                  setCurrentTopic("");
+                                  setSuggestedTopics([]);
+                                  setShowTopicSelection(false);
+                                  setShowCustomInput(false);
+                                  setConversation([]);
+                                  conversationRef.current = [];
+                                  setCurrentQuestion("");
+                                  topicSuggestionTriggered.current = false;
+                                  setQuizQuestions([]);
+                                  setQuizResponses({});
+                                  setCurrentQuizIndex(0);
+                                  setShortAnswer("");
                                 }}
                                 className="inline-flex h-10 items-center rounded-full border border-white/15 bg-white/5 px-6 text-sm font-semibold text-white/90 hover:bg-white/10 transition-colors"
                               >
@@ -3104,47 +3333,126 @@ export default function SurgePage() {
                     }
                     
                     // Has topics to review
+                    const currentDataForReview = loadSubjectData(slug);
+                    const reviewedTopics = currentDataForReview?.reviewedTopics || {};
+                    
+                    // Separate topics into reviewed and not reviewed
+                    const notReviewedTopics = topicsToReview.filter(topic => !reviewedTopics[topic]);
+                    const reviewedTopicsList = topicsToReview.filter(topic => reviewedTopics[topic]);
+                    
                     return (
-                      <div className="rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 p-8">
+                      <div className="rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 p-8">
                         <div className="text-center mb-6">
                           <div className="text-xl font-semibold text-[var(--foreground)] mb-2">
                             Let's review
                           </div>
                           <div className="text-sm text-[var(--foreground)]/70 mb-6">
-                            We'll go through focused questions on these topics:
+                            {notReviewedTopics.length > 0 
+                              ? "We'll go through focused questions on these topics:"
+                              : "All topics have been reviewed. You can reset topics to review them again."}
                           </div>
-                          <div className="space-y-2 mb-6">
-                            {topicsToReview.map((topic, idx) => (
-                              <div key={idx} className="text-base text-[var(--foreground)]">
-                                • {topic}
+                          {notReviewedTopics.length > 0 && (
+                            <div className="space-y-2 mb-6">
+                              {notReviewedTopics.map((topic, idx) => (
+                                <div key={idx} className="text-base text-[var(--foreground)]">
+                                  • {topic}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {reviewedTopicsList.length > 0 && (
+                            <div className="space-y-2 mb-6">
+                              <div className="text-sm font-medium text-[var(--foreground)]/60 mb-2">
+                                Already reviewed:
                               </div>
-                            ))}
-                          </div>
-                          <button
-                            onClick={async () => {
-                              // Prevent multiple clicks
-                              if (quizLoading || reviewStartRequested.current) {
-                                console.log("Already generating review questions, please wait...");
-                                return;
-                              }
-                              
-                              // Set flag immediately to prevent duplicate calls
-                              reviewStartRequested.current = true;
-                              
-                              // Reset quiz state
-                              setQuizQuestions([]);
-                              setQuizResponses({});
-                              setCurrentQuizIndex(0);
-                              setShortAnswer("");
-                              harderQuestionsRequested.current = false;
-                              
-                              // Call the function directly - it has guards to prevent multiple calls
-                              await requestReviewQuestions();
-                            }}
-                            className="px-8 py-3 rounded-lg bg-[var(--accent-cyan)]/20 hover:bg-[var(--accent-cyan)]/30 text-[var(--foreground)] font-medium transition-colors"
-                          >
-                            Start
-                          </button>
+                              {reviewedTopicsList.map((topic, idx) => (
+                                <div key={idx} className="flex items-center justify-center gap-2 text-base text-[var(--foreground)]/70">
+                                  <span>✓ {topic}</span>
+                                  <button
+                                    onClick={async () => {
+                                      const data = loadSubjectData(slug);
+                                      if (data) {
+                                        if (!data.reviewedTopics) {
+                                          data.reviewedTopics = {};
+                                        }
+                                        delete data.reviewedTopics[topic];
+                                        await saveSubjectDataAsync(slug, data);
+                                        // Force re-render by toggling phase
+                                        setPhase("learn");
+                                        setTimeout(() => setPhase("repeat"), 50);
+                                      }
+                                    }}
+                                    className="btn-grey text-xs px-2 py-1"
+                                    title="Reset review status"
+                                  >
+                                    Reset
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {notReviewedTopics.length > 0 ? (
+                            <button
+                              onClick={async () => {
+                                // Prevent multiple clicks
+                                if (quizLoading || reviewStartRequested.current) {
+                                  console.log("Already generating review questions, please wait...");
+                                  return;
+                                }
+                                
+                                // Set flag immediately to prevent duplicate calls
+                                reviewStartRequested.current = true;
+                                
+                                // Reset quiz state
+                                setQuizQuestions([]);
+                                setQuizResponses({});
+                                setCurrentQuizIndex(0);
+                                setShortAnswer("");
+                                harderQuestionsRequested.current = false;
+                                
+                                // Call the function directly - it has guards to prevent multiple calls
+                                await requestReviewQuestions();
+                              }}
+                              className="btn-grey rounded-lg font-medium"
+                              style={{ 
+                                paddingLeft: '3rem',
+                                paddingRight: '3rem',
+                                paddingTop: '1.125rem',
+                                paddingBottom: '1.125rem',
+                                fontSize: '1.125rem'
+                              }}
+                            >
+                              Start
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setPhase("learn");
+                                setQuizQuestions([]);
+                                setQuizResponses({});
+                                setCurrentQuizIndex(0);
+                                setShortAnswer("");
+                                setCurrentTopic("");
+                                setSuggestedTopics([]);
+                                setShowTopicSelection(false);
+                                setShowCustomInput(false);
+                                setConversation([]);
+                                conversationRef.current = [];
+                                setCurrentQuestion("");
+                                topicSuggestionTriggered.current = false;
+                              }}
+                              className="btn-grey rounded-lg font-medium"
+                              style={{ 
+                                paddingLeft: '3rem',
+                                paddingRight: '3rem',
+                                paddingTop: '1.125rem',
+                                paddingBottom: '1.125rem',
+                                fontSize: '1.125rem'
+                              }}
+                            >
+                              Continue
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -3165,7 +3473,7 @@ export default function SurgePage() {
             
             {/* Quiz View - Review or Regular Quiz */}
             {(phase === "quiz" || phase === "repeat") && quizQuestions.length > 0 && currentQuizIndex < quizQuestions.length ? (
-              <div className="rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 p-6">
+              <div className="rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 p-6">
                 {(() => {
                   const currentQ = quizQuestions[currentQuizIndex];
                   if (!currentQ) return null;
@@ -3336,24 +3644,68 @@ export default function SurgePage() {
                             {currentQ.options?.map((option, optIdx) => {
                               const optionLetter = String.fromCharCode(65 + optIdx);
                               const response = quizResponses[currentQ.id];
-                              const isAnswered = !!response;
+                              const isAnswered = !!response?.answer;
                               const isSelected = response?.answer === optionLetter;
                               const isCorrect =
                                 currentQ.correctOption &&
                                 currentQ.correctOption.toUpperCase() === optionLetter;
-                              const optionClasses = isAnswered
-                                ? isCorrect
-                                  ? "border-green-500 bg-green-500/10"
-                                  : isSelected
-                                  ? "border-red-500 bg-red-500/10"
-                                  : "border-[var(--foreground)]/10 opacity-60"
-                                : "border-[var(--foreground)]/20 bg-[var(--background)]/60 hover:border-[var(--accent-cyan)]/30 hover:bg-[var(--accent-cyan)]/10";
+                              
+                              // Determine styling based on answer state
+                              // Base styles to match btn-grey exactly
+                              const baseButtonStyle: React.CSSProperties = {
+                                padding: '0.75rem 1rem',
+                                borderRadius: '0.5rem',
+                                fontSize: 'inherit',
+                                lineHeight: 'inherit',
+                                boxShadow: 'none',
+                                width: '100%',
+                                textAlign: 'left' as const,
+                              };
+                              
+                              let buttonStyle: React.CSSProperties = { ...baseButtonStyle };
+                              let buttonClasses = "btn-grey w-full text-left rounded-lg transition-all disabled:cursor-not-allowed";
+                              
+                              if (isAnswered) {
+                                if (isCorrect) {
+                                  // Green for correct answer - override colors but keep btn-grey for size
+                                  buttonStyle = {
+                                    ...baseButtonStyle,
+                                    borderWidth: '1px',
+                                    borderStyle: 'solid',
+                                    borderColor: 'rgb(34, 197, 94)',
+                                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                                    color: 'var(--foreground)',
+                                  };
+                                  // Remove btn-grey class to allow color override
+                                  buttonClasses = "w-full text-left rounded-lg transition-all disabled:cursor-not-allowed";
+                                } else if (isSelected) {
+                                  // Red for selected incorrect answer - override colors but keep size
+                                  buttonStyle = {
+                                    ...baseButtonStyle,
+                                    borderWidth: '1px',
+                                    borderStyle: 'solid',
+                                    borderColor: 'rgb(239, 68, 68)',
+                                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                    color: 'var(--foreground)',
+                                  };
+                                  // Remove btn-grey class to allow color override
+                                  buttonClasses = "w-full text-left rounded-lg transition-all disabled:cursor-not-allowed";
+                                } else {
+                                  // Unselected options - use btn-grey with opacity
+                                  buttonStyle = {
+                                    ...baseButtonStyle,
+                                    opacity: 0.6,
+                                  };
+                                }
+                              }
+                              
                               return (
                                 <button
                                   key={optIdx}
                                   onClick={() => handleMCOptionSelect(optionLetter)}
                                   disabled={isAnswered}
-                                  className={`w-full text-left px-4 py-3 rounded-lg border transition-all text-[var(--foreground)] ${optionClasses} disabled:cursor-not-allowed`}
+                                  className={buttonClasses}
+                                  style={buttonStyle}
                                 >
                                   <span className="font-semibold mr-2">{optionLetter})</span>
                                   {option}
@@ -3372,7 +3724,7 @@ export default function SurgePage() {
                             onChange={(e) => setShortAnswer(e.target.value)}
                             placeholder="Type your answer here..."
                             disabled={!!quizResponses[currentQ.id]?.checked}
-                            className="w-full min-h-[120px] px-4 py-3 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/60 text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-cyan)]/50 resize-none disabled:opacity-70 disabled:cursor-not-allowed"
+                            className="chat-input-container w-full min-h-[120px] px-4 py-3 rounded-lg border border-[var(--foreground)]/10 text-[var(--foreground)] focus:outline-none focus:border-[var(--foreground)]/20 resize-none disabled:opacity-70 disabled:cursor-not-allowed"
                           />
                         </div>
                       )}
@@ -3385,7 +3737,8 @@ export default function SurgePage() {
                           <button
                             onClick={handleNextQuestion}
                             disabled={!quizResponses[currentQ.id]?.answer || awaitingHarder || quizLoading}
-                            className="px-6 py-2 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] text-white font-medium transition-opacity disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
+                            className="btn-grey rounded-lg font-medium"
+                            style={{ padding: '0.5rem 1.5rem' }}
                           >
                             {awaitingHarder ? "Generating harder questions..." : nextLabel}
                           </button>
@@ -3397,7 +3750,8 @@ export default function SurgePage() {
                               checkingAnswer ||
                               (!quizResponses[currentQ.id]?.checked && !shortAnswer.trim())
                             }
-                            className="px-6 py-2 rounded-lg bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-pink)] text-white font-medium transition-opacity disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
+                            className="btn-grey rounded-lg font-medium"
+                            style={{ padding: '0.5rem 1.5rem' }}
                           >
                             {checkingAnswer
                               ? "Checking..."
@@ -3435,8 +3789,14 @@ export default function SurgePage() {
                       <div className="flex flex-col sm:flex-row gap-3 justify-center items-center mb-8">
                         <button
                           onClick={() => handleTopicSelect(recommendedTopic)}
-                          className="px-6 py-2 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-sm text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors"
-                          style={{ boxShadow: 'none' }}
+                          className="btn-grey rounded-lg font-medium"
+                          style={{ 
+                            paddingLeft: '3rem',
+                            paddingRight: '3rem',
+                            paddingTop: '1.125rem',
+                            paddingBottom: '1.125rem',
+                            fontSize: '1.125rem'
+                          }}
                         >
                           Start
                         </button>
@@ -3477,14 +3837,16 @@ export default function SurgePage() {
                                   }
                                 }}
                                 placeholder="Enter custom topic..."
-                                className="flex-1 min-w-[200px] rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-2 text-[var(--foreground)] focus:outline-none focus:border-[var(--accent-cyan)]/50"
+                                className="chat-input-container flex-1 min-w-[200px] rounded-lg border border-[var(--foreground)]/10 px-4 py-2 text-[var(--foreground)] focus:outline-none focus:border-[var(--foreground)]/20"
+                                style={{ boxShadow: 'none' }}
                                 autoFocus
                               />
                               <div className="flex gap-2">
                                 <button
                                   onClick={handleCustomTopicSubmit}
                                   disabled={!customTopicInput.trim()}
-                                  className="px-4 py-2 rounded-lg bg-[var(--accent-cyan)]/20 hover:bg-[var(--accent-cyan)]/30 text-[var(--foreground)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                  className="btn-grey rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                  style={{ padding: '0.5rem 1.5rem' }}
                                 >
                                   Add topic
                                 </button>
@@ -3493,7 +3855,8 @@ export default function SurgePage() {
                                     setShowCustomInput(false);
                                     setCustomTopicInput("");
                                   }}
-                                  className="px-4 py-2 rounded-lg bg-[var(--foreground)]/5 hover:bg-[var(--foreground)]/10 text-[var(--foreground)] transition-colors"
+                                  className="btn-grey rounded-lg font-medium"
+                                  style={{ padding: '0.5rem 1.5rem' }}
                                 >
                                   Cancel
                                 </button>
@@ -3516,6 +3879,10 @@ export default function SurgePage() {
             {/* Lesson Card View */}
             {phase === "learn" && showLessonCard ? (
               <div className="space-y-4">
+                {/* Flashcard tip */}
+                <p className="text-xs text-[var(--foreground)]/50 italic">
+                  Tip: Ask Chad to create flashcards about any lesson you are on.
+                </p>
                 <div 
                   className="rounded-xl border border-[var(--accent-cyan)]/30 bg-[var(--background)]/80 p-6 min-h-[500px] flex flex-col lesson-content surge-lesson-card" 
                   data-topic={currentTopic}
@@ -3732,10 +4099,17 @@ export default function SurgePage() {
                         }
                       }}
                       disabled={sending}
-                      className="p-3 rounded-lg bg-[var(--accent-cyan)]/20 hover:bg-[var(--accent-cyan)]/30 text-[var(--foreground)] transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="btn-grey rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ 
+                        paddingLeft: '3rem',
+                        paddingRight: '3rem',
+                        paddingTop: '1.125rem',
+                        paddingBottom: '1.125rem',
+                        fontSize: '1.125rem'
+                      }}
                       aria-label="Start Quiz"
                     >
-                      <span className="text-sm font-medium">{sending ? "Generating..." : "Start Quiz"}</span>
+                      {sending ? "Generating..." : "Start Quiz"}
                     </button>
                   </div>
                 </div>

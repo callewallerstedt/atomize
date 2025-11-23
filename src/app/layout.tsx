@@ -62,8 +62,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} ${rajdhani.variable} ${ibmPlexMono.variable} ${orbitron.variable} antialiased`}>
+    <html lang="en" spellCheck="false" autoCorrect="off">
+      <body className={`${geistSans.variable} ${geistMono.variable} ${rajdhani.variable} ${ibmPlexMono.variable} ${orbitron.variable} antialiased`} spellCheck="false" autoCorrect="off">
         <Shell>{children}</Shell>
       </body>
     </html>

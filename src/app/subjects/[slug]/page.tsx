@@ -68,6 +68,8 @@ export default function SubjectPage() {
   const [starredFlashcards, setStarredFlashcards] = useState<Set<string>>(new Set());
   const [showOnlyStarred, setShowOnlyStarred] = useState(false);
   const [isShuffleActive, setIsShuffleActive] = useState(false);
+  const [showFlashcardTopicList, setShowFlashcardTopicList] = useState(true);
+  const [selectedFlashcardTopic, setSelectedFlashcardTopic] = useState<string | null>(null);
   const [examDateUpdateTrigger, setExamDateUpdateTrigger] = useState(0); // Force re-render when exam dates change
   const [examSnipes, setExamSnipes] = useState<Array<{ id: string; courseName: string; slug: string; createdAt: string; fileNames: string[] }>>([]);
   const [loadingExamSnipes, setLoadingExamSnipes] = useState(false);
@@ -350,6 +352,8 @@ export default function SubjectPage() {
     setFlashcardFlipped(false);
     setShowOnlyStarred(false);
     setIsShuffleActive(false);
+    setShowFlashcardTopicList(true);
+    setSelectedFlashcardTopic(null);
     setAllFlashcardsModalOpen(true);
   }
 
@@ -750,7 +754,7 @@ export default function SubjectPage() {
                           {name}
                         </span>
                         {hasSurgeLesson && (
-                          <span className="text-[10px] uppercase tracking-[0.25em] text-white/35 font-semibold">
+                          <span className="text-[10px] uppercase tracking-[0.25em] font-semibold text-[var(--foreground)]/80">
                             Surge
                           </span>
                         )}
@@ -1367,12 +1371,117 @@ export default function SubjectPage() {
       )}
 
       {/* All Course Flashcards Modal */}
-      {allFlashcardsModalOpen && allFlashcards.length > 0 && (() => {
+      {allFlashcardsModalOpen && (() => {
+        // Group flashcards by topic
+        const flashcardsByTopic: Record<string, typeof allFlashcards> = {};
+        allFlashcards.forEach(f => {
+          if (!flashcardsByTopic[f.topicName]) {
+            flashcardsByTopic[f.topicName] = [];
+          }
+          flashcardsByTopic[f.topicName].push(f);
+        });
+        const topicsWithFlashcards = Object.keys(flashcardsByTopic).sort();
+        
         const filteredFlashcards = showOnlyStarred 
           ? allFlashcards.filter(f => starredFlashcards.has(f.id))
+          : selectedFlashcardTopic
+          ? flashcardsByTopic[selectedFlashcardTopic] || []
           : allFlashcards;
         const currentCard = filteredFlashcards[currentFlashcardIndex];
         const isStarred = currentCard ? starredFlashcards.has(currentCard.id) : false;
+        
+        // Show topic list if no topic selected and we have multiple topics, or if no flashcards yet
+        if (allFlashcards.length === 0) {
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+              <div className="relative w-full max-w-xl rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/95 p-6 shadow-2xl">
+                <button
+                  onClick={() => {
+                    setAllFlashcardsModalOpen(false);
+                    setFlashcardFlipped(false);
+                  }}
+                  className="unified-button absolute right-4 top-4 h-8 w-8 rounded-full flex items-center justify-center"
+                  aria-label="Close flashcards"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
+                <div className="text-center py-8">
+                  <p className="text-[var(--foreground)]/70">No flashcards found. Generate flashcards from lessons first.</p>
+                </div>
+              </div>
+            </div>
+          );
+        }
+        
+        // Show topic list if no topic selected and we have multiple topics
+        if (showFlashcardTopicList && topicsWithFlashcards.length > 1 && !selectedFlashcardTopic) {
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+              <div className="relative w-full max-w-xl rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/95 p-6 shadow-2xl">
+                <button
+                  onClick={() => {
+                    setAllFlashcardsModalOpen(false);
+                    setFlashcardFlipped(false);
+                  }}
+                  className="unified-button absolute right-4 top-4 h-8 w-8 rounded-full flex items-center justify-center"
+                  aria-label="Close flashcards"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
+                <div className="mb-4">
+                  <h2 className="text-xl font-semibold text-[var(--foreground)] mb-2">Flashcards by Topic</h2>
+                  <p className="text-sm text-[var(--foreground)]/70">Select a topic to view its flashcards</p>
+                </div>
+                <div className="max-h-[400px]" style={{ padding: '1rem 0.75rem', overflowY: 'auto', overflowX: 'visible' }}>
+                  <div className="space-y-3">
+                    {topicsWithFlashcards.map((topic) => (
+                      <button
+                        key={topic}
+                        onClick={() => {
+                          setSelectedFlashcardTopic(topic);
+                          setShowFlashcardTopicList(false);
+                          setCurrentFlashcardIndex(0);
+                        }}
+                        className="w-full text-left btn-grey font-medium px-4 py-2.5 transition-colors"
+                        style={{
+                          borderRadius: '9999px',
+                          boxShadow: '0 0.5px 1px rgba(0, 0, 0, 0.03)',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.boxShadow = '0 0.5px 1px rgba(0, 0, 0, 0.03)';
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium">{topic}</span>
+                          <span className="text-sm opacity-60 whitespace-nowrap">
+                            {flashcardsByTopic[topic].length} {flashcardsByTopic[topic].length === 1 ? 'flashcard' : 'flashcards'}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="mt-4 pt-4 border-t border-[var(--foreground)]/10">
+                  <button
+                    onClick={() => {
+                      setShowFlashcardTopicList(false);
+                      setSelectedFlashcardTopic(null);
+                      setCurrentFlashcardIndex(0);
+                    }}
+                    className="w-full btn-grey rounded-lg font-medium"
+                    style={{ paddingTop: '0.75rem', paddingBottom: '0.75rem' }}
+                  >
+                    View All Flashcards
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        }
         
         return filteredFlashcards.length > 0 ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
@@ -1382,7 +1491,7 @@ export default function SubjectPage() {
                   setAllFlashcardsModalOpen(false);
                   setFlashcardFlipped(false);
                 }}
-                className="absolute right-4 top-4 h-8 w-8 rounded-full border border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 flex items-center justify-center"
+                className="unified-button absolute right-4 top-4 h-8 w-8 rounded-full flex items-center justify-center"
                 aria-label="Close flashcards"
               >
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1401,52 +1510,27 @@ export default function SubjectPage() {
                 </div>
               </div>
               <div className="relative flex items-center justify-center gap-3">
-                <div
-                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
-                  style={{
-                    padding: '1.5px',
-                    background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-                    opacity: (!isShuffleActive && currentFlashcardIndex === 0) ? 0.4 : 1,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!(!isShuffleActive && currentFlashcardIndex === 0)) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                <button
+                  onClick={() => {
+                    if (isShuffleActive) {
+                      const newIndex = getRandomCardIndex(filteredFlashcards, currentFlashcardIndex);
+                      setCurrentFlashcardIndex(newIndex);
+                    } else {
+                      if (currentFlashcardIndex === 0) return;
+                      setCurrentFlashcardIndex((idx) => Math.max(idx - 1, 0));
                     }
+                    setFlashcardFlipped(false);
                   }}
-                  onMouseLeave={(e) => {
-                    if (!(!isShuffleActive && currentFlashcardIndex === 0)) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-                    }
-                  }}
+                  disabled={!isShuffleActive && currentFlashcardIndex === 0}
+                  className="btn-grey rounded-lg flex h-10 w-10 items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Previous flashcard"
                 >
-                  <button
-                    onClick={() => {
-                      if (isShuffleActive) {
-                        const newIndex = getRandomCardIndex(filteredFlashcards, currentFlashcardIndex);
-                        setCurrentFlashcardIndex(newIndex);
-                      } else {
-                        if (currentFlashcardIndex === 0) return;
-                        setCurrentFlashcardIndex((idx) => Math.max(idx - 1, 0));
-                      }
-                      setFlashcardFlipped(false);
-                    }}
-                    disabled={!isShuffleActive && currentFlashcardIndex === 0}
-                    className="flex h-10 w-10 items-center justify-center text-white bg-[var(--background)]/90 backdrop-blur-md transition-all duration-300 ease-out disabled:cursor-not-allowed"
-                    style={{
-                      borderRadius: 'calc(0.75rem - 1.5px)',
-                    }}
-                    aria-label="Previous flashcard"
-                  >
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M15 18l-6-6 6-6" />
-                    </svg>
-                  </button>
-                </div>
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M15 18l-6-6 6-6" />
+                  </svg>
+                </button>
                 <div
-                  className="relative h-72 w-full max-w-md cursor-pointer overflow-hidden rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/80 p-6 text-center shadow-inner"
+                  className="relative h-72 w-full max-w-md cursor-pointer rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/80 text-center shadow-inner overflow-hidden"
                   onClick={() => setFlashcardFlipped((f) => !f)}
                 >
                   {/* Low opacity spinner background */}
@@ -1465,7 +1549,7 @@ export default function SubjectPage() {
                         e.stopPropagation();
                         e.preventDefault();
                       }}
-                      className="absolute right-2 top-2 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/90 backdrop-blur-sm text-[var(--foreground)]/70 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 transition-colors pointer-events-auto"
+                      className="unified-button absolute right-2 top-2 z-20 flex h-8 w-8 items-center justify-center rounded-full pointer-events-auto"
                       style={{ pointerEvents: 'auto' }}
                       aria-label={isStarred ? "Unstar flashcard" : "Star flashcard"}
                     >
@@ -1480,149 +1564,102 @@ export default function SubjectPage() {
                       </svg>
                     </button>
                   )}
-                  <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-0' : 'opacity-100'}`}>
-                    <div className="pointer-events-auto">
-                      <LessonBody body={sanitizeLessonBody(String(currentCard?.prompt || ""))} />
+                  <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 px-4 pb-12 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-0' : 'opacity-100'}`}>
+                    <div className="pointer-events-auto w-full overflow-y-auto overflow-x-hidden text-center" style={{ maxHeight: 'calc(100% - 3rem)' }}>
+                      <div className="flex flex-col items-center justify-center min-h-full py-4">
+                        <LessonBody body={sanitizeLessonBody(String(currentCard?.prompt || ""))} />
+                      </div>
                     </div>
                   </div>
-                  <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 overflow-auto px-4 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-100' : 'opacity-0'}`}>
-                    <div className="pointer-events-auto">
-                      <LessonBody body={sanitizeLessonBody(String(currentCard?.answer || ""))} />
+                  <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 px-4 pb-12 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-100' : 'opacity-0'}`}>
+                    <div className="pointer-events-auto w-full overflow-y-auto overflow-x-hidden text-center" style={{ maxHeight: 'calc(100% - 3rem)' }}>
+                      <div className="flex flex-col items-center justify-center min-h-full py-4">
+                        <LessonBody body={sanitizeLessonBody(String(currentCard?.answer || ""))} />
+                      </div>
                     </div>
                   </div>
                   <div className="absolute bottom-4 left-0 right-0 text-xs text-[var(--foreground)]/60 z-10 pointer-events-none">
                     {flashcardFlipped ? "Tap to view prompt" : "Tap to reveal answer"}
                   </div>
                 </div>
-                <div
-                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
-                  style={{
-                    padding: '1.5px',
-                    background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
-                    opacity: (!isShuffleActive && currentFlashcardIndex >= filteredFlashcards.length - 1) ? 0.4 : 1,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!(!isShuffleActive && currentFlashcardIndex >= filteredFlashcards.length - 1)) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
+                <button
+                  onClick={() => {
+                    if (isShuffleActive) {
+                      const newIndex = getRandomCardIndex(filteredFlashcards, currentFlashcardIndex);
+                      setCurrentFlashcardIndex(newIndex);
+                    } else {
+                      if (currentFlashcardIndex >= filteredFlashcards.length - 1) return;
+                      setCurrentFlashcardIndex((idx) => Math.min(idx + 1, filteredFlashcards.length - 1));
                     }
+                    setFlashcardFlipped(false);
                   }}
-                  onMouseLeave={(e) => {
-                    if (!(!isShuffleActive && currentFlashcardIndex >= filteredFlashcards.length - 1)) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-                    }
-                  }}
+                  disabled={!isShuffleActive && currentFlashcardIndex >= filteredFlashcards.length - 1}
+                  className="btn-grey rounded-lg flex h-10 w-10 items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Next flashcard"
                 >
-                  <button
-                    onClick={() => {
-                      if (isShuffleActive) {
-                        const newIndex = getRandomCardIndex(filteredFlashcards, currentFlashcardIndex);
-                        setCurrentFlashcardIndex(newIndex);
-                      } else {
-                        if (currentFlashcardIndex >= filteredFlashcards.length - 1) return;
-                        setCurrentFlashcardIndex((idx) => Math.min(idx + 1, filteredFlashcards.length - 1));
-                      }
-                      setFlashcardFlipped(false);
-                    }}
-                    disabled={!isShuffleActive && currentFlashcardIndex >= filteredFlashcards.length - 1}
-                    className="flex h-10 w-10 items-center justify-center text-white bg-[var(--background)]/90 backdrop-blur-md transition-all duration-300 ease-out disabled:cursor-not-allowed"
-                    style={{
-                      borderRadius: 'calc(0.75rem - 1.5px)',
-                    }}
-                    aria-label="Next flashcard"
-                  >
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M9 6l6 6-6 6" />
-                    </svg>
-                  </button>
-                </div>
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 6l6 6-6 6" />
+                  </svg>
+                </button>
               </div>
               <div className="mt-4 flex justify-center gap-3">
-                <div
-                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
-                  style={{
-                    padding: '1.5px',
-                    background: isShuffleActive
-                      ? 'linear-gradient(135deg, rgba(0, 229, 255, 1), rgba(255, 45, 150, 1))'
-                      : 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-                    boxShadow: isShuffleActive
-                      ? '0 0 20px rgba(0, 229, 255, 0.4), 0 0 40px rgba(255, 45, 150, 0.2)'
-                      : '0 2px 8px rgba(0, 0, 0, 0.3)',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isShuffleActive) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isShuffleActive) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-                    }
-                  }}
+                <button
+                  onClick={() => setIsShuffleActive(!isShuffleActive)}
+                  className="btn-grey font-medium relative overflow-hidden"
+                  style={isShuffleActive ? {
+                    backgroundColor: 'transparent',
+                    borderColor: 'transparent',
+                    color: 'var(--foreground)',
+                  } : {}}
+                  aria-label={isShuffleActive ? "Disable shuffle mode" : "Enable shuffle mode"}
                 >
-                  <button
-                    onClick={() => setIsShuffleActive(!isShuffleActive)}
-                    className="flex h-10 items-center justify-center px-3 text-xs font-medium text-white bg-[var(--background)]/90 backdrop-blur-md transition-all duration-300 ease-out"
-                    style={{
-                      borderRadius: 'calc(0.75rem - 1.5px)',
-                    }}
-                    aria-label={isShuffleActive ? "Disable shuffle mode" : "Enable shuffle mode"}
-                  >
-                    Shuffle
-                  </button>
-                </div>
-                <div
-                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
-                  style={{
-                    padding: '1.5px',
-                    background: showOnlyStarred
-                      ? 'linear-gradient(135deg, rgba(251, 191, 36, 0.8), rgba(245, 158, 11, 0.8))'
-                      : 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-                    boxShadow: showOnlyStarred
-                      ? '0 0 20px rgba(251, 191, 36, 0.3), 0 0 40px rgba(245, 158, 11, 0.15)'
-                      : '0 2px 8px rgba(0, 0, 0, 0.3)',
+                  {isShuffleActive && (
+                    <div 
+                      className="absolute inset-0"
+                      style={{
+                        backgroundImage: 'linear-gradient(90deg, rgba(0, 229, 255, 0.4), rgba(255, 45, 150, 0.4))',
+                        borderRadius: '9999px',
+                        zIndex: 0,
+                      }}
+                    />
+                  )}
+                  <span className="relative z-10">Shuffle</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShowOnlyStarred(!showOnlyStarred);
+                    setCurrentFlashcardIndex(0);
+                    setFlashcardFlipped(false);
                   }}
-                  onMouseEnter={(e) => {
-                    if (!showOnlyStarred) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!showOnlyStarred) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-                    }
-                  }}
+                  className="btn-grey font-medium flex items-center gap-1.5 relative overflow-hidden"
+                  style={showOnlyStarred ? {
+                    backgroundColor: 'transparent',
+                    borderColor: 'transparent',
+                    color: 'var(--foreground)',
+                  } : {}}
+                  aria-label={showOnlyStarred ? "Show all flashcards" : "Show only starred flashcards"}
                 >
-                  <button
-                    onClick={() => {
-                      setShowOnlyStarred(!showOnlyStarred);
-                      setCurrentFlashcardIndex(0);
-                      setFlashcardFlipped(false);
-                    }}
-                    className="flex h-10 items-center gap-1.5 px-3 text-xs font-medium text-white bg-[var(--background)]/90 backdrop-blur-md transition-all duration-300 ease-out"
-                    style={{
-                      borderRadius: 'calc(0.75rem - 1.5px)',
-                    }}
-                    aria-label={showOnlyStarred ? "Show all flashcards" : "Show only starred flashcards"}
+                  {showOnlyStarred && (
+                    <div 
+                      className="absolute inset-0"
+                      style={{
+                        backgroundImage: 'linear-gradient(90deg, rgba(250, 204, 21, 0.4), rgba(234, 179, 8, 0.4))',
+                        borderRadius: '9999px',
+                        zIndex: 0,
+                      }}
+                    />
+                  )}
+                  <svg 
+                    className={`h-4 w-4 relative z-10 ${showOnlyStarred ? 'fill-yellow-400 text-yellow-400' : ''}`} 
+                    viewBox="0 0 24 24" 
+                    fill={showOnlyStarred ? "currentColor" : "none"} 
+                    stroke="currentColor" 
+                    strokeWidth="2"
                   >
-                    <svg 
-                      className={`h-4 w-4 ${showOnlyStarred ? 'fill-yellow-400 text-yellow-400' : ''}`} 
-                      viewBox="0 0 24 24" 
-                      fill={showOnlyStarred ? "currentColor" : "none"} 
-                      stroke="currentColor" 
-                      strokeWidth="2"
-                    >
-                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-                    </svg>
-                    {showOnlyStarred ? 'Starred Only' : 'Show Starred'}
-                  </button>
-                </div>
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                  </svg>
+                  <span className="relative z-10">{showOnlyStarred ? 'Starred Only' : 'Show Starred'}</span>
+                </button>
               </div>
             </div>
           </div>
@@ -1634,7 +1671,7 @@ export default function SubjectPage() {
                   setAllFlashcardsModalOpen(false);
                   setShowOnlyStarred(false);
                 }}
-                className="absolute right-4 top-4 h-8 w-8 rounded-full border border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/40 flex items-center justify-center"
+                className="unified-button absolute right-4 top-4 h-8 w-8 rounded-full flex items-center justify-center"
                 aria-label="Close flashcards"
               >
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1648,7 +1685,7 @@ export default function SubjectPage() {
                     setShowOnlyStarred(false);
                     setCurrentFlashcardIndex(0);
                   }}
-                  className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
+                  className="btn-grey rounded-lg font-medium px-4 py-2"
                 >
                   Show All Flashcards
                 </button>

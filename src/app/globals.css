@@ -32,6 +32,7 @@ body {
 html, body {
   -ms-overflow-style: none; /* IE and Edge */
   scrollbar-width: none;    /* Firefox */
+  spellcheck: false;
 }
 * {
   scrollbar-width: none;    /* Firefox - all elements */
@@ -40,6 +41,14 @@ html, body {
   display: none;            /* Chrome, Safari, Opera */
   width: 0 !important;
   height: 0 !important;
+}
+
+/* Globally disable autocorrect and spellcheck on all inputs */
+input, textarea, [contenteditable] {
+  spellcheck: false !important;
+  -webkit-spellcheck: false !important;
+  -webkit-autocorrect: off !important;
+  -webkit-autocapitalize: off !important;
 }
 
 @media (max-width: 1440px) and (min-width: 900px) {
@@ -354,6 +363,13 @@ select {
   color: rgba(0, 0, 0, 0.9) !important;
 }
 
+/* Surge text styling to match button colors in light mode */
+html.light-mode h2[class*="text-[var(--foreground)]/80"],
+html.light-mode span[class*="text-[var(--foreground)]/80"],
+html.light-mode h1[class*="text-[var(--foreground)]/80"] {
+  color: rgba(0, 0, 0, 0.7) !important;
+}
+
 /* Chat message bubbles */
 .chat-bubble-assistant {
   background-color: color-mix(in srgb, var(--foreground) 8%, transparent) !important;
@@ -385,6 +401,16 @@ html.light-mode .chat-input-container,
 html.light-mode div.chat-input-container[style],
 .light-mode div.chat-input-container[style] {
   background-color: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Quick typing popup - use lighter button style but more opaque */
+div[data-chat-pill].chat-input-container {
+  background-color: color-mix(in srgb, var(--foreground) 15%, transparent) !important;
+}
+
+html.light-mode div[data-chat-pill].chat-input-container,
+.light-mode div[data-chat-pill].chat-input-container {
+  background-color: rgba(255, 255, 255, 0.9) !important;
 }
 
 .course-box {
@@ -800,6 +826,24 @@ button[class*="px-3"][class*="py-1"][class*="rounded-full"]:not([class*="bg-grad
 .light-mode .pill-button:hover:not(:disabled),
 .light-mode button[class*="px-3"][class*="py-1"][class*="rounded-full"]:not([class*="bg-gradient"]):hover:not(:disabled) {
   background-color: rgba(255, 255, 255, 0.8) !important;
+}
+
+/* Ensure pill button shadows are never clipped */
+.pill-button,
+button[class*="px-3"][class*="py-1"][class*="rounded-full"]:not([class*="bg-gradient"]) {
+  will-change: box-shadow;
+  transform: translateZ(0);
+}
+
+/* Ensure parent containers don't clip shadows */
+.pills-scroll-container {
+  overflow-y: visible !important;
+  contain: none !important;
+}
+
+/* Ensure inner flex container allows shadow overflow */
+.pills-scroll-container > div {
+  overflow-y: visible !important;
 }
 
 /* Pulse glow animation for Surge button */

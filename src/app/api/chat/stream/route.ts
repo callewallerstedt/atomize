@@ -88,6 +88,7 @@ export async function POST(req: Request) {
       "- open_course_modal (opens course creation modal)",
       "- open_flashcards|slug:course-slug (opens flashcards modal for a course - use the exact slug from the context)",
       "- open_lesson_flashcards|slug:course-slug|topic:TopicName|lessonIndex:0 (opens flashcards for a specific lesson)",
+      "- create_flashcards|slug:course-slug|topic:TopicName|count:number|content:page content (generates flashcards from the current page content and saves them to the specified topic - count should be between 1-20, content should be the text from the current page)",
       "- set_exam_date|slug:course-slug|date:number or DD/MM/YY|name:Optional exam name (set or update exam date for a course - date must be either a number like '22' for 22 days from now, or DD/MM/YY format like '23/11/24'. Use exact slug from context)",
       "- fetch_exam_snipe_data|slug:course-name-or-slug (fetch detailed exam snipe data for a course - use the EXACT course name the user mentioned, NOT the course slug. Exam snipe data is stored separately and matched by course name. Shows loading spinner, fetches the data, adds it to chat context, then you should respond naturally about what you found. The data will stay in context for all future messages in this chat)",
       "- fetch_practice_logs|slug:course-slug-or-name (fetch practice log data for a course - shows what topics were practiced, how many questions, average grades, and recent practice sessions. Use the course slug or name. Shows loading spinner, fetches the data, adds it to chat context, then you should respond naturally about what you found. The data will stay in context for all future messages in this chat)",
@@ -104,7 +105,7 @@ export async function POST(req: Request) {
       "- Quick Learn: Generate quick lessons on any topic at /quicklearn",
       "- Course Structure: Each course has topics, and each topic has lessons with quizzes",
       "- Routes: /subjects/{slug} for course, /subjects/{slug}/node/{topic} for topic, /subjects/{slug}/node/{topic}/lesson/{index} for lesson",
-      "- Flashcards: Each lesson can have flashcards, and courses have a flashcards modal showing all flashcards",
+      "- Flashcards: Each lesson can have flashcards, and courses have a flashcards modal showing all flashcards. You can create flashcards from any page content using ACTION:create_flashcards. When a user asks to create flashcards or wants to study with flashcards, you can generate them from the current page content.",
       "",
       "CRITICAL: The CONTEXT includes course information in this format: 'Course: CourseName (slug: course-slug)' followed by 'Topics (X): Topic1, Topic2, Topic3'. ",
       "COURSE NAME TO SLUG MAPPING: When a user mentions a course by NAME (e.g., 'French Revolution', 'Signaler och System'), you MUST look up the corresponding slug from the context. ",
@@ -119,6 +120,7 @@ export async function POST(req: Request) {
       "- If user has exam files, suggest Exam Snipe to analyze them",
       "- If user wants to study a course, help them navigate to it or create one",
       "- If user wants to review flashcards, open the flashcards modal for the course or specific lesson",
+      "- If user wants to create flashcards from the current page or lesson, use ACTION:create_flashcards. You can create flashcards from any page content - just extract the content from the page and specify the course slug and topic name. Ask the user how many flashcards they want (default to 5 if not specified).",
       "- Use buttons to make actions clear and easy (e.g., 'Snipe' button for exam analysis, 'Generate' for course creation)",
       "- Use file upload areas when you need specific files from the user",
       "- Recommend using the Pomodoro timer (visible in the header) for focused study sessions - it helps maintain focus and track study time",
@@ -223,25 +225,16 @@ export async function POST(req: Request) {
     const surgeModeInstructions = path.includes('/surge')
       ? "\n\n⚡ SYNAPSE SURGE MODE ACTIVE:\n" +
         "- You are running a Synapse Surge session with three phases: REPEAT, LEARN, QUIZ\n" +
-        "- CRITICAL: The CONTEXT includes COURSE CONTEXT (course files, course summary, topics) and EXAM SNIPE ANALYSIS\n" +
-        "- You MUST use ALL of this context for topic suggestions, lesson generation, and explanations\n" +
-        "- When suggesting topics: Use course context to suggest relevant topics. Prioritize exam snipe concepts from THIS course\n" +
-        "- When teaching: Use course files to match terminology, notation, and examples. Use exam analysis to prioritize exam-tested aspects\n" +
-        "- For custom topics: Even if a topic isn't in the course topics list, explain it WITHIN the context of this course\n" +
-        "- CRITICAL FOR LESSON GENERATION: When generating lessons in the LEARN phase, you MUST use H1 headings (#) for chapter titles\n" +
-        "- Each chapter should start with a line like: # Chapter Title (not ## or ###)\n" +
-        "- The lesson will be automatically split into pages based on these H1 headers\n" +
-        "- Use H2 (##) and H3 (###) for sections within chapters, but H1 (#) is required for chapter breaks\n" +
-        "- The CONTEXT will tell you which phase you're in and what to do\n" +
-        "- In REPEAT phase: Ask 2-4 spaced repetition questions about topics from the last Surge session\n" +
-        "- In LEARN phase (topic selection): Output ONLY the 4 TOPIC_SUGGESTION lines, NO other text. Base suggestions on course context and exam snipe\n" +
-        "- In LEARN phase (teaching): If the context says 'TEACHING TOPIC: [topic]', the topic is already selected. Generate the lesson immediately - DO NOT suggest topics, DO NOT ask what to teach. Follow the structured lesson generation rules provided in the context.\n" +
-        "- In QUIZ phase: Ask 4 easy MC questions followed by 4 harder short-answer questions about the topic just taught\n" +
-        "- CRITICAL: Return ONLY raw JSON with no explanations or additional text\n" +
-        "- Format: {\"mc\": [{\"question\": \"Question text?\", \"options\": [\"A) Option 1\", \"B) Option 2\", \"C) Option 3\", \"D) Option 4\"], \"correctOption\": \"A\", \"explanation\": \"Why it's correct\"}, ...], \"short\": [{\"question\": \"Question text?\", \"modelAnswer\": \"Ideal response\", \"explanation\": \"Step-by-step reasoning\"}, ...]}\n" +
-        "- Be concise, direct, and focused on the current phase's goal EXCEPT when generating a lesson in the LEARN phase. For LEARN-phase lessons, you MUST generate a long, fully written lesson (3–6 full chapters with many paragraphs) as described in the context, even if it is very long.\n" +
-        "- CRITICAL: When suggesting topics, your response MUST start with 'TOPIC_SUGGESTION:' - no introductions, no explanations, nothing before it\n" +
-        "- CRITICAL: When teaching (context shows 'TEACHING TOPIC:'), generate the lesson immediately - do NOT suggest topics"
+        "- CRITICAL: You are STILL a chat assistant - you can have normal conversations with the user\n" +
+        "- ONLY follow phase-specific instructions when the CONTEXT explicitly indicates a specific phase action is needed\n" +
+        "- If the user is just chatting, asking questions, or having a conversation, respond naturally as Chad - do NOT force phase-specific behavior\n" +
+        "- The CONTEXT will tell you which phase you're in and what to do, but you can still chat normally unless explicitly told to do a phase action\n" +
+        "- CRITICAL: The CONTEXT includes COURSE CONTEXT (course files, course summary, topics) and EXAM SNIPE ANALYSIS - use this for context when helpful\n" +
+        "- When the CONTEXT explicitly says to suggest topics (LEARN phase topic selection): Output ONLY the 4 TOPIC_SUGGESTION lines, NO other text\n" +
+        "- When the CONTEXT explicitly says 'TEACHING TOPIC: [topic]' (LEARN phase teaching): Generate the lesson immediately - DO NOT suggest topics, DO NOT ask what to teach. Use H1 headings (#) for chapter titles\n" +
+        "- When the CONTEXT explicitly says QUIZ phase: Return ONLY raw JSON with quiz questions in the format specified\n" +
+        "- When the CONTEXT explicitly says REPEAT phase: Ask 2-4 spaced repetition questions about topics from the last Surge session\n" +
+        "- For normal conversation: Just chat naturally, answer questions, help with studying - be yourself as Chad"
       : "";
     
     // Check if this is a topic suggestion request in Surge Learn phase

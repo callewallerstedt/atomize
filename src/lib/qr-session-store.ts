@@ -22,14 +22,22 @@ export function getAllSessions() {
 }
 
 // Clean up expired sessions every 5 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [sessionId, session] of sessions.entries()) {
-    if (session.expiresAt < now) {
-      sessions.delete(sessionId);
+// Only run in Node.js environment (not in edge runtime)
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    const now = Date.now();
+    let cleaned = 0;
+    for (const [sessionId, session] of sessions.entries()) {
+      if (session.expiresAt < now) {
+        sessions.delete(sessionId);
+        cleaned++;
+      }
     }
-  }
-}, 5 * 60 * 1000);
+    if (cleaned > 0) {
+      console.log(`Cleaned up ${cleaned} expired QR sessions`);
+    }
+  }, 5 * 60 * 1000);
+}
 
 export function getSession(sessionId: string): QRSession | undefined {
   return sessions.get(sessionId);

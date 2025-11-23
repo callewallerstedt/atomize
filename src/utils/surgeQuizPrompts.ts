@@ -33,10 +33,18 @@ export function buildQuizJsonInstruction(
       "  ],",
       '  "short": []',
       "}",
-      "- There must be exactly 5 objects in mc[]. Each options array must have 4 strings that match letters A-D.",
+      "- There must be exactly 5 objects in mc[]. Each options array must have 4 strings.",
+      "- CRITICAL: Do NOT include letter prefixes (A), B), C), D), AA), etc.) in the option strings. The website will add the letters automatically. Just provide the option text only (e.g., 'Option 1' not 'A) Option 1').",
+      "- CRITICAL - DISTRACTOR QUALITY: All incorrect options (distractors) MUST be plausible and require careful reading to eliminate. Each distractor should:",
+      "  * Be based on real concepts from the lesson but with a MINOR detail wrong (e.g., wrong formula constant, slightly incorrect terminology, reversed relationship, wrong order of steps)",
+      "  * NOT be obviously wrong or nonsensical (avoid options that are clearly false, unrelated, or make no sense)",
+      "  * Test whether the student truly understands the concept, not just recognizes obvious errors",
+      "  * Use common misconceptions or easy-to-make mistakes as distractors",
+      "  * Make students think critically to identify why each distractor is wrong",
       "- correctOption must be a single letter A-D. explanation must describe WHY that answer is correct, referencing course/exam context.",
       "- Use the provided course context and exam-analysis cues from the system prompt to create realistic questions that test true understanding.",
-      "- DO NOT output anything besides that JSON object. No prose.",
+      "- CRITICAL: OUTPUT ONLY THE JSON OBJECT. DO NOT output the lesson content, DO NOT output markdown, DO NOT output any prose or explanations. ONLY output the JSON object starting with { and ending with }.",
+      "- DO NOT output anything besides that JSON object. No prose, no lesson content, no markdown.",
     ];
     if (debugInstruction) {
       lines.push(`DEBUG FOCUS: ${debugInstruction}`);
@@ -66,7 +74,8 @@ export function buildQuizJsonInstruction(
     "- There must be exactly 4 objects in short[]. modelAnswer must be a complete, exam-ready solution.",
     "- explanation must walk through the reasoning or steps.",
     "- Tie questions to the course files and exam patterns mentioned in context.",
-    "- DO NOT output anything besides that JSON object. No prose.",
+    "- CRITICAL: OUTPUT ONLY THE JSON OBJECT. DO NOT output the lesson content, DO NOT output markdown, DO NOT output any prose or explanations. ONLY output the JSON object starting with { and ending with }.",
+    "- DO NOT output anything besides that JSON object. No prose, no lesson content, no markdown.",
   ];
   if (debugInstruction) {
     lines.push(`DEBUG FOCUS: ${debugInstruction}`);

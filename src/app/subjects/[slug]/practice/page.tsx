@@ -1421,11 +1421,26 @@ export default function PracticePage() {
   // QR Code functions
   const createQrSession = async () => {
     try {
+      setError(null);
       const response = await fetch("/api/qr-session/create", {
         method: "POST",
       });
-      if (!response.ok) throw new Error("Failed to create session");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to create session");
+      }
       const data = await response.json();
+      
+      if (!data.sessionId) {
+        throw new Error("Session ID not returned from server");
+      }
+      
+      // Verify session exists before proceeding
+      const verifyResponse = await fetch(`/api/qr-session/${data.sessionId}/images`);
+      if (!verifyResponse.ok && verifyResponse.status !== 404) {
+        throw new Error("Session verification failed");
+      }
+      
       setQrSessionId(data.sessionId);
       setQrUrl(data.qrUrl);
       
@@ -1448,9 +1463,9 @@ export default function PracticePage() {
       setShowQrModal(true);
       setShowQrDropdown(false);
       startPollingForImages(data.sessionId);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error creating QR session:", error);
-      setError("Failed to create QR session");
+      setError(error?.message || "Failed to create QR session. Please try again.");
     }
   };
 
@@ -1531,6 +1546,39 @@ export default function PracticePage() {
       // Fallback: append to input
       setInput((prev) => prev + (prev ? "\n" : "") + imageMarkdown + "\n");
     }
+  };
+
+  // Parse images from input text
+  const parseImagesFromInput = (text: string): Array<{ url: string; fullMatch: string; index: number }> => {
+    const imageRegex = /!\[photo\]\((data:image\/[^)]+)\)/g;
+    const images: Array<{ url: string; fullMatch: string; index: number }> = [];
+    let match;
+    // Reset regex lastIndex
+    imageRegex.lastIndex = 0;
+    while ((match = imageRegex.exec(text)) !== null) {
+      images.push({
+        url: match[1],
+        fullMatch: match[0],
+        index: match.index,
+      });
+    }
+    return images;
+  };
+
+  // Get text without image markdown for display
+  const getTextWithoutImages = (text: string): string => {
+    return text.replace(/!\[photo\]\(data:image\/[^)]+\)/g, '');
+  };
+
+  // Remove image from input
+  const removeImageFromInput = (imageMatch: string) => {
+    setInput((prev) => {
+      // Remove the image markdown and any surrounding newlines
+      let newValue = prev.replace(new RegExp(`\\n?${imageMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n?`, 'g'), '');
+      // Clean up multiple consecutive newlines
+      newValue = newValue.replace(/\n{3,}/g, '\n\n');
+      return newValue;
+    });
   };
 
   // Cleanup polling on unmount
@@ -3148,32 +3196,126 @@ Respond with ONLY the specific topic name, no explanation.`;
                   </div>
                 )}
               </div>
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void sendMessage();
-                  }
-                }}
-                placeholder="Respond with your work, explain your reasoning, or ask for a different drill…"
-                rows={1}
-                className="w-full resize-none rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/80 pl-12 pr-20 py-4.5 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/40 focus:border-[var(--accent-cyan)] focus:outline-none"
-              />
-              {/* Image thumbnails in textarea */}
-              {qrImages.length > 0 && (
-                <div className="absolute left-12 top-1.5 flex gap-1 flex-wrap pointer-events-none">
-                  {qrImages.map((img) => (
-                    <img
-                      key={img.id}
-                      src={img.data}
-                      alt="Uploaded"
-                      className="h-6 w-6 object-cover rounded border border-[var(--foreground)]/20"
-                    />
-                  ))}
-                </div>
-              )}
+              <div className="relative w-full">
+                {(() => {
+                  const images = parseImagesFromInput(input);
+                  const textWithoutImages = getTextWithoutImages(input);
+                  
+                  return (
+                    <>
+                      {/* Hidden textarea for form submission - contains full input with markdown */}
+                      <textarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            void sendMessage();
+                          }
+                        }}
+                        placeholder="Respond with your work, explain your reasoning, or ask for a different drill…"
+                        rows={1}
+                        className="absolute inset-0 w-full resize-none rounded-xl border border-[var(--foreground)]/10 bg-transparent pl-12 pr-20 py-4.5 text-sm text-transparent placeholder:text-transparent focus:border-[var(--accent-cyan)] focus:outline-none z-10"
+                        style={{
+                          caretColor: 'var(--foreground)',
+                        }}
+                      />
+                      {/* Visible overlay showing text and images */}
+                      <div 
+                        className="w-full min-h-[2.5rem] rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/80 pl-12 pr-20 py-4.5 flex flex-wrap items-center gap-2 text-sm overflow-hidden pointer-events-none"
+                        style={{ 
+                          color: 'var(--foreground)',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {images.length === 0 && !textWithoutImages.trim() && (
+                          <span className="text-[var(--foreground)]/40">
+                            Respond with your work, explain your reasoning, or ask for a different drill…
+                          </span>
+                        )}
+                        {(() => {
+                          if (images.length === 0) {
+                            return <span className="whitespace-pre-wrap">{textWithoutImages}</span>;
+                          }
+                          
+                          const segments: Array<{ type: 'text' | 'image'; content: string; imageUrl?: string; imageMatch?: string }> = [];
+                          let lastIndex = 0;
+                          
+                          images.forEach((img) => {
+                            // Add text before image
+                            if (img.index > lastIndex) {
+                              const textContent = input.substring(lastIndex, img.index);
+                              if (textContent.trim()) {
+                                segments.push({
+                                  type: 'text',
+                                  content: textContent,
+                                });
+                              }
+                            }
+                            // Add image
+                            segments.push({
+                              type: 'image',
+                              content: '',
+                              imageUrl: img.url,
+                              imageMatch: img.fullMatch,
+                            });
+                            lastIndex = img.index + img.fullMatch.length;
+                          });
+                          
+                          // Add remaining text
+                          if (lastIndex < input.length) {
+                            const textContent = input.substring(lastIndex);
+                            if (textContent.trim()) {
+                              segments.push({
+                                type: 'text',
+                                content: textContent,
+                              });
+                            }
+                          }
+                          
+                          return segments.map((segment, idx) => {
+                            if (segment.type === 'image' && segment.imageUrl) {
+                              return (
+                                <div
+                                  key={idx}
+                                  className="relative inline-block pointer-events-auto group"
+                                  style={{ maxWidth: '200px', maxHeight: '150px', flexShrink: 0 }}
+                                >
+                                  <img
+                                    src={segment.imageUrl}
+                                    alt="Uploaded"
+                                    className="max-w-full max-h-[150px] object-contain rounded border border-[var(--foreground)]/20"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      if (segment.imageMatch) {
+                                        removeImageFromInput(segment.imageMatch);
+                                      }
+                                    }}
+                                    className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center hover:bg-red-600 shadow-lg z-30 pointer-events-auto"
+                                    aria-label="Remove image"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              );
+                            }
+                            return (
+                              <span key={idx} className="whitespace-pre-wrap">
+                                {segment.content}
+                              </span>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center gap-1.5">
                 <button
                   type="button"

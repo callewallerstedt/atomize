@@ -620,6 +620,10 @@ Surge is for those who want to minimize friction and get results fast. I will pr
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const pillsScrollRef1 = useRef<HTMLDivElement>(null);
+  const pillsScrollRef2 = useRef<HTMLDivElement>(null);
+  const [pillsScroll1, setPillsScroll1] = useState({ canScrollLeft: false, canScrollRight: false });
+  const [pillsScroll2, setPillsScroll2] = useState({ canScrollLeft: false, canScrollRight: false });
 
   const resetHomepageChat = useCallback(() => {
     tutorialPlaybackRef.current = false;
@@ -634,6 +638,52 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       localStorage.removeItem('synapse:home-chat');
     }
   }, []);
+
+  // Handle scroll for pills container 1
+  useEffect(() => {
+    const container = pillsScrollRef1.current;
+    if (!container) return;
+
+    const updateScrollState = () => {
+      const { scrollLeft, scrollWidth, clientWidth } = container;
+      setPillsScroll1({
+        canScrollLeft: scrollLeft > 0,
+        canScrollRight: scrollLeft < scrollWidth - clientWidth - 1
+      });
+    };
+
+    updateScrollState();
+    container.addEventListener('scroll', updateScrollState);
+    window.addEventListener('resize', updateScrollState);
+
+    return () => {
+      container.removeEventListener('scroll', updateScrollState);
+      window.removeEventListener('resize', updateScrollState);
+    };
+  }, [homepageMessages.length]);
+
+  // Handle scroll for pills container 2
+  useEffect(() => {
+    const container = pillsScrollRef2.current;
+    if (!container) return;
+
+    const updateScrollState = () => {
+      const { scrollLeft, scrollWidth, clientWidth } = container;
+      setPillsScroll2({
+        canScrollLeft: scrollLeft > 0,
+        canScrollRight: scrollLeft < scrollWidth - clientWidth - 1
+      });
+    };
+
+    updateScrollState();
+    container.addEventListener('scroll', updateScrollState);
+    window.addEventListener('resize', updateScrollState);
+
+    return () => {
+      container.removeEventListener('scroll', updateScrollState);
+      window.removeEventListener('resize', updateScrollState);
+    };
+  }, [homepageMessages.length]);
 
   useEffect(() => {
     if (hasStreamed.current || typeof window === "undefined") return;
@@ -2050,7 +2100,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
   }, [cleanupMediaStream, stopActiveRecording]);
 
   return (
-    <div className="mx-auto mb-6 w-full max-w-3xl">
+    <div className="mx-auto mb-6 w-full max-w-3xl" style={{ overflowY: 'visible' }}>
       {(aiName || homepageMessages.length > 0) && (
         <div className="mb-1.5 flex items-center justify-between gap-3">
           {aiName ? (
@@ -2082,7 +2132,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
               )}
             </div>
           </div>
-          <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%' }}>
+          <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%', overflowY: 'visible' }}>
             <div 
               className="chat-input-container flex items-center gap-2 px-4 py-2 border border-[var(--foreground)]/10 overflow-hidden"
               style={{ 
@@ -2162,7 +2212,19 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     : 'Transcribing voice...'}
               </p>
             )}
-            <div className="flex items-center justify-center gap-2 mt-2">
+            <div 
+              ref={pillsScrollRef1}
+              className="mt-2 w-full relative pills-scroll-container" 
+              style={{ overflowX: 'auto', overflowY: 'visible', scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', paddingTop: '12px', paddingBottom: '12px', paddingLeft: '16px', paddingRight: '16px' }}
+            >
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '0.5rem', 
+                flexWrap: 'nowrap', 
+                width: 'max-content',
+                position: 'relative'
+              }}>
                 <button
                   onClick={() => {
                     if (!homepageSending && !isTutorialActive) {
@@ -2171,7 +2233,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                   }}
                   disabled={homepageSending || isTutorialActive}
                   className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
-                  style={{ boxShadow: 'none' }}
+                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
                 >
                   Create Course
                 </button>
@@ -2184,7 +2246,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                   }}
                   disabled={homepageSending || isTutorialActive}
                   className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
-                  style={{ boxShadow: 'none' }}
+                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
                 >
                   Quick Learn
                 </button>
@@ -2196,7 +2258,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                   }}
                   disabled={homepageSending || isTutorialActive}
                   className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
-                  style={{ boxShadow: 'none' }}
+                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
                 >
                   Exam Snipe
                 </button>
@@ -2208,11 +2270,27 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                   }}
                   disabled={homepageSending || isTutorialActive}
                   className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
-                  style={{ boxShadow: 'none' }}
+                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
                 >
                   Help!
                 </button>
               </div>
+              {/* Fadeout gradients */}
+              {pillsScroll1.canScrollLeft && (
+                <div className="absolute left-0 top-0 bottom-0 pointer-events-none transition-opacity duration-200" style={{ 
+                  background: 'linear-gradient(to right, var(--background), transparent)',
+                  width: '8px',
+                  zIndex: 10
+                }}></div>
+              )}
+              {pillsScroll1.canScrollRight && (
+                <div className="absolute right-0 top-0 bottom-0 pointer-events-none transition-opacity duration-200" style={{ 
+                  background: 'linear-gradient(to left, var(--background), transparent)',
+                  width: '8px',
+                  zIndex: 10
+                }}></div>
+              )}
+            </div>
             </div>
         </>
       ) : (
@@ -2301,7 +2379,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
               </div>
             </div>
           )}
-          <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%' }}>
+          <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%', overflowY: 'visible' }}>
             <div 
               className="chat-input-container flex items-center gap-2 px-4 py-2 border border-[var(--foreground)]/10 overflow-hidden"
               style={{ 
@@ -2381,56 +2459,86 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     : 'Transcribing voice...'}
               </p>
             )}
-            <div className="flex items-center justify-center gap-2 mt-2">
-              <button
-                onClick={() => {
-                  if (!homepageSending && !isTutorialActive) {
-                    handleSendMessage("Create Course");
-                  }
-                }}
-                disabled={homepageSending || isTutorialActive}
-                className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
-                style={{ boxShadow: 'none' }}
-              >
-                Create Course
-              </button>
-              <button
-                onClick={() => {
-                  if (!homepageSending && !isTutorialActive) {
-                    setInputValue("Please create a quick learn on the subject: ");
-                    chatInputRef.current?.focus();
-                  }
-                }}
-                disabled={homepageSending || isTutorialActive}
-                className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
-                style={{ boxShadow: 'none' }}
-              >
-                Quick Learn
-              </button>
-              <button
-                onClick={() => {
-                  if (!homepageSending && !isTutorialActive) {
-                    handleSendMessage("Do an exam snipe please.");
-                  }
-                }}
-                disabled={homepageSending || isTutorialActive}
-                className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
-                style={{ boxShadow: 'none' }}
-              >
-                Exam Snipe
-              </button>
-              <button
-                onClick={() => {
-                  if (!homepageSending && !isTutorialActive) {
-                    handleSendMessage("Help!");
-                  }
-                }}
-                disabled={homepageSending || isTutorialActive}
-                className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
-                style={{ boxShadow: 'none' }}
-              >
-                Help!
-              </button>
+            <div 
+              ref={pillsScrollRef2}
+              className="mt-2 w-full relative pills-scroll-container" 
+              style={{ overflowX: 'auto', overflowY: 'visible', scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', paddingTop: '12px', paddingBottom: '12px', paddingLeft: '16px', paddingRight: '16px' }}
+            >
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                gap: '0.5rem', 
+                flexWrap: 'nowrap', 
+                width: 'max-content', 
+                margin: '0 auto',
+                position: 'relative'
+              }}>
+                <button
+                  onClick={() => {
+                    if (!homepageSending && !isTutorialActive) {
+                      handleSendMessage("Create Course");
+                    }
+                  }}
+                  disabled={homepageSending || isTutorialActive}
+                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
+                >
+                  Create Course
+                </button>
+                <button
+                  onClick={() => {
+                    if (!homepageSending && !isTutorialActive) {
+                      setInputValue("Please create a quick learn on the subject: ");
+                      chatInputRef.current?.focus();
+                    }
+                  }}
+                  disabled={homepageSending || isTutorialActive}
+                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
+                >
+                  Quick Learn
+                </button>
+                <button
+                  onClick={() => {
+                    if (!homepageSending && !isTutorialActive) {
+                      handleSendMessage("Do an exam snipe please.");
+                    }
+                  }}
+                  disabled={homepageSending || isTutorialActive}
+                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
+                >
+                  Exam Snipe
+                </button>
+                <button
+                  onClick={() => {
+                    if (!homepageSending && !isTutorialActive) {
+                      handleSendMessage("Help!");
+                    }
+                  }}
+                  disabled={homepageSending || isTutorialActive}
+                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
+                >
+                  Help!
+                </button>
+              </div>
+              {/* Fadeout gradients */}
+              {pillsScroll2.canScrollLeft && (
+                <div className="absolute left-0 top-0 bottom-0 pointer-events-none transition-opacity duration-200" style={{ 
+                  background: 'linear-gradient(to right, var(--background), transparent)',
+                  width: '8px',
+                  zIndex: 10
+                }}></div>
+              )}
+              {pillsScroll2.canScrollRight && (
+                <div className="absolute right-0 top-0 bottom-0 pointer-events-none transition-opacity duration-200" style={{ 
+                  background: 'linear-gradient(to left, var(--background), transparent)',
+                  width: '8px',
+                  zIndex: 10
+                }}></div>
+              )}
             </div>
           </div>
         </div>

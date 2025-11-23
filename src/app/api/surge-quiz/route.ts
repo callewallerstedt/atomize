@@ -122,6 +122,24 @@ export async function POST(req: Request) {
       );
     }
 
+    // Validate that the response looks like JSON, not lesson content
+    const trimmed = raw.trim();
+    const looksLikeJson = trimmed.startsWith("{") && (trimmed.includes('"mc"') || trimmed.includes('"short"') || trimmed.includes('"questions"'));
+    const looksLikeLesson = trimmed.startsWith("#") || trimmed.includes("##") || (trimmed.length > 500 && !trimmed.includes('"question"'));
+    
+    if (looksLikeLesson && !looksLikeJson) {
+      console.error("surge-quiz returned lesson content instead of JSON", {
+        rawLength: raw.length,
+        firstChars: raw.substring(0, 200),
+        hasJson: looksLikeJson,
+        hasLesson: looksLikeLesson
+      });
+      return NextResponse.json(
+        { error: "Quiz generation returned lesson content instead of quiz JSON. Please try again." },
+        { status: 502 }
+      );
+    }
+
     return NextResponse.json({ ok: true, raw, stage });
   } catch (err: any) {
     console.error("surge-quiz API error:", err);

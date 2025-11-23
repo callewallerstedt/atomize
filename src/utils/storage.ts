@@ -93,6 +93,7 @@ export type StoredSubjectData = {
   reviewSchedules?: { [key: string]: ReviewSchedule }; // key: "topicName-lessonIndex"
   examDates?: Array<{ date: string; name?: string }>; // ISO date strings, e.g., "2024-03-15"
   surgeLog?: SurgeLogEntry[]; // History of Synapse Surge sessions
+  reviewedTopics?: { [topicName: string]: number }; // Map of topic names to last review timestamp
 };
 
 const PREFIX = "atomicSubjectData:";

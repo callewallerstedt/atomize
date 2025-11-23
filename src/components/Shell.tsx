@@ -467,6 +467,8 @@ type ChatMessage = {
     message?: string;
   }>;
   isLoading?: boolean; // For showing loading spinner
+  flashcardGeneration?: { slug: string; topic: string; count: number }; // For flashcard generation state
+  flashcardSuccess?: boolean; // For flashcard generation success
   hidden?: boolean; // For messages that should be in context but not displayed
 };
 
@@ -1381,6 +1383,143 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
             }, 500);
           }
         }
+      } else if (action.name === 'create_flashcards') {
+        const slug = action.params.slug?.trim();
+        const topic = action.params.topic?.trim();
+        const count = Math.max(1, Math.min(20, parseInt(action.params.count || '5', 10)));
+        let content = action.params.content?.trim();
+        
+        if (!slug || !topic) {
+          setMessages((m) => [...m, { role: 'assistant', content: 'I need a course slug and topic name to create flashcards. Please specify them.' }]);
+          return;
+        }
+        
+        // If no content provided, try to extract from page
+        if (!content || content.length < 50) {
+          // Try to get content from lesson-content or similar elements
+          const lessonContent = document.querySelector('.lesson-content, .surge-lesson-card, [data-topic]');
+          if (lessonContent) {
+            content = lessonContent.textContent || '';
+          }
+        }
+        
+        if (!content || content.length < 50) {
+          setMessages((m) => [...m, { role: 'assistant', content: 'I need content to create flashcards from. Please provide the content or make sure you\'re on a page with lesson content.' }]);
+          return;
+        }
+        
+        // Show loading message
+        const loadingMessageId = `flashcard-loading-${Date.now()}`;
+        setMessages((m) => [...m, { 
+          role: 'assistant', 
+          content: 'Generating Flashcards',
+          id: loadingMessageId,
+          isLoading: true,
+          flashcardGeneration: { slug, topic, count }
+        }]);
+        
+        // Generate flashcards
+        (async () => {
+          try {
+            const res = await fetch('/api/generate-flashcards', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                subject: slug,
+                topic,
+                content,
+                count,
+                courseContext: '', // Could be enhanced to get from context
+                languageName: '', // Could be enhanced to get from course data
+              }),
+            });
+            
+            const json = await res.json().catch(() => ({}));
+            
+            if (!res.ok || !json?.ok || !Array.isArray(json.flashcards) || json.flashcards.length === 0) {
+              throw new Error(json?.error || 'Failed to generate flashcards');
+            }
+            
+            // Save flashcards to topic
+            const { loadSubjectData, saveSubjectData } = await import('@/utils/storage');
+            const data = loadSubjectData(slug);
+            if (!data) {
+              throw new Error('Course not found');
+            }
+            
+            // Get or create topic content
+            let topicContent = data.nodes[topic];
+            if (!topicContent || typeof topicContent === 'string') {
+              // Create new topic content with a single lesson
+              topicContent = {
+                overview: '',
+                symbols: [],
+                lessons: [{
+                  title: topic,
+                  body: content.substring(0, 500), // Store first 500 chars as placeholder
+                  quiz: [],
+                  flashcards: json.flashcards,
+                }],
+              };
+            } else {
+              // Add flashcards to first lesson or create a new one
+              const lessons = (topicContent as any).lessons || [];
+              if (lessons.length > 0) {
+                // Add to first lesson
+                lessons[0] = {
+                  ...lessons[0],
+                  flashcards: [...(lessons[0].flashcards || []), ...json.flashcards],
+                };
+              } else {
+                // Create new lesson
+                lessons.push({
+                  title: topic,
+                  body: content.substring(0, 500),
+                  quiz: [],
+                  flashcards: json.flashcards,
+                });
+              }
+              topicContent = {
+                ...topicContent,
+                lessons,
+              };
+            }
+            
+            // Save updated data
+            data.nodes[topic] = topicContent;
+            saveSubjectData(slug, data);
+            
+            // Update message to show success
+            setMessages((m) => {
+              const copy = [...m];
+              const loadingIdx = copy.findIndex(msg => msg.id === loadingMessageId);
+              if (loadingIdx >= 0) {
+                copy[loadingIdx] = {
+                  role: 'assistant',
+                  content: `Flashcards Generated. I've created ${json.flashcards.length} flashcards for "${topic}".`,
+                  id: loadingMessageId,
+                  flashcardGeneration: { slug, topic, count: json.flashcards.length },
+                  flashcardSuccess: true,
+                };
+              }
+              return copy;
+            });
+          } catch (err: any) {
+            // Update message to show error
+            setMessages((m) => {
+              const copy = [...m];
+              const loadingIdx = copy.findIndex(msg => msg.id === loadingMessageId);
+              if (loadingIdx >= 0) {
+                copy[loadingIdx] = {
+                  role: 'assistant',
+                  content: `Failed to generate flashcards: ${err?.message || 'Unknown error'}`,
+                  id: loadingMessageId,
+                };
+              }
+              return copy;
+            });
+          }
+        })();
       } else if (action.name === 'request_files') {
         const message = action.params.message || 'Please upload the files I need.';
         alert(message);
@@ -2382,13 +2521,46 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
           
           // Show loading spinner for loading messages
           if (m.isLoading) {
+            const isFlashcardGeneration = m.flashcardGeneration;
             return (
               <div key={i} className="flex justify-start">
                 <div className="max-w-[80%]">
                   <div className="text-[10px] text-[var(--foreground)]/60 mb-1 ml-1">Chad</div>
                   <div className="rounded-xl bg-[var(--background)]/80 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--foreground)]/10 flex items-center gap-2">
                     <GlowSpinner size={16} ariaLabel="Loading" idSuffix={`chat-loading-${i}`} />
-                    <span className="text-xs text-[var(--foreground)]/60">Getting info...</span>
+                    <span className="text-xs text-[var(--foreground)]/60">
+                      {isFlashcardGeneration ? 'Generating Flashcards' : 'Getting info...'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+          
+          // Show flashcard success message with View flashcards button
+          if (m.flashcardSuccess && m.flashcardGeneration) {
+            return (
+              <div key={i} className="flex justify-start">
+                <div className="max-w-[80%]">
+                  <div className="text-[10px] text-[var(--foreground)]/60 mb-1 ml-1">Chad</div>
+                  <div className="rounded-xl bg-[var(--background)]/80 text-[var(--foreground)] px-3 py-2 text-sm border border-[var(--foreground)]/10">
+                    <LessonBody body={sanitizeLessonBody(String(m.content || ''))} />
+                    <button
+                      onClick={() => {
+                        const { slug } = m.flashcardGeneration!;
+                        if (slug && typeof window !== 'undefined') {
+                          // Set pending flag and navigate
+                          sessionStorage.setItem('__pendingFlashcardOpen', slug);
+                          // Also dispatch event to open flashcards if already on the course page
+                          document.dispatchEvent(new CustomEvent('synapse:open-flashcards', { detail: { slug } }));
+                          router.push(`/subjects/${slug}`);
+                        }
+                      }}
+                      className="mt-2 inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
+                      style={{ color: 'white' }}
+                    >
+                      View Flashcards
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2505,20 +2677,20 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
           }}
         >
           <div 
-            className="flex flex-col items-center gap-2"
+            className="flex flex-col items-center gap-2 w-full"
             style={{ 
-              minWidth: '520px',
-              maxWidth: '910px',
+              maxWidth: 'min(910px, calc(100vw - 2rem))',
               width: '100%',
             }}
             onClick={(e) => e.stopPropagation()}
           >
             <div 
               data-chat-pill
-              className="chat-input-container flex items-center gap-2 px-4 py-2 border border-[var(--foreground)]/10 overflow-hidden w-full"
+              className="chat-input-container flex items-center gap-2 px-4 py-3 border border-[var(--foreground)]/10 overflow-hidden w-full"
               style={{ 
                 boxShadow: 'none',
                 borderRadius: '1.5rem',
+                minHeight: '3.5rem',
               }}
             >
             <textarea
@@ -2542,15 +2714,16 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
               }}
               placeholder="Chat with Chad..."
               disabled={sending}
-              className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden"
+              className="flex-1 bg-transparent border-none outline-none text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden"
               style={{ 
                 boxShadow: 'none', 
-                padding: '0.25rem 0.5rem', 
-                minHeight: '1.5rem', 
+                padding: '0.5rem 0.75rem', 
+                minHeight: '2rem', 
                 maxHeight: '120px', 
                 lineHeight: '1.5rem', 
                 borderRadius: '0', 
-                backgroundColor: 'transparent' 
+                backgroundColor: 'transparent',
+                fontSize: '1rem',
               }}
               rows={1}
             />
@@ -2561,14 +2734,14 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                 disabled={sending || isTranscribing}
                 aria-pressed={isRecording}
                 title={isRecording ? "Stop recording" : "Record voice message"}
-                className={`unified-button transition-colors flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10 ${
+                className={`unified-button transition-colors flex-shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-full border border-[var(--foreground)]/10 ${
                   isRecording
                     ? 'text-[#FFB347] border-[#FFB347]/60'
                     : ''
                 } disabled:opacity-50`}
                 style={{ boxShadow: 'none' }}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 15c1.66 0 3-1.34 3-3V7a3 3 0 0 0-6 0v5c0 1.66 1.34 3 3 3z" />
                   <path d="M19 11v1a7 7 0 0 1-14 0v-1" />
                   <path d="M12 19v3" />
@@ -2582,12 +2755,12 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                   }
                 }}
                 disabled={sending || !input.trim()}
-                className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10"
+                className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-full border border-[var(--foreground)]/10"
                 style={{ 
                   boxShadow: 'none',
                 }}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M5 12h14M12 5l7 7-7 7"/>
                 </svg>
               </button>
@@ -2633,7 +2806,8 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
       {/* Full chat dropdown */}
       {typeof document !== 'undefined' && showFullChat ? createPortal(
         <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50"
+          style={{ paddingLeft: '1rem', paddingRight: '1rem', paddingTop: '0.25rem', paddingBottom: '0.25rem' }}
           onClick={() => {
             setShowFullChat(false);
             setOpen(false);
@@ -2642,17 +2816,20 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
           <div 
             ref={chatDropdownRef}
             data-chat-dropdown
-            className="relative w-full max-w-3xl max-h-[90vh] rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-2xl flex flex-col"
+            className="relative w-full rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-2xl flex flex-col"
             style={{
-              height: typeof window !== "undefined" && window.innerHeight < 720 ? "85vh" : "80vh"
+              maxWidth: 'min(1000px, calc(100vw - 2rem))',
+              maxHeight: 'calc(100vh - 0.5rem)',
+              height: 'calc(100vh - 0.5rem)',
+              width: '100%',
             }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--foreground)]/10">
+            <div className="flex items-center justify-between px-6 border-b border-[var(--foreground)]/10" style={{ paddingTop: '0.5rem', paddingBottom: '0.5rem' }}>
               <div className="flex items-center gap-2">
                 <div className="h-6 w-6 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
-                <div className="text-sm font-semibold text-[var(--foreground)]">Chad</div>
+                <div className="font-semibold text-[var(--foreground)]" style={{ fontSize: '1.05rem' }}>Chad</div>
               </div>
               <button
                 onClick={() => {
@@ -2669,9 +2846,9 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
             </div>
             
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 min-h-0">
+            <div className="flex-1 overflow-y-auto px-6 space-y-4 min-h-0" style={{ paddingTop: '0.5rem', paddingBottom: '0.5rem' }}>
               {messages.length === 0 && (
-                <div className="text-xs text-[var(--foreground)]/60">Ask a question about this page. I'll use the current page content as context.</div>
+                <div className="text-[var(--foreground)]/60" style={{ fontSize: '0.9rem' }}>Ask a question about this page. I'll use the current page content as context.</div>
               )}
               {messages.map((m, i) => {
                 if (m.role === 'system' || m.hidden) return null;
@@ -2682,7 +2859,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                       <div 
                         className="chat-bubble-assistant max-w-[80%] inline-block px-3 py-1.5 rounded-full border border-[var(--foreground)]/10"
                       >
-                        <div className="text-sm text-[var(--foreground)]/90 leading-relaxed flex items-center gap-2">
+                        <div className="text-[var(--foreground)]/90 leading-relaxed flex items-center gap-2" style={{ fontSize: '1.05rem' }}>
                           <span className="inline-block w-2 h-2 bg-[var(--foreground)]/60 rounded-full animate-pulse"></span>
                           Thinking...
                         </div>
@@ -2697,7 +2874,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                       <div 
                         className="chat-bubble-user max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/15"
                       >
-                        <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
+                        <div className="text-[var(--foreground)]/90 leading-relaxed" style={{ fontSize: '1.05rem' }}>
                           {m.content}
                         </div>
                       </div>
@@ -2705,7 +2882,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                       <div 
                         className="chat-bubble-assistant max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10"
                       >
-                        <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
+                        <div className="text-[var(--foreground)]/90 leading-relaxed" style={{ fontSize: '1.05rem' }}>
                           {m.role === 'assistant' ? (
                             <>
                               <div className="chat-bubble">
@@ -2725,7 +2902,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
             </div>
             
             {/* Chat pill at bottom */}
-            <div className="px-6 py-4 border-t border-[var(--foreground)]/10 flex-shrink-0">
+            <div className="px-6 border-t border-[var(--foreground)]/10 flex-shrink-0" style={{ paddingTop: '0.5rem', paddingBottom: '0.5rem' }}>
               <div 
                 data-chat-pill
                 className="chat-input-container flex items-center gap-2 px-4 py-2 border border-[var(--foreground)]/10 overflow-hidden"
@@ -2755,7 +2932,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                   }}
                   placeholder="Chat with Chad..."
                   disabled={sending}
-                  className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden"
+                  className="flex-1 bg-transparent border-none outline-none text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden"
                   style={{ 
                     boxShadow: 'none', 
                     padding: '0.25rem 0.5rem', 
@@ -2763,7 +2940,8 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                     maxHeight: '120px', 
                     lineHeight: '1.5rem', 
                     borderRadius: '0', 
-                    backgroundColor: 'transparent' 
+                    backgroundColor: 'transparent',
+                    fontSize: '1.05rem'
                   }}
                   rows={1}
                 />
@@ -3186,11 +3364,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             {pathname?.includes('/surge') && (
               <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2 items-center">
                 <h1 
-                  className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider" 
+                  className="text-3xl font-bold tracking-wider text-[var(--foreground)]/80" 
                   style={{ 
                     fontFamily: 'var(--font-orbitron), sans-serif',
                     fontWeight: 700,
-                    textShadow: '0 0 20px rgba(0, 229, 255, 0.4), 0 0 40px rgba(255, 45, 150, 0.2)',
                     letterSpacing: '0.15em'
                   }}
                 >
@@ -3306,36 +3483,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       </svg>
                     )}
                   </button>
-                {/* Info button */}
-                  <button
-                    onClick={() => setInfoOpen(true)}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      e.currentTarget.blur();
-                    }}
-                    className="unified-button relative inline-flex items-center justify-center px-1.5 py-1.5
-                               focus:outline-none focus:ring-0 focus-visible:outline-none
-                               transition-all duration-300 ease-out"
-                    style={{ 
-                      outline: 'none', 
-                      WebkitTapHighlightColor: 'transparent', 
-                      transform: 'none !important',
-                      borderRadius: '50%',
-                      margin: 0,
-                      display: 'flex',
-                      height: '32px',
-                      width: '32px',
-                      boxShadow: 'none',
-                    }}
-                    aria-label="Info"
-                    title="About this app"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
-                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
-                      <path d="M12 8.5a.75.75 0 100-1.5.75.75 0 000 1.5z" fill="currentColor"/>
-                      <path d="M11.25 10.5h1.5v6h-1.5z" fill="currentColor"/>
-                    </svg>
-                  </button>
                 {/* Settings button */}
                   <button
                     onClick={() => setSettingsOpen(true)}
@@ -3368,93 +3515,26 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               </div>
 
               <div ref={mobileMenuRef} className="relative md:hidden">
-                {/* Mobile menu button with gradient border */}
-                <div
-                  className="inline-flex rounded-xl transition-all duration-300 overflow-hidden"
-                  style={{
-                    padding: '1.5px',
-                    background: mobileMenuOpen 
-                      ? 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))'
-                      : 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
-                    boxShadow: mobileMenuOpen
-                      ? '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)'
-                      : '0 2px 8px rgba(0, 0, 0, 0.3)',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!mobileMenuOpen) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.9), rgba(255, 45, 150, 0.9))';
-                      e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 229, 255, 0.3), 0 0 40px rgba(255, 45, 150, 0.15)';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!mobileMenuOpen) {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))';
-                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)';
-                    }
-                  }}
+                {/* Mobile menu button */}
+                <button
+                  onClick={() => setMobileMenuOpen((open) => !open)}
+                  className="unified-button inline-flex items-center gap-1.5 px-4 py-2.5 text-sm transition-colors"
+                  aria-expanded={mobileMenuOpen}
+                  aria-haspopup="true"
                 >
-                  <button
-                    onClick={() => setMobileMenuOpen((open) => !open)}
-                    className="group relative inline-flex items-center gap-1 px-3 py-2 text-sm
-                               text-white
-                               transition-all duration-300 ease-out
-                               bg-[var(--background)]/90 backdrop-blur-md"
-                    style={{
-                      borderRadius: 'calc(0.75rem - 1.5px)',
-                    }}
-                    aria-expanded={mobileMenuOpen}
-                    aria-haspopup="true"
-                  >
-                    Menu
-                    <svg className={`h-4 w-4 transition-transform ${mobileMenuOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                </div>
+                  Menu
+                  <svg className={`h-4 w-4 transition-transform ${mobileMenuOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
 
                 {mobileMenuOpen && isMobile && (
                   <div 
-                    className="absolute right-0 mt-2 w-[min(18rem,calc(100vw-1.5rem))] rounded-2xl overflow-hidden z-50"
+                    className="absolute right-0 mt-2 w-[min(18rem,calc(100vw-1.5rem))] rounded-2xl bg-[var(--background)]/95 backdrop-blur-md border border-[var(--foreground)]/10 p-3 space-y-4 z-50"
                     style={{
-                      padding: '1.5px',
-                      background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.8), rgba(255, 45, 150, 0.8))',
                       boxShadow: '0 12px 30px rgba(0, 0, 0, 0.6)',
                     }}
                   >
-                    <div className="rounded-2xl bg-[var(--background)]/95 backdrop-blur-md p-3 space-y-4" style={{ borderRadius: 'calc(1rem - 1.5px)' }}>
-                    <div>
-                      <p className="text-xs uppercase tracking-wide text-[var(--foreground)]/60">Tools</p>
-                      <div className="mt-2 space-y-1.5">
-                        <button
-                          onClick={() => {
-                            router.push('/exam-snipe');
-                            setMobileMenuOpen(false);
-                          }}
-                          className="btn-grey w-full rounded-lg px-3 py-2 text-left text-sm transition-colors"
-                        >
-                          Exam Snipe
-                        </button>
-                        <button
-                          onClick={() => {
-                            router.push('/quicklearn');
-                            setMobileMenuOpen(false);
-                          }}
-                          className="btn-grey w-full rounded-lg px-3 py-2 text-left text-sm transition-colors"
-                        >
-                          Quick Learn
-                        </button>
-                        <button
-                          onClick={() => {
-                            router.push('/readassist');
-                            setMobileMenuOpen(false);
-                          }}
-                          className="btn-grey w-full rounded-lg px-3 py-2 text-left text-sm transition-colors"
-                        >
-                          Read Assist
-                        </button>
-                      </div>
-                    </div>
-
                     <div className="border-t border-[var(--foreground)]/10 pt-3">
                       <p className="text-xs uppercase tracking-wide text-[var(--foreground)]/60">Pomodoro</p>
                       <div className="mt-2">
@@ -3462,13 +3542,13 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       </div>
                     </div>
 
-                    <div className="border-t border-[var(--foreground)]/10 pt-3 space-y-1.5">
+                    <div className="border-t border-[var(--foreground)]/10 pt-3 space-y-2">
                       <button
                         onClick={() => {
                           setMobileMenuOpen(false);
                           document.dispatchEvent(new CustomEvent('synapse:open-chat'));
                         }}
-                        className="btn-grey w-full rounded-lg px-3 py-2 text-left text-sm transition-colors"
+                        className="btn-grey w-full rounded-lg px-4 py-3 text-left text-sm transition-colors"
                       >
                         Open Chat
                       </button>
@@ -3477,7 +3557,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                           setMobileMenuOpen(false);
                           setInfoOpen(true);
                         }}
-                        className="btn-grey w-full rounded-lg px-3 py-2 text-left text-sm transition-colors"
+                        className="btn-grey w-full rounded-lg px-4 py-3 text-left text-sm transition-colors"
                       >
                         App Info
                       </button>
@@ -3486,11 +3566,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                           setMobileMenuOpen(false);
                           setSettingsOpen(true);
                         }}
-                        className="btn-grey w-full rounded-lg px-3 py-2 text-left text-sm transition-colors"
+                        className="btn-grey w-full rounded-lg px-4 py-3 text-left text-sm transition-colors"
                       >
                         Settings
                       </button>
-                    </div>
                     </div>
                   </div>
                 )}

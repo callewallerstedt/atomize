@@ -28,15 +28,18 @@ export async function POST(
       const allSessions = getAllSessions();
       console.error("Session not found in store. Available sessions:", allSessions.map(s => s.id));
       return NextResponse.json(
-        { error: "Session not found" },
+        { error: "Session not found. Please generate a new QR code." },
         { status: 404 }
       );
     }
 
-    if (session.expiresAt < Date.now()) {
+    const now = Date.now();
+    if (session.expiresAt < now) {
       deleteSession(sessionId);
+      const expiredMinutes = Math.round((now - session.expiresAt) / 1000 / 60);
+      console.error(`Session expired: ${sessionId}. Expired ${expiredMinutes} minutes ago.`);
       return NextResponse.json(
-        { error: "Session expired" },
+        { error: `Session expired ${expiredMinutes} minute${expiredMinutes !== 1 ? 's' : ''} ago. Please generate a new QR code.` },
         { status: 410 }
       );
     }
