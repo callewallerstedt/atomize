@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { LessonBody } from "@/components/LessonBody";
 import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
@@ -612,6 +612,10 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
   const chatDropdownRef = useRef<HTMLDivElement>(null);
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
+  const pathname = usePathname();
+  const [preferredAddress, setPreferredAddress] = useState<string | null>(null);
+  const homeResetRef = useRef(false);
+  const insertedWelcomeRef = useRef(false);
   const lastSavedRef = useRef<string>('');
   const isLoadingFromHistoryRef = useRef<boolean>(false);
   const pendingWelcomeMessageRef = useRef<{ welcomeMessage: string; userMessage: string } | null>(null);
@@ -627,16 +631,110 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
     return null;
   }
 
-  // Load chat history from localStorage
+  // Load chat history from localStorage (skip when we intentionally reset on the homepage)
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (pathname === '/') {
+      setChatHistory([]);
+      return;
+    }
     try {
       const stored = localStorage.getItem('chatHistory');
       if (stored) {
         setChatHistory(JSON.parse(stored));
+      } else {
+        setChatHistory([]);
       }
-    } catch {}
+    } catch {
+      setChatHistory([]);
+    }
+  }, [pathname]);
+
+  // Fetch preferred address/prefix for personalized greetings
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/me', { credentials: 'include' });
+        const data = await res.json().catch(() => ({}));
+        if (!isMounted) return;
+        const prefs = data?.user?.preferences || {};
+        const customTitle = typeof prefs?.customTitle === 'string' ? prefs.customTitle : null;
+        const storedTitle = typeof prefs?.preferredTitle === 'string' ? prefs.preferredTitle : null;
+        setPreferredAddress(customTitle || storedTitle || null);
+      } catch {
+        if (isMounted) {
+          setPreferredAddress(null);
+        }
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
   }, []);
+
+  const buildWelcomeMessage = useCallback(() => {
+    const now = new Date();
+    const weekday = now.toLocaleDateString(undefined, { weekday: 'long' });
+    const timeStamp = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const hours = now.getHours();
+    let timeOfDay: 'morning' | 'afternoon' | 'evening' | 'night';
+    if (hours >= 5 && hours < 12) timeOfDay = 'morning';
+    else if (hours >= 12 && hours < 17) timeOfDay = 'afternoon';
+    else if (hours >= 17 && hours < 22) timeOfDay = 'evening';
+    else timeOfDay = 'night';
+    const honorific = (preferredAddress?.trim() || 'legend').replace(/\s+/g, ' ');
+    const vibeMap: Record<typeof timeOfDay, string> = {
+      morning: "let's brew some fresh neurons before the rest of the campus wakes up.",
+      afternoon: "perfect time to turn that momentum into a mini breakthrough.",
+      evening: "ideal for a focused power session before you log off.",
+      night: "the late-night lab lights are glowing just for you."
+    };
+    return `Welcome Back to Synapse, ${honorific}! It's a ${weekday.toLowerCase()} ${timeOfDay} (${timeStamp}) — ${vibeMap[timeOfDay]}`;
+  }, [preferredAddress]);
+
+  const resetHomepageChat = useCallback(() => {
+    insertedWelcomeRef.current = true;
+    lastSavedRef.current = '';
+    setCurrentChatId(null);
+    setMessages([{ role: 'assistant', content: buildWelcomeMessage() }]);
+    setInput("");
+    setChatHistory([]);
+    try {
+      localStorage.removeItem('chatHistory');
+    } catch {}
+  }, [buildWelcomeMessage]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (pathname === '/') {
+      if (!homeResetRef.current) {
+        homeResetRef.current = true;
+        resetHomepageChat();
+      }
+    } else {
+      homeResetRef.current = false;
+      insertedWelcomeRef.current = false;
+    }
+  }, [pathname, resetHomepageChat]);
+
+  useEffect(() => {
+    if (pathname !== '/' || !insertedWelcomeRef.current) return;
+    setMessages((prev) => {
+      if (prev.length === 1 && prev[0]?.role === 'assistant') {
+        const welcome = buildWelcomeMessage();
+        if (prev[0].content === welcome) return prev;
+        return [{ ...prev[0], content: welcome }];
+      }
+      return prev;
+    });
+  }, [pathname, buildWelcomeMessage]);
+
+  useEffect(() => {
+    if (insertedWelcomeRef.current && messages.some((m) => m.role === 'user')) {
+      insertedWelcomeRef.current = false;
+    }
+  }, [messages]);
 
   useEffect(() => {
     const handleOpenChat = () => {
@@ -668,6 +766,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
           { role: 'assistant', content: welcomeMessage },
           { role: 'user', content: userMessage }
         ]);
+        insertedWelcomeRef.current = false;
         setOpen(true);
         // Store for processing in next effect
         pendingWelcomeMessageRef.current = { welcomeMessage, userMessage };
@@ -785,6 +884,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
   }, [messages, sending, chatHistory, currentChatId]);
 
   function startNewChat() {
+    insertedWelcomeRef.current = false;
     setMessages([]);
     setInput("");
     lastSavedRef.current = '';
@@ -900,6 +1000,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
 
   function loadChat(chat: ChatHistory) {
     isLoadingFromHistoryRef.current = true;
+     insertedWelcomeRef.current = false;
     setMessages(chat.messages);
     setCurrentChatId(chat.id);
   }
@@ -2215,6 +2316,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
   async function sendMessage() {
     const text = input.trim();
     if (!text || sending) return;
+    insertedWelcomeRef.current = false;
     setInput("");
     setMessages((m) => [...m, { role: 'user', content: text }]);
     setShowFullChat(true); // Open full chat when sending a message

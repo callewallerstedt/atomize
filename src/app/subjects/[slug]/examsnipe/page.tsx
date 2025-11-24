@@ -462,13 +462,21 @@ function CourseExamSnipeInner() {
       };
     };
 
+    const notifySubjectDataUpdated = (targetSlug: string) => {
+      if (typeof window !== "undefined" && targetSlug) {
+        window.dispatchEvent(new CustomEvent('synapse:subject-data-updated', { detail: { slug: targetSlug } }));
+      }
+    };
+
     const examData = buildCourseData(loadSubjectData(lessonSlug) || null, record.courseName || lessonSlug);
     await saveSubjectDataAsync(lessonSlug, examData);
+    notifySubjectDataUpdated(lessonSlug);
 
     try {
       const primaryExisting = loadSubjectData(slug) || null;
       const primaryData = buildCourseData(primaryExisting, primaryExisting?.subject || slug || record.courseName || "Course");
       await saveSubjectDataAsync(slug, primaryData);
+      notifySubjectDataUpdated(slug);
     } catch (err) {
       console.error("Failed to sync exam snipe lessons to course:", err);
     }

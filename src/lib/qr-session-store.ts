@@ -9,9 +9,20 @@ export type QRSession = {
   expiresAt: number;
 };
 
-// Use a global Map to ensure it's shared across all imports
-// In Next.js, modules are cached, so this should work
-const sessions = new Map<string, QRSession>();
+// Ensure the session store survives hot reloads / serverless re-instantiation
+// by pinning it on the global object (Next.js caches modules per instance only).
+const globalWithSessions = globalThis as typeof globalThis & {
+  __qrSessions__?: Map<string, QRSession>;
+  __qrSessionCleanupInterval__?: NodeJS.Timeout;
+};
+
+const sessions =
+  globalWithSessions.__qrSessions__ ?? new Map<string, QRSession>();
+
+if (!globalWithSessions.__qrSessions__) {
+  globalWithSessions.__qrSessions__ = sessions;
+  console.log("[QR] Initialized global session store");
+}
 
 // Export for debugging
 export function getAllSessions() {
@@ -23,8 +34,11 @@ export function getAllSessions() {
 
 // Clean up expired sessions every 5 minutes
 // Only run in Node.js environment (not in edge runtime)
-if (typeof setInterval !== 'undefined') {
-  setInterval(() => {
+if (
+  typeof setInterval !== "undefined" &&
+  !globalWithSessions.__qrSessionCleanupInterval__
+) {
+  globalWithSessions.__qrSessionCleanupInterval__ = setInterval(() => {
     const now = Date.now();
     let cleaned = 0;
     for (const [sessionId, session] of sessions.entries()) {
@@ -34,7 +48,7 @@ if (typeof setInterval !== 'undefined') {
       }
     }
     if (cleaned > 0) {
-      console.log(`Cleaned up ${cleaned} expired QR sessions`);
+      console.log(`[QR] Cleaned up ${cleaned} expired sessions`);
     }
   }, 5 * 60 * 1000);
 }

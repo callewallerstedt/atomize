@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { LessonBody } from "@/components/LessonBody";
-import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
+import { FlashcardContent } from "@/components/FlashcardContent";
+import { sanitizeLessonBody, sanitizeFlashcardContent } from "@/lib/sanitizeLesson";
 import { loadSubjectData, saveSubjectData, saveSubjectDataAsync, StoredSubjectData, TopicMeta, getLessonsDueForReview, getUpcomingReviews, LessonFlashcard } from "@/utils/storage";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -222,56 +223,61 @@ export default function SubjectPage() {
     }
   }, [slug]);
 
-  useEffect(() => {
+  const refreshSubjectData = useCallback(() => {
     const saved = loadSubjectData(slug);
+
     if (saved?.topics && saved.topics.length) {
       setTopics(saved.topics);
       setCombinedText(saved.combinedText || "");
       setSavedFiles(saved.files || []);
       setCourseNotes(saved.course_notes || "");
       setProgress(saved.progress || {});
-      setNodes(saved.nodes || {} as any);
-      // Build tree from topics if tree doesn't exist or has no topics
+      setNodes(saved.nodes || ({} as any));
       if (saved.tree && saved.tree.topics && saved.tree.topics.length > 0) {
         setTree(saved.tree);
       } else {
-        // Create tree from topics array
-        setTree({ 
-          subject: saved.subject || slug, 
-          topics: saved.topics.map((t: any) => ({ name: t.name || t, subtopics: [] })) 
+        setTree({
+          subject: saved.subject || slug,
+          topics: saved.topics.map((t: any) => ({ name: t.name || t, subtopics: [] })),
         });
       }
     } else if (saved?.tree) {
-      // legacy fallback: flatten top-level names as topics with equal coverage
       const legacyTopics = (saved.tree?.topics || []).map((t: any) => ({ name: t.name, summary: "" }));
       setTopics(legacyTopics);
       setCombinedText(saved.combinedText || "");
       setSavedFiles(saved.files || []);
       setProgress(saved.progress || {});
       setTree(saved.tree);
-      setNodes(saved.nodes || {} as any);
+      setNodes(saved.nodes || ({} as any));
+    } else {
+      setTopics(null);
+      setCombinedText("");
+      setSavedFiles([]);
+      setCourseNotes("");
+      setProgress({});
+      setTree(null);
+      setNodes({});
     }
-    
-    // Load reviews
+
     setReviewsDue(getLessonsDueForReview(slug));
     setUpcomingReviews(getUpcomingReviews(slug, 7));
-    
-    // Load exam snipes for this course
+    return saved || null;
+  }, [slug]);
+
+  useEffect(() => {
+    const saved = refreshSubjectData();
     void loadExamSnipes();
-    
-    // Check if we need to open flashcards after data is loaded
+
     const pendingFlashcardOpen = typeof window !== 'undefined' ? sessionStorage.getItem('__pendingFlashcardOpen') : null;
     if (pendingFlashcardOpen === slug && saved && saved.nodes && Object.keys(saved.nodes).length > 0) {
-      // Clear the pending flag
       if (typeof window !== 'undefined') {
         sessionStorage.removeItem('__pendingFlashcardOpen');
       }
-      // Open flashcards immediately since data is now loaded
       setTimeout(() => {
         collectAllFlashcards();
       }, 50);
     }
-  }, [slug, loadExamSnipes]);
+  }, [slug, loadExamSnipes, refreshSubjectData]);
 
   // Refresh exam snipes when page gains focus (in case user created one in another tab)
   useEffect(() => {
@@ -281,6 +287,20 @@ export default function SubjectPage() {
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
   }, [loadExamSnipes]);
+
+  useEffect(() => {
+    const handleSubjectDataUpdated = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.slug === slug) {
+        refreshSubjectData();
+        void loadExamSnipes();
+      }
+    };
+    window.addEventListener('synapse:subject-data-updated', handleSubjectDataUpdated as EventListener);
+    return () => {
+      window.removeEventListener('synapse:subject-data-updated', handleSubjectDataUpdated as EventListener);
+    };
+  }, [slug, refreshSubjectData, loadExamSnipes]);
 
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -1575,14 +1595,14 @@ export default function SubjectPage() {
                   <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 px-4 pb-12 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-0' : 'opacity-100'}`}>
                     <div className="pointer-events-auto w-full overflow-y-auto overflow-x-hidden text-center" style={{ maxHeight: 'calc(100% - 3rem)' }}>
                       <div className="flex flex-col items-center justify-center min-h-full py-4">
-                        <LessonBody body={sanitizeLessonBody(String(currentCard?.prompt || ""))} />
+                        <FlashcardContent content={sanitizeFlashcardContent(String(currentCard?.prompt || ""))} />
                       </div>
                     </div>
                   </div>
                   <div className={`absolute inset-0 flex flex-col items-center justify-center gap-4 px-4 pb-12 text-lg font-medium leading-relaxed text-[var(--foreground)] transition-opacity duration-300 z-10 pointer-events-none ${flashcardFlipped ? 'opacity-100' : 'opacity-0'}`}>
                     <div className="pointer-events-auto w-full overflow-y-auto overflow-x-hidden text-center" style={{ maxHeight: 'calc(100% - 3rem)' }}>
                       <div className="flex flex-col items-center justify-center min-h-full py-4">
-                        <LessonBody body={sanitizeLessonBody(String(currentCard?.answer || ""))} />
+                        <FlashcardContent content={sanitizeFlashcardContent(String(currentCard?.answer || ""))} />
                       </div>
                     </div>
                   </div>
