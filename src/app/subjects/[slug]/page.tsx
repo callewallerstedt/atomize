@@ -714,6 +714,9 @@ export default function SubjectPage() {
                   const hasSurgeLesson =
                     Array.isArray(nodes?.[name]?.lessons) &&
                     nodes[name].lessons.some((lesson: any) => lesson?.origin === "surge");
+                  const hasExamSnipeLesson =
+                    Array.isArray(nodes?.[name]?.lessons) &&
+                    nodes[name].lessons.some((lesson: any) => lesson?.origin === "exam-snipe");
                   const isGenerating = !!nodeGenerating[name];
                   const isFirst = i === 0;
                   const isLast = i === tree.topics.length - 1;
@@ -756,6 +759,11 @@ export default function SubjectPage() {
                         {hasSurgeLesson && (
                           <span className="text-[10px] uppercase tracking-[0.25em] font-semibold text-[var(--foreground)]/80">
                             Surge
+                          </span>
+                        )}
+                        {hasExamSnipeLesson && (
+                          <span className="text-[10px] uppercase tracking-[0.25em] font-semibold text-[var(--foreground)]/80">
+                            Exam Snipe
                           </span>
                         )}
                       </div>

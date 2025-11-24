@@ -314,6 +314,168 @@ function CourseExamSnipeInner() {
   const [generatingPlan, setGeneratingPlan] = useState(false);
   const [lessonGenerating, setLessonGenerating] = useState<Record<string, boolean>>({});
 
+  const syncExamSnipeCourseData = async (
+    record: ExamSnipeRecord,
+    conceptName: string,
+    focusPlanId?: string
+  ): Promise<{ lessonSlug: string; topic: string; clickedLessonIndex: number }> => {
+    const results = record.results || {};
+    const concepts = results.concepts || [];
+    const lessonPlans = results.lessonPlans || {};
+    const concept = concepts.find((c: any) => c.name === conceptName);
+    const conceptPlan = lessonPlans[conceptName] || concept?.lessonPlan;
+    const lessons = conceptPlan?.lessons || [];
+
+    if (!lessons.length) {
+      throw new Error("Lesson plan missing for this concept");
+    }
+
+    const generatedLessonsByConcept = results.generatedLessons?.[conceptName] || {};
+    const slugBase = (record.courseName || "Exam Snipe Lessons")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    const lessonSlug = `${slugBase}-${record.slug || "exams"}`.slice(0, 64);
+    const topic = conceptName;
+
+    const planLessons = lessons;
+    const planIdMapping: Record<number, string> = {};
+    let clickedLessonIndex = -1;
+    planLessons.forEach((lessonPlanItem: any, idx: number) => {
+      const lessonPlanId = String(lessonPlanItem.id);
+      planIdMapping[idx] = lessonPlanId;
+      if (focusPlanId && lessonPlanId === focusPlanId) {
+        clickedLessonIndex = idx;
+      }
+    });
+
+    const buildLessonsForExisting = (existingLessons: any[] = []) => {
+      const lessonsMeta: Array<{ type: string; title: string; planId?: string; tag?: string }> = [];
+      const lessonsArray: Array<any> = [];
+
+      planLessons.forEach((lessonPlanItem: any, idx: number) => {
+        const lessonPlanId = planIdMapping[idx];
+        const lessonTitle = String(lessonPlanItem.title || `Lesson ${idx + 1}`);
+        const lessonGenerated = generatedLessonsByConcept?.[lessonPlanId] as GeneratedLesson | undefined;
+        const existingLesson = existingLessons[idx] || {};
+
+        if (lessonGenerated) {
+          lessonsMeta.push({
+            type: "Exam Snipe",
+            title: String(lessonGenerated.title || lessonTitle),
+            planId: lessonPlanId,
+            tag: "Exam Snipe",
+          });
+          lessonsArray.push({
+            ...existingLesson,
+            title: String(lessonGenerated.title || lessonTitle),
+            body: String(lessonGenerated.body || ""),
+            origin: "exam-snipe",
+            quiz: (existingLesson as any)?.quiz?.length
+              ? (existingLesson as any).quiz
+              : Array.isArray(lessonGenerated.quiz)
+              ? lessonGenerated.quiz.map((q: any) => ({ question: String(q?.question || q || "") }))
+              : [],
+          });
+        } else {
+          lessonsMeta.push({
+            type: "Exam Snipe Outline",
+            title: lessonTitle,
+            planId: lessonPlanId,
+            tag: "Exam Snipe",
+          });
+          lessonsArray.push({
+            ...existingLesson,
+            title: lessonTitle,
+            body: typeof existingLesson.body === "string" ? existingLesson.body : "",
+            quiz: (existingLesson as any)?.quiz?.length ? (existingLesson as any).quiz : [],
+          });
+        }
+      });
+
+      return { lessonsMeta, lessonsArray };
+    };
+
+    const buildCourseData = (existingData: StoredSubjectData | null, subjectFallback: string) => {
+      const existingNode =
+        existingData?.nodes?.[topic] && typeof existingData.nodes[topic] === "object" && !Array.isArray(existingData.nodes[topic])
+          ? (existingData.nodes[topic] as any)
+          : null;
+      const existingLessons = existingNode?.lessons || [];
+      const existingRawLessonJson = existingNode?.rawLessonJson || [];
+      const existingSymbols = existingNode?.symbols || [];
+
+      const { lessonsMeta, lessonsArray } = buildLessonsForExisting(existingLessons);
+
+      const topicsList = Array.isArray(existingData?.topics) ? [...existingData.topics] : [];
+      if (!topicsList.some((t: any) => t?.name === topic)) {
+        topicsList.push({
+          name: topic,
+          summary: concept?.description || `Exam Snipe concept: ${topic}`,
+        });
+      }
+
+      const examSummary = [results.patternAnalysis, results.gradeInfo].filter(Boolean).join("\n").trim();
+      const combinedContext = (() => {
+        const base = existingData?.course_context?.trim();
+        if (examSummary) {
+          return base ? `${base}\n${examSummary}` : examSummary;
+        }
+        return base || "";
+      })();
+
+      return {
+        subject: existingData?.subject || subjectFallback,
+        course_context: combinedContext,
+        combinedText: existingData?.combinedText || "",
+        topics: topicsList,
+        nodes: {
+          ...(existingData?.nodes || {}),
+          [topic]: {
+            overview: existingNode?.overview || `Lessons generated from Exam Snipe for: ${topic}`,
+            symbols: existingSymbols,
+            lessonsMeta,
+            lessons: lessonsArray,
+            rawLessonJson: existingRawLessonJson,
+            examSnipeMeta: {
+              historySlug: record.slug,
+              conceptName,
+              conceptDescription: concept?.description || "",
+              keySkills: conceptPlan?.keySkills || [],
+              examConnections: conceptPlan?.examConnections || [],
+              planIdMapping,
+              planLessons: lessons.map((lessonPlanItem: any) => ({
+                id: String(lessonPlanItem.id),
+                title: String(lessonPlanItem.title || ""),
+                summary: lessonPlanItem.summary || "",
+                objectives: Array.isArray(lessonPlanItem.objectives) ? lessonPlanItem.objectives : [],
+              })),
+              courseName: record.courseName || "",
+              patternAnalysis: results.patternAnalysis || "",
+              detectedLanguage: results.detectedLanguage || null,
+            },
+          } as any,
+        },
+        files: existingData?.files || [],
+        progress: existingData?.progress || {},
+        reviewedTopics: existingData?.reviewedTopics || {},
+      };
+    };
+
+    const examData = buildCourseData(loadSubjectData(lessonSlug) || null, record.courseName || lessonSlug);
+    await saveSubjectDataAsync(lessonSlug, examData);
+
+    try {
+      const primaryExisting = loadSubjectData(slug) || null;
+      const primaryData = buildCourseData(primaryExisting, primaryExisting?.subject || slug || record.courseName || "Course");
+      await saveSubjectDataAsync(slug, primaryData);
+    } catch (err) {
+      console.error("Failed to sync exam snipe lessons to course:", err);
+    }
+    return { lessonSlug, topic, clickedLessonIndex };
+  };
+
+
   const selectedConcept =
     examSnipe?.results != null && selectedConceptIndex != null
       ? examSnipe.results.concepts[selectedConceptIndex] ?? null
@@ -602,100 +764,23 @@ function CourseExamSnipeInner() {
 
                             const handleRowClick = async () => {
                               try {
-                                const slugBase = (examSnipe?.courseName || 'Exam Snipe Lessons')
-                                  .toLowerCase()
-                                  .replace(/[^a-z0-9]+/g, '-')
-                                  .replace(/^-+|-+$/g, '');
-                                const lessonSlug = `${slugBase}-${examSnipe?.slug || 'exams'}`.slice(0, 64);
-                                const topic = concept.name;
-                                
-                                // Load existing subject data if it exists
-                                const existingData = loadSubjectData(lessonSlug) || null;
-                                
-                                // Build lessonsMeta and lessons arrays from all lesson plans
-                                const lessonsMeta: Array<{ type: string; title: string; planId?: string }> = [];
-                                const lessonsArray: Array<any> = [];
-                                const planIdMapping: Record<number, string> = {};
-                                let clickedLessonIndex = -1;
-                                
-                                // Get existing lessons to preserve user data (flashcards, quiz answers, etc.)
-                                const existingLessons = (existingData?.nodes?.[topic] && typeof existingData.nodes[topic] === 'object' && !Array.isArray(existingData.nodes[topic])) 
-                                  ? (existingData.nodes[topic] as any).lessons || []
-                                  : [];
-                                
-                                (lessons || []).forEach((lessonPlanItem: any, idx: number) => {
-                                  const lessonPlanId = String(lessonPlanItem.id);
-                                  const lessonGenerated = generatedMap?.[lessonPlanId] as GeneratedLesson | undefined;
-                                  const lessonTitle = String(lessonPlanItem.title || `Lesson ${idx + 1}`);
-                                  
-                                  // Track which lesson was clicked
-                                  if (lessonPlanId === planId) {
-                                    clickedLessonIndex = idx;
-                                  }
-                                  
-                                  // Store mapping of lesson index to planId
-                                  planIdMapping[idx] = lessonPlanId;
-                                  
-                                  // Get existing lesson data to preserve user progress
-                                  const existingLesson = existingLessons[idx] || {};
-                                  
-                                  if (lessonGenerated) {
-                                    lessonsMeta.push({ type: 'Generated Lesson', title: String(lessonGenerated.title || lessonTitle), planId: lessonPlanId });
-                                    lessonsArray.push({
-                                      ...existingLesson,
-                                      title: String(lessonGenerated.title || lessonTitle),
-                                      body: String(lessonGenerated.body || ''),
-                                      quiz: (existingLesson as any)?.quiz?.length 
-                                        ? (existingLesson as any).quiz 
-                                        : (Array.isArray(lessonGenerated.quiz) 
-                                            ? lessonGenerated.quiz.map((q: any) => ({ question: String(q?.question || q || "") }))
-                                            : []),
-                                    });
-                                  } else {
-                                    lessonsMeta.push({ type: 'Lesson Outline', title: lessonTitle, planId: lessonPlanId });
-                                    lessonsArray.push({
-                                      ...existingLesson,
-                                      title: lessonTitle,
-                                      body: '',
-                                      quiz: (existingLesson as any)?.quiz?.length ? (existingLesson as any).quiz : [],
-                                    });
-                                  }
-                                });
-                                
-                                // Merge with existing data
-                                const data: StoredSubjectData = {
-                                  subject: examSnipe?.courseName || existingData?.subject || 'Exam Snipe Lessons',
-                                  course_context: (results.patternAnalysis || '') + "\n" + (results.gradeInfo || '') || existingData?.course_context || '',
-                                  combinedText: existingData?.combinedText || '',
-                                  topics: existingData?.topics || [],
-                                  nodes: {
-                                    ...(existingData?.nodes || {}),
-                                    [topic]: {
-                                      overview: `Lessons generated from Exam Snipe for: ${topic}`,
-                                      symbols: (existingData?.nodes?.[topic] && typeof existingData.nodes[topic] === 'object' && !Array.isArray(existingData.nodes[topic])) ? (existingData.nodes[topic] as any).symbols || [] : [],
-                                      lessonsMeta,
-                                      lessons: lessonsArray,
-                                      rawLessonJson: (existingData?.nodes?.[topic] && typeof existingData.nodes[topic] === 'object' && !Array.isArray(existingData.nodes[topic])) ? (existingData.nodes[topic] as any).rawLessonJson || [] : [],
-                                      examSnipeMeta: {
-                                        historySlug: examSnipe?.slug || '',
-                                        conceptName: concept.name,
-                                        planIdMapping,
-                                      },
-                                    } as any,
-                                  },
-                                  files: existingData?.files || [],
-                                  progress: existingData?.progress || {},
-                                };
-                                
-                                await saveSubjectDataAsync(lessonSlug, data);
-                                
-                                // Always navigate to the lesson page
+                                if (!examSnipe) {
+                                  throw new Error("Exam snipe history not loaded yet");
+                                }
+                                const { lessonSlug, topic, clickedLessonIndex } = await syncExamSnipeCourseData(
+                                  examSnipe,
+                                  concept.name,
+                                  planId
+                                );
                                 if (clickedLessonIndex >= 0) {
                                   router.push(`/subjects/${lessonSlug}/node/${encodeURIComponent(topic)}/lesson/${clickedLessonIndex}`);
                                 } else {
                                   router.push(`/subjects/${lessonSlug}/node/${encodeURIComponent(topic)}`);
                                 }
-                              } catch {}
+                              } catch (err: any) {
+                                console.error("Failed to open lesson:", err);
+                                alert(err?.message || "Failed to open lesson");
+                              }
                             };
 
                             const triggerLessonGeneration = async () => {
@@ -751,8 +836,8 @@ function CourseExamSnipeInner() {
                                   otherLessonsInConceptTitles.length > 0 ? `\n\nOther Lessons Already Generated for "${concept.name}" (avoid duplication):\n${otherLessonsList}` : "",
                                 ].filter(Boolean).join("");
 
-                                // Generate lesson using /api/node-lesson
-                                const lessonRes = await fetch('/api/node-lesson', {
+                                // Generate lesson using streaming endpoint for parity with Surge/regular lessons
+                                const streamingRes = await fetch('/api/node-lesson/stream', {
                                   method: 'POST',
                                   headers: { 'Content-Type': 'application/json' },
                                   body: JSON.stringify({
@@ -760,7 +845,7 @@ function CourseExamSnipeInner() {
                                     topic: planItem.title,
                                     course_context: examContext + (otherConcepts.length > 0 ? `\n\nOther Main Concepts in this Course (avoid overlap):\n${otherConceptsList}` : "") + (otherLessonsInConceptTitles.length > 0 ? `\n\nOther Lessons Already Generated for "${concept.name}" (avoid duplication):\n${otherLessonsList}` : ""),
                                     combinedText: "",
-                                    topicSummary: topicSummary,
+                                    topicSummary,
                                     lessonsMeta: [{ type: "Concept", title: planItem.title }],
                                     lessonIndex: 0,
                                     previousLessons: generatedLessonsInConcept.slice(0, currentLessonIdx),
@@ -770,8 +855,56 @@ function CourseExamSnipeInner() {
                                     languageName: results.detectedLanguage?.name || "English",
                                   }),
                                 });
-                                const lessonJson = await lessonRes.json().catch(() => ({}));
-                                if (!lessonRes.ok || !lessonJson?.ok) throw new Error(lessonJson?.error || 'Failed to generate lesson');
+
+                                if (!streamingRes.ok || !streamingRes.body) {
+                                  const errorJson = await streamingRes.json().catch(() => ({}));
+                                  throw new Error(errorJson?.error || `Lesson generation failed (${streamingRes.status})`);
+                                }
+
+                                const reader = streamingRes.body.getReader();
+                                const decoder = new TextDecoder();
+                                let accumulated = "";
+
+                                while (true) {
+                                  const { value, done } = await reader.read();
+                                  if (done) break;
+                                  if (!value) continue;
+                                  const chunk = decoder.decode(value, { stream: true });
+                                  const lines = chunk.split("\n");
+                                  for (const line of lines) {
+                                    if (!line.startsWith("data: ")) continue;
+                                    const payload = line.slice(6);
+                                    if (!payload) continue;
+                                    try {
+                                      const parsed = JSON.parse(payload);
+                                      if (parsed.type === "text") {
+                                        accumulated += parsed.content;
+                                      } else if (parsed.type === "error") {
+                                        throw new Error(parsed.error || "Lesson streaming error");
+                                      }
+                                    } catch (err) {
+                                      if (!(err instanceof SyntaxError)) {
+                                        throw err;
+                                      }
+                                    }
+                                  }
+                                }
+
+                                const sanitizeString = (value: string): string =>
+                                  value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+
+                                const lessonBody = sanitizeString(accumulated);
+
+                                if (!lessonBody.trim()) {
+                                  throw new Error("Lesson generation returned empty content");
+                                }
+
+                                const lessonPayload = {
+                                  title: planItem.title,
+                                  body: lessonBody,
+                                  quiz: [],
+                                  metadata: null,
+                                };
 
                                 // Save the lesson to exam-snipe history
                                 const saveRes = await fetch('/api/exam-snipe/generate-lesson', {
@@ -791,7 +924,7 @@ function CourseExamSnipeInner() {
                                     planSummary: planItem.summary,
                                     planObjectives: planItem.objectives || [],
                                     detectedLanguage: results.detectedLanguage,
-                                    lessonData: lessonJson.data,
+                                    lessonData: lessonPayload,
                                   }),
                                 });
                                 const saveJson = await saveRes.json().catch(() => ({}));
@@ -799,6 +932,11 @@ function CourseExamSnipeInner() {
                                 if (saveJson.record) {
                                   const updated = normalizeHistoryRecord(saveJson.record);
                                   setExamSnipe(updated);
+                                  try {
+                                    await syncExamSnipeCourseData(updated, concept.name, planId);
+                                  } catch (syncErr) {
+                                    console.error("Failed to sync exam snipe lesson to course:", syncErr);
+                                  }
                                   
                                   // Navigate to the lesson page after generation
                                   const slugBase = (updated.courseName || 'Exam Snipe Lessons')

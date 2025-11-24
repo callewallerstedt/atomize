@@ -10,6 +10,7 @@ import SettingsModal from "@/components/SettingsModal";
 import Modal from "@/components/Modal";
 import GlowSpinner from "@/components/GlowSpinner";
 import { APP_VERSION } from "@/lib/version";
+import type { StoredSubjectData } from "@/utils/storage";
 
 // Generate stable dots that don't change on re-render
 function generateDots(count: number) {
@@ -3040,6 +3041,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [surgeLogRefreshKey, setSurgeLogRefreshKey] = useState(0); // Force re-render when data changes
   const [surgeLogData, setSurgeLogData] = useState<any[]>([]); // Store surge log data in state
   const [devToolsModalOpen, setDevToolsModalOpen] = useState(false);
+  const [savedDataDump, setSavedDataDump] = useState<Array<{ slug: string; data: StoredSubjectData | null; raw: string | null }>>([]);
+  const [savedDataLoading, setSavedDataLoading] = useState(false);
+  const [savedDataError, setSavedDataError] = useState<string | null>(null);
+  const [copiedSavedDataSlug, setCopiedSavedDataSlug] = useState<string | null>(null);
   const [expandedSurgeTopics, setExpandedSurgeTopics] = useState<Set<string>>(new Set());
   const [expandedSurgeQuestionTypes, setExpandedSurgeQuestionTypes] = useState<Set<string>>(new Set());
   const [expandedSurgeQuestions, setExpandedSurgeQuestions] = useState<Set<string>>(new Set());
@@ -3069,6 +3074,55 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   
   Synapse helps you learn smarter — not longer.
   `.trim();
+
+  const loadAllSavedData = () => {
+    if (typeof window === "undefined") return;
+    setSavedDataLoading(true);
+    setSavedDataError(null);
+    try {
+      const entries: Array<{ slug: string; data: StoredSubjectData | null; raw: string | null }> = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const key = window.localStorage.key(i);
+        if (!key || !key.startsWith("atomicSubjectData:")) continue;
+        const slug = key.replace("atomicSubjectData:", "");
+        const raw = window.localStorage.getItem(key);
+        let parsed: StoredSubjectData | null = null;
+        if (raw) {
+          try {
+            parsed = JSON.parse(raw) as StoredSubjectData;
+          } catch (err) {
+            console.warn("Failed to parse saved data for", slug, err);
+          }
+        }
+        entries.push({ slug, data: parsed, raw: raw ?? null });
+      }
+      entries.sort((a, b) => a.slug.localeCompare(b.slug));
+      setSavedDataDump(entries);
+      if (entries.length === 0) {
+        setSavedDataError("No saved subject data found in this browser.");
+      }
+    } catch (err) {
+      console.error("Failed to load saved data:", err);
+      setSavedDataDump([]);
+      setSavedDataError(err instanceof Error ? err.message : "Failed to load saved data.");
+    } finally {
+      setSavedDataLoading(false);
+    }
+  };
+
+  const handleCopySavedData = async (slug: string, raw: string | null) => {
+    if (!raw) {
+      setSavedDataError(`No raw data available to copy for ${slug}.`);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(raw);
+      setCopiedSavedDataSlug(slug);
+    } catch (err) {
+      console.error("Failed to copy saved data:", err);
+      setSavedDataError("Failed to copy data to clipboard.");
+    }
+  };
 
   useEffect(() => {
     setSubjects(getSubjects());
@@ -3210,6 +3264,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       setMobileMenuOpen(false);
     }
   }, [isMobile]);
+
+  useEffect(() => {
+    if (!copiedSavedDataSlug) return;
+    const timer = setTimeout(() => setCopiedSavedDataSlug(null), 2000);
+    return () => clearTimeout(timer);
+  }, [copiedSavedDataSlug]);
 
   // Determine auth state (used to hide chrome on login page and show Logout)
   useEffect(() => {
@@ -4523,15 +4583,13 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           </div>
         }
       >
-        <div className="space-y-4">
+        <div className="space-y-6">
           <div>
             <h3 className="text-sm font-medium text-[var(--foreground)] mb-3">Tools</h3>
             <button
               onClick={() => {
-                // Dispatch custom event to trigger tutorial on home page
                 window.dispatchEvent(new CustomEvent('synapse:tutorial-trigger'));
                 setDevToolsModalOpen(false);
-                // Navigate to home if not already there
                 if (pathname !== '/') {
                   router.push('/');
                 }
@@ -4541,6 +4599,93 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               Tutorial
             </button>
           </div>
+
+          {subscriptionLevel === "Tester" && (
+            <div className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-[var(--foreground)]">Saved data viewer</h3>
+                  <p className="text-xs text-[var(--foreground)]/60">
+                    Inspect local practice logs, Surge sessions, and all course storage on this device.
+                  </p>
+                </div>
+                <button
+                  onClick={loadAllSavedData}
+                  disabled={savedDataLoading}
+                  className="inline-flex items-center rounded-full border border-[var(--foreground)]/20 px-3 py-1.5 text-xs font-medium text-[var(--foreground)] hover:bg-[var(--foreground)]/10 disabled:opacity-50"
+                >
+                  {savedDataLoading ? "Loading…" : "Load data"}
+                </button>
+              </div>
+
+              {savedDataError && (
+                <div className="text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">
+                  {savedDataError}
+                </div>
+              )}
+
+              {savedDataLoading && (
+                <div className="flex items-center gap-2 text-xs text-[var(--foreground)]/60">
+                  <GlowSpinner size={16} ariaLabel="Loading saved data" idSuffix="saved-data-loading" />
+                  Loading saved logs…
+                </div>
+              )}
+
+              {!savedDataLoading && savedDataDump.length > 0 && (
+                <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+                  {savedDataDump.map((entry) => {
+                    const practiceCount = entry.data?.practiceLogs?.length ?? 0;
+                    const surgeCount = entry.data?.surgeLog?.length ?? 0;
+                    const reviewCount = entry.data?.reviewSchedules ? Object.keys(entry.data.reviewSchedules).length : 0;
+                    const filesCount = entry.data?.files?.length ?? 0;
+                    const subjectName = entry.data?.subject || entry.slug;
+                    const preview = entry.raw
+                      ? entry.raw.length > 4000
+                        ? `${entry.raw.slice(0, 4000)}\n… (truncated)`
+                        : entry.raw
+                      : "No raw data saved.";
+                    return (
+                      <div
+                        key={entry.slug}
+                        className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-3 space-y-3"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-[var(--foreground)]">
+                              {subjectName}
+                            </div>
+                            <div className="text-[10px] text-[var(--foreground)]/60 mt-0.5">
+                              slug: <span className="font-mono">{entry.slug}</span> • files {filesCount} • practice logs {practiceCount} • surge logs {surgeCount} • review items {reviewCount}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleCopySavedData(entry.slug, entry.raw)}
+                            className="inline-flex items-center rounded-full border border-[var(--foreground)]/20 px-3 py-1 text-[11px] font-medium text-[var(--foreground)] hover:bg-[var(--foreground)]/10"
+                          >
+                            {copiedSavedDataSlug === entry.slug ? "Copied!" : "Copy JSON"}
+                          </button>
+                        </div>
+                        <details className="text-xs text-[var(--foreground)]/80 rounded-lg border border-[var(--foreground)]/10">
+                          <summary className="cursor-pointer select-none px-3 py-2 text-[var(--foreground)]/70">
+                            Preview raw data
+                          </summary>
+                          <pre className="px-3 py-2 max-h-60 overflow-auto whitespace-pre-wrap text-[10px] text-[var(--foreground)]/80">
+                            {preview}
+                          </pre>
+                        </details>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {!savedDataLoading && savedDataDump.length === 0 && !savedDataError && (
+                <div className="text-xs text-[var(--foreground)]/50">
+                  Load to inspect localStorage course data.
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </Modal>
 

@@ -230,9 +230,18 @@ input, textarea, [contenteditable] {
 }
 .lesson-content .katex-display {
   margin: 1rem 0;
+  max-width: 100%;
+  overflow: visible;
+}
+.lesson-content .katex-display > .katex {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal !important;
 }
 .lesson-content .katex {
   font-size: 1.05rem;
+  white-space: normal !important;
+  word-break: break-word;
 }
 
 /* Code blocks and inline code */

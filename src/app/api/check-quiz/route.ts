@@ -54,7 +54,7 @@ Rules:
   - Use Markdown: **bold**, *italics*, numbered lists, bullet points, code blocks
   - Use LaTeX math: inline math with $...$ (e.g., $f(x) = x^2$)
   - Use LaTeX display math: $$...$$ or \\[ ... \\] (e.g., $$\\int_0^1 x^2 dx$$)
-  - CRITICAL: If using LaTeX math, use \\text{} for text (NOT \\t which is a tab character)
+- CRITICAL: If using LaTeX math, use \\text{} for text (NOT \\t which is a tab character)
 - Use the lesson content and course context to determine correctness
 - Number keys starting from 0 for each question index
 - Return only valid JSON, no additional text

@@ -1520,7 +1520,7 @@ export default function PracticePage() {
           );
           if (newImages.length > 0) {
             setQrImages((prev) => [...prev, ...newImages]);
-            insertImagesIntoInput(newImages);
+            insertImagesIntoInput();
             // Close modal when images are received
             setShowQrModal(false);
             // Stop polling
@@ -1536,72 +1536,24 @@ export default function PracticePage() {
     }, 1000);
   };
 
-  const insertImagesIntoInput = (images: Array<{ id: string; data: string }>) => {
-    // Insert images as markdown image syntax
-    const imageMarkdown = images
-      .map((img) => `![photo](${img.data})`)
-      .join("\n");
-    
-    // Insert at cursor position or append
-    const textarea = document.querySelector(
-      'textarea[placeholder*="Respond with your work"]'
-    ) as HTMLTextAreaElement;
-    if (textarea) {
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      const currentValue = input;
-      const newValue =
-        currentValue.substring(0, start) +
-        (currentValue.substring(start, end) ? "" : "\n") +
-        imageMarkdown +
-        "\n" +
-        currentValue.substring(end);
-      setInput(newValue);
-      
-      // Set cursor position after inserted images
-      setTimeout(() => {
-        const newPosition = start + imageMarkdown.length + 2;
-        textarea.setSelectionRange(newPosition, newPosition);
-        textarea.focus();
-      }, 0);
-    } else {
-      // Fallback: append to input
-      setInput((prev) => prev + (prev ? "\n" : "") + imageMarkdown + "\n");
-    }
-  };
+const insertImagesIntoInput = () => {
+  // Focus the textarea so the user can continue typing after images are added
+  const textarea = document.querySelector(
+    'textarea[placeholder*="Respond with your work"]'
+  ) as HTMLTextAreaElement;
+  if (textarea) {
+    setTimeout(() => {
+      textarea.focus();
+    }, 0);
+  }
+};
 
-  // Parse images from input text
-  const parseImagesFromInput = (text: string): Array<{ url: string; fullMatch: string; index: number }> => {
-    const imageRegex = /!\[photo\]\((data:image\/[^)]+)\)/g;
-    const images: Array<{ url: string; fullMatch: string; index: number }> = [];
-    let match;
-    // Reset regex lastIndex
-    imageRegex.lastIndex = 0;
-    while ((match = imageRegex.exec(text)) !== null) {
-      images.push({
-        url: match[1],
-        fullMatch: match[0],
-        index: match.index,
-      });
-    }
-    return images;
-  };
+const attachmentsToMarkdown = (images: Array<{ id: string; data: string }>) =>
+  images.map((img) => `![photo](${img.data})`).join("\n");
 
-  // Get text without image markdown for display
-  const getTextWithoutImages = (text: string): string => {
-    return text.replace(/!\[photo\]\(data:image\/[^)]+\)/g, '');
-  };
-
-  // Remove image from input
-  const removeImageFromInput = (imageMatch: string) => {
-    setInput((prev) => {
-      // Remove the image markdown and any surrounding newlines
-      let newValue = prev.replace(new RegExp(`\\n?${imageMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n?`, 'g'), '');
-      // Clean up multiple consecutive newlines
-      newValue = newValue.replace(/\n{3,}/g, '\n\n');
-      return newValue;
-    });
-  };
+const removeQrImage = (imageId: string) => {
+  setQrImages((prev) => prev.filter((img) => img.id !== imageId));
+};
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -2416,26 +2368,34 @@ async function sendMessage(
   const rawText = typeof textOverride === "string" ? textOverride : input;
   const suppressUser = options?.suppressUser ?? false;
   const omitFromHistory = options?.omitFromHistory ?? false;
-  const text = rawText?.trim() ?? "";
+  const text = rawText ?? "";
+  const trimmedText = text.trim();
+  const hasUserText = trimmedText.length > 0;
+  const hasAttachedImages = qrImages.length > 0;
+  const attachmentMarkdown = hasAttachedImages ? attachmentsToMarkdown(qrImages) : "";
+  const messagePayload = [hasUserText ? trimmedText : null, attachmentMarkdown ? attachmentMarkdown : null]
+    .filter(Boolean)
+    .join(hasUserText && attachmentMarkdown ? "\n\n" : "");
 
   if (sending) return;
-  if (!omitFromHistory && !text) return;
+  if (!omitFromHistory && !hasUserText && !hasAttachedImages) return;
 
   if (!suppressUser && !textOverride) {
     setInput("");
+    setQrImages([]);
   }
 
   const conversation = conversationRef.current;
   const uiMessages: ChatMessage[] = [];
 
-  if (!omitFromHistory && text) {
-    conversation.push({ role: "user", content: text });
+  if (!omitFromHistory && (hasUserText || hasAttachedImages)) {
+    conversation.push({ role: "user", content: messagePayload || "" });
     if (!suppressUser) {
-      uiMessages.push({ role: "user", content: text });
+      uiMessages.push({ role: "user", content: messagePayload || "" });
     }
 
     // Log the question-answer pair by finding the most recent question in conversation
-    if (!suppressUser && !omitFromHistory) {
+    if (!suppressUser && !omitFromHistory && hasUserText) {
       // Scan conversation history for the most recent question
       let mostRecentQuestion: string | null = null;
       let questionTopic: string | null = null;
@@ -2460,7 +2420,7 @@ async function sendMessage(
 
       // If we found a question, log the answer
       if (mostRecentQuestion) {
-        callPracticeLogger(mostRecentQuestion, text);
+        callPracticeLogger(mostRecentQuestion, trimmedText);
       }
 
       // Clear the current question state
@@ -3225,8 +3185,8 @@ Respond with ONLY the specific topic name, no explanation.`;
               </div>
               <div className="relative w-full">
                 {(() => {
-                  const images = parseImagesFromInput(input);
-                  const textWithoutImages = getTextWithoutImages(input);
+                  const images = qrImages;
+                  const hasText = input.trim().length > 0;
                   
                   return (
                     <>
@@ -3245,17 +3205,7 @@ Respond with ONLY the specific topic name, no explanation.`;
                         className="absolute inset-0 w-full resize-none rounded-xl border border-[var(--foreground)]/10 bg-transparent pl-12 pr-20 py-4.5 text-sm text-transparent placeholder:text-transparent focus:border-[var(--accent-cyan)] focus:outline-none z-10"
                         style={{
                           caretColor: 'var(--foreground)',
-                        }}
-                        onPointerDown={(e) => {
-                          // If clicking in the left area where the plus button is (first 50px), don't capture the event
-                          const target = e.target as HTMLElement;
-                          const rect = target.getBoundingClientRect();
-                          const clickX = e.clientX - rect.left;
-                          // If clicking in the left area where plus button is, let the event pass through
-                          if (clickX < 50) {
-                            e.stopPropagation();
-                            return;
-                          }
+                          pointerEvents: 'auto',
                         }}
                       />
                       {/* Visible overlay showing text and images */}
@@ -3267,88 +3217,39 @@ Respond with ONLY the specific topic name, no explanation.`;
                           wordBreak: 'break-word',
                         }}
                       >
-                        {images.length === 0 && !textWithoutImages.trim() && (
+                        {!hasText && images.length === 0 && (
                           <span className="text-[var(--foreground)]/40">
                             Respond with your work, explain your reasoning, or ask for a different drill…
                           </span>
                         )}
-                        {(() => {
-                          if (images.length === 0) {
-                            return <span className="whitespace-pre-wrap">{textWithoutImages}</span>;
-                          }
-                          
-                          const segments: Array<{ type: 'text' | 'image'; content: string; imageUrl?: string; imageMatch?: string }> = [];
-                          let lastIndex = 0;
-                          
-                          images.forEach((img) => {
-                            // Add text before image
-                            if (img.index > lastIndex) {
-                              const textContent = input.substring(lastIndex, img.index);
-                              if (textContent.trim()) {
-                                segments.push({
-                                  type: 'text',
-                                  content: textContent,
-                                });
-                              }
-                            }
-                            // Add image
-                            segments.push({
-                              type: 'image',
-                              content: '',
-                              imageUrl: img.url,
-                              imageMatch: img.fullMatch,
-                            });
-                            lastIndex = img.index + img.fullMatch.length;
-                          });
-                          
-                          // Add remaining text
-                          if (lastIndex < input.length) {
-                            const textContent = input.substring(lastIndex);
-                            if (textContent.trim()) {
-                              segments.push({
-                                type: 'text',
-                                content: textContent,
-                              });
-                            }
-                          }
-                          
-                          return segments.map((segment, idx) => {
-                            if (segment.type === 'image' && segment.imageUrl) {
-                              return (
-                                <div
-                                  key={idx}
-                                  className="relative inline-block pointer-events-auto group"
-                                  style={{ maxWidth: '200px', maxHeight: '150px', flexShrink: 0 }}
-                                >
-                                  <img
-                                    src={segment.imageUrl}
-                                    alt="Uploaded"
-                                    className="max-w-full max-h-[150px] object-contain rounded border border-[var(--foreground)]/20"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      if (segment.imageMatch) {
-                                        removeImageFromInput(segment.imageMatch);
-                                      }
-                                    }}
-                                    className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center hover:bg-red-600 shadow-lg z-30 pointer-events-auto"
-                                    aria-label="Remove image"
-                                  >
-                                    ×
-                                  </button>
-                                </div>
-                              );
-                            }
-                            return (
-                              <span key={idx} className="whitespace-pre-wrap">
-                                {segment.content}
-                              </span>
-                            );
-                          });
-                        })()}
+                        {hasText && (
+                          <span className="whitespace-pre-wrap">{input}</span>
+                        )}
+                        {images.map((image) => (
+                          <div
+                            key={image.id}
+                            className="relative inline-block pointer-events-auto group"
+                            style={{ maxWidth: '200px', maxHeight: '150px', flexShrink: 0 }}
+                          >
+                            <img
+                              src={image.data}
+                              alt="Uploaded"
+                              className="max-w-full max-h-[150px] object-contain rounded border border-[var(--foreground)]/20"
+                            />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                removeQrImage(image.id);
+                              }}
+                              className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center hover:bg-red-600 shadow-lg z-30 pointer-events-auto"
+                              aria-label="Remove image"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     </>
                   );
