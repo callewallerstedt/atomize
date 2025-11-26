@@ -2740,6 +2740,7 @@ export default function SurgePage() {
           combinedText: "",
           nodes: {},
           surgeLog: [entry],
+          examDates: [],
         };
         await saveSubjectDataAsync(slug, newData);
         console.log("Created new subject data with surge session");

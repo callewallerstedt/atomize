@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, DragEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { LessonBody } from "@/components/LessonBody";
 import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
@@ -1117,13 +1118,15 @@ export default function PracticePage() {
   const conversationRef = useRef<Array<Omit<ChatMessage, "hidden">>>([]);
   
   // QR Code feature state
-  const [showQrDropdown, setShowQrDropdown] = useState(false);
+  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrSessionId, setQrSessionId] = useState<string | null>(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
   const [qrImages, setQrImages] = useState<Array<{ id: string; data: string }>>([]);
+  const [isAttachmentDragActive, setIsAttachmentDragActive] = useState(false);
   const qrPollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
 
   const applyPracticeLogUpdates = (updates: PracticeLogEntry[]) => {
     if (!updates.length) return;
@@ -1483,7 +1486,7 @@ export default function PracticePage() {
       }
       
       setShowQrModal(true);
-      setShowQrDropdown(false);
+      setShowAttachmentMenu(false);
       startPollingForImages(data.sessionId);
     } catch (error: any) {
       console.error("Error creating QR session:", error);
@@ -1536,7 +1539,7 @@ export default function PracticePage() {
     }, 1000);
   };
 
-const insertImagesIntoInput = () => {
+  const insertImagesIntoInput = () => {
   // Focus the textarea so the user can continue typing after images are added
   const textarea = document.querySelector(
     'textarea[placeholder*="Respond with your work"]'
@@ -1555,6 +1558,81 @@ const removeQrImage = (imageId: string) => {
   setQrImages((prev) => prev.filter((img) => img.id !== imageId));
 };
 
+  const readFileAsDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsDataURL(file);
+    });
+
+  const addImagesFromFiles = async (files: File[]) => {
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    if (!imageFiles.length) {
+      return;
+    }
+
+    try {
+      const processed = await Promise.all(
+        imageFiles.map(async (file) => ({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          data: await readFileAsDataUrl(file),
+        }))
+      );
+      setQrImages((prev) => [...prev, ...processed]);
+      insertImagesIntoInput();
+    } catch (attachmentError) {
+      console.error("Error processing attachments:", attachmentError);
+      setError("Failed to add image. Please try again.");
+    }
+  };
+
+  const handleAttachmentInputChange = async (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length) {
+      await addImagesFromFiles(files);
+    }
+    // Reset so the same file can be selected again
+    event.target.value = "";
+  };
+
+  const handleAttachmentDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    if (!isAttachmentDragActive) {
+      setIsAttachmentDragActive(true);
+    }
+  };
+
+  const handleAttachmentDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const related = event.relatedTarget as Node | null;
+    if (related && (event.currentTarget === related || event.currentTarget.contains(related))) {
+      return;
+    }
+    if (isAttachmentDragActive) {
+      setIsAttachmentDragActive(false);
+    }
+  };
+
+  const handleAttachmentDrop = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsAttachmentDragActive(false);
+    const files = Array.from(event.dataTransfer?.files || []);
+    if (files.length) {
+      await addImagesFromFiles(files);
+    }
+  };
+
+  const openAttachmentPicker = () => {
+    attachmentInputRef.current?.click();
+  };
+
   // Cleanup polling on unmount
   useEffect(() => {
     return () => {
@@ -1567,18 +1645,18 @@ const removeQrImage = (imageId: string) => {
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (showQrDropdown) {
+      if (showAttachmentMenu) {
         const target = event.target as HTMLElement;
-        if (!target.closest('[data-qr-dropdown]')) {
-          setShowQrDropdown(false);
+        if (!target.closest('[data-attachment-dropdown]')) {
+          setShowAttachmentMenu(false);
         }
       }
     };
-    if (showQrDropdown) {
+    if (showAttachmentMenu) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showQrDropdown]);
+  }, [showAttachmentMenu]);
 
   // Handle button clicks for UI elements
   const handleButtonClick = (action: string | undefined, params: Record<string, string> | undefined, uploadId?: string) => {
@@ -2383,6 +2461,7 @@ async function sendMessage(
   if (!suppressUser && !textOverride) {
     setInput("");
     setQrImages([]);
+    setShowAttachmentMenu(false);
   }
 
   const conversation = conversationRef.current;
@@ -3153,13 +3232,17 @@ Respond with ONLY the specific topic name, no explanation.`;
           <div className="flex items-center gap-3">
             <div className="flex-1 relative">
               {/* Plus button for dropdown */}
-              <div className="absolute left-2 top-1/2 -translate-y-1/2 z-20" data-qr-dropdown style={{ pointerEvents: 'auto' }}>
+              <div
+                className="absolute left-2 top-1/2 -translate-y-1/2 z-20"
+                data-attachment-dropdown
+                style={{ pointerEvents: 'auto' }}
+              >
                 <button
                   type="button"
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    setShowQrDropdown(!showQrDropdown);
+                    setShowAttachmentMenu((prev) => !prev);
                   }}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-base leading-none text-[var(--foreground)] hover:bg-[var(--background)]/70 disabled:opacity-50 transition-colors"
                   style={{ pointerEvents: 'auto' }}
@@ -3169,21 +3252,42 @@ Respond with ONLY the specific topic name, no explanation.`;
                   +
                 </button>
                 {/* Dropdown menu */}
-                {showQrDropdown && (
-                  <div className="absolute left-0 bottom-full mb-2 w-48 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/95 shadow-lg overflow-hidden z-20">
+                {showAttachmentMenu && (
+                  <div
+                    className="absolute left-0 bottom-full mb-2 w-48 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/95 shadow-lg overflow-hidden z-20"
+                    data-attachment-dropdown
+                  >
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openAttachmentPicker();
+                        setShowAttachmentMenu(false);
+                      }}
+                      className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors"
+                    >
+                      Upload image
+                    </button>
                     <button
                       type="button"
                       onClick={() => {
                         void createQrSession();
                       }}
-                      className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors"
+                      className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors border-t border-[var(--foreground)]/10"
                     >
                       Answer with phone
                     </button>
                   </div>
                 )}
               </div>
-              <div className="relative w-full">
+              <div
+                className="relative w-full"
+                onDragEnter={handleAttachmentDragOver}
+                onDragOver={handleAttachmentDragOver}
+                onDragLeave={handleAttachmentDragLeave}
+                onDrop={handleAttachmentDrop}
+              >
                 {(() => {
                   const images = qrImages;
                   const hasText = input.trim().length > 0;
@@ -3200,9 +3304,22 @@ Respond with ONLY the specific topic name, no explanation.`;
                             void sendMessage();
                           }
                         }}
+                        onPaste={async (event) => {
+                          const files = Array.from(event.clipboardData?.files || []).filter((file) =>
+                            file.type.startsWith("image/")
+                          );
+                          if (files.length) {
+                            event.preventDefault();
+                            await addImagesFromFiles(files);
+                          }
+                        }}
                         placeholder="Respond with your work, explain your reasoning, or ask for a different drill…"
                         rows={1}
-                        className="absolute inset-0 w-full resize-none rounded-xl border border-[var(--foreground)]/10 bg-transparent pl-12 pr-20 py-4.5 text-sm text-transparent placeholder:text-transparent focus:border-[var(--accent-cyan)] focus:outline-none z-10"
+                        className={`absolute inset-0 w-full resize-none rounded-xl border ${
+                          isAttachmentDragActive
+                            ? 'border-[var(--accent-cyan)]'
+                            : 'border-[var(--foreground)]/10'
+                        } bg-transparent pl-12 pr-20 py-4.5 text-sm text-transparent placeholder:text-transparent focus:border-[var(--accent-cyan)] focus:outline-none z-10`}
                         style={{
                           caretColor: 'var(--foreground)',
                           pointerEvents: 'auto',
@@ -3210,7 +3327,11 @@ Respond with ONLY the specific topic name, no explanation.`;
                       />
                       {/* Visible overlay showing text and images */}
                       <div 
-                        className="w-full min-h-[2.5rem] rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/80 pl-12 pr-20 py-4.5 flex flex-wrap items-center gap-2 text-sm overflow-hidden pointer-events-none"
+                        className={`w-full min-h-[2.5rem] rounded-xl border ${
+                          isAttachmentDragActive
+                            ? 'border-[var(--accent-cyan)]'
+                            : 'border-[var(--foreground)]/10'
+                        } bg-[var(--background)]/80 pl-12 pr-20 py-4.5 flex flex-wrap items-center gap-2 text-sm overflow-hidden pointer-events-none`}
                         style={{ 
                           color: 'var(--foreground)',
                           whiteSpace: 'pre-wrap',
@@ -3251,6 +3372,14 @@ Respond with ONLY the specific topic name, no explanation.`;
                           </div>
                         ))}
                       </div>
+                      <input
+                        ref={attachmentInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={handleAttachmentInputChange}
+                      />
                     </>
                   );
                 })()}
@@ -3280,7 +3409,7 @@ Respond with ONLY the specific topic name, no explanation.`;
             </div>
             <button
               type="submit"
-              disabled={sending || !input.trim()}
+              disabled={sending || (!input.trim() && qrImages.length === 0)}
               className="inline-flex h-10 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-semibold text-white shadow-lg transition-opacity hover:opacity-95 disabled:opacity-50"
             >
               {sending ? "Sending…" : "Send"}

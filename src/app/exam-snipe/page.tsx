@@ -1648,6 +1648,7 @@ function ExamSnipeInner() {
                         ...existingLesson, // Keep all existing data (flashcards, quiz progress, etc.)
                         title: String(lessonGenerated.title || lessonTitle),
                         body: String(lessonGenerated.body || ''),
+                        origin: 'exam-snipe', // Mark as exam-snipe lesson
                         // Only update quiz if there's no existing quiz (to preserve user answers/results)
                         quiz: (existingLesson as any)?.quiz?.length 
                           ? (existingLesson as any).quiz 
@@ -1662,18 +1663,28 @@ function ExamSnipeInner() {
                         ...existingLesson, // Keep all existing data
                         title: lessonTitle,
                         body: '', // Empty body to trigger Start button
+                        origin: 'exam-snipe', // Mark as exam-snipe lesson
                         // Only clear quiz if there's no existing quiz (preserve user data)
                         quiz: (existingLesson as any)?.quiz?.length ? (existingLesson as any).quiz : [],
                       });
                     }
                   });
                   
+                  // Ensure topic is added to topics array
+                  const topicsList = Array.isArray(existingData?.topics) ? [...existingData.topics] : [];
+                  if (!topicsList.some((t: any) => (typeof t === 'string' ? t === topic : t?.name === topic))) {
+                    topicsList.push({
+                      name: topic,
+                      summary: concept?.description || `Exam Snipe concept: ${topic}`,
+                    });
+                  }
+                  
                   // Merge with existing data
                   const data: StoredSubjectData = {
                     subject: activeHistoryMeta?.courseName || existingData?.subject || 'Exam Snipe Lessons',
                     course_context: (examResults.patternAnalysis || '') + "\n" + (examResults.gradeInfo || '') || existingData?.course_context || '',
                     combinedText: existingData?.combinedText || '',
-                    topics: existingData?.topics || [],
+                    topics: topicsList,
                     nodes: {
                       ...(existingData?.nodes || {}),
                       [topic]: {
@@ -1692,6 +1703,7 @@ function ExamSnipeInner() {
                     },
                     files: existingData?.files || [],
                     progress: existingData?.progress || {},
+                    examDates: existingData?.examDates || [],
                   };
                   
                   await saveSubjectDataAsync(slug, data);

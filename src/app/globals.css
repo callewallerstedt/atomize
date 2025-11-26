@@ -787,6 +787,20 @@ button.date-button:hover,
   text-shadow: none !important;
 }
 
+button.chat-attach-button,
+button.chat-attach-button:hover,
+button.chat-attach-button:focus-visible {
+  box-shadow: none !important;
+  border: none !important;
+  outline: none !important;
+  background-color: transparent !important;
+  ring: 0 !important;
+}
+
+button.chat-attach-button:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
 /* Remove shadow from "New chat" button on homepage */
 button[aria-label="Start a new chat"],
 button[aria-label="Start a new chat"]:hover,

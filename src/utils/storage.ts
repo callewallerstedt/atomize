@@ -233,6 +233,7 @@ export function upsertNodeContent(slug: string, nodeName: string, content: strin
     tree: null,
     topics: [],
     nodes: {},
+    examDates: [],
   } as StoredSubjectData;
   existing.nodes[nodeName] = content as any;
   saveSubjectData(slug, existing);
@@ -247,6 +248,7 @@ export async function upsertNodeContentAsync(slug: string, nodeName: string, con
     tree: null,
     topics: [],
     nodes: {},
+    examDates: [],
   } as StoredSubjectData;
   existing.nodes[nodeName] = content as any;
   await saveSubjectDataAsync(slug, existing);

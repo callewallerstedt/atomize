@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import React, { Suspense, useEffect, useState, useRef, useCallback, useMemo } from "react";
+import React, { Suspense, useEffect, useState, useRef, useCallback, useMemo, type ChangeEvent, type DragEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import GlowSpinner from "@/components/GlowSpinner";
 import CourseCreateModal from "@/components/CourseCreateModal";
@@ -302,9 +302,30 @@ type UIElement = {
   params?: Record<string, string>;
 };
 
+type ChatAttachment =
+  | {
+      id: string;
+      type: 'image';
+      data: string;
+      name?: string;
+      size?: number;
+      mimeType?: string;
+    }
+  | {
+      id: string;
+      type: 'file';
+      name: string;
+      size: number;
+      extension?: string;
+      data?: string; // base64 data URL for binary files
+      content?: string; // text content for text files
+      mimeType?: string;
+    };
+
 type HomepageMessage = {
   role: 'user' | 'assistant';
   content: string;
+  attachments?: ChatAttachment[];
   uiElements?: UIElement[];
   tutorial?: boolean;
 };
@@ -316,6 +337,22 @@ type ScriptStep = {
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const ATTACHMENT_TILE_SIZE = 36;
+
+const formatFileSize = (size?: number) => {
+  if (typeof size !== 'number') return '';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const extractFileExtension = (name?: string) => {
+  if (!name) return '';
+  const parts = name.split('.');
+  if (parts.length <= 1) return '';
+  return parts[parts.length - 1].toUpperCase();
+};
 
 // File upload component for homepage
 function HomepageFileUploadArea({ 
@@ -437,6 +474,30 @@ function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn }: { t
   const [inputFocused, setInputFocused] = useState(false);
   const [homepageMessages, setHomepageMessages] = useState<HomepageMessage[]>([]);
   const [isTutorialActive, setIsTutorialActive] = useState(false);
+  const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
+  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [isAttachmentDragActive, setIsAttachmentDragActive] = useState(false);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const [homepageSending, setHomepageSending] = useState(false);
+  const [showThinking, setShowThinking] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<Record<string, File[]>>({});
+  const [uploadStatus, setUploadStatus] = useState<Record<string, 'idle' | 'ready' | 'processing' | 'success'>>({});
+  const [isCreatingCourse, setIsCreatingCourse] = useState(false);
+  const hasStreamed = useRef(false);
+  const thinkingRef = useRef(false);
+  const courseCreationInProgress = useRef(false);
+  const isCreatingCourseRef = useRef(false);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const pillsScrollRef1 = useRef<HTMLDivElement>(null);
+  const pillsScrollRef2 = useRef<HTMLDivElement>(null);
+  const [pillsScroll1, setPillsScroll1] = useState({ canScrollLeft: false, canScrollRight: false });
+  const [pillsScroll2, setPillsScroll2] = useState({ canScrollLeft: false, canScrollRight: false });
   const tutorialScript = useMemo<ScriptStep[]>(
     () => [
       { id: "welcome", text: "Welcome to Synapse. I'm Chad, your personal assistant built into Synapse to help structure, explain and run actions for you." },
@@ -604,26 +665,27 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       localStorage.setItem('synapse:home-chat', JSON.stringify(trimmed));
     } catch {}
   }, [homepageMessages]);
-  const [homepageSending, setHomepageSending] = useState(false);
-  const [showThinking, setShowThinking] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<Record<string, File[]>>({});
-  const [uploadStatus, setUploadStatus] = useState<Record<string, 'idle' | 'ready' | 'processing' | 'success'>>({});
-  const [isCreatingCourse, setIsCreatingCourse] = useState(false);
-  const hasStreamed = useRef(false);
-  const thinkingRef = useRef(false);
-  const courseCreationInProgress = useRef(false);
-  const isCreatingCourseRef = useRef(false);
-  const chatInputRef = useRef<HTMLTextAreaElement>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [voiceError, setVoiceError] = useState<string | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const pillsScrollRef1 = useRef<HTMLDivElement>(null);
-  const pillsScrollRef2 = useRef<HTMLDivElement>(null);
-  const [pillsScroll1, setPillsScroll1] = useState({ canScrollLeft: false, canScrollRight: false });
-  const [pillsScroll2, setPillsScroll2] = useState({ canScrollLeft: false, canScrollRight: false });
+
+  useEffect(() => {
+    if (!showAttachmentMenu) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('[data-chat-attachment-dropdown]')) {
+        setShowAttachmentMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showAttachmentMenu]);
+
+  useEffect(() => {
+    if (homepageSending || isTutorialActive) {
+      setShowAttachmentMenu(false);
+    }
+  }, [homepageSending, isTutorialActive]);
+  const focusChatInput = () => {
+    chatInputRef.current?.focus();
+  };
 
   const resetHomepageChat = useCallback(() => {
     tutorialPlaybackRef.current = false;
@@ -634,6 +696,9 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     setIsCreatingCourse(false);
     setIsTutorialActive(false);
     courseCreationInProgress.current = false;
+    setChatAttachments([]);
+    setShowAttachmentMenu(false);
+    setIsAttachmentDragActive(false);
     if (typeof window !== 'undefined') {
       localStorage.removeItem('synapse:home-chat');
     }
@@ -1707,6 +1772,194 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     setUploadStatus(prev => ({ ...prev, [uploadId]: files.length > 0 ? 'ready' : 'idle' }));
   }
 
+  const readAttachmentAsDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsDataURL(file);
+    });
+
+  const readFileAsText = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsText(file);
+    });
+
+  const addAttachmentsFromFiles = async (files: File[]) => {
+    if (homepageSending || isTutorialActive) return;
+    if (!files.length) return;
+    try {
+      const processed = await Promise.all(
+        files.map(async (file) => {
+          const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          if (file.type.startsWith("image/")) {
+            const data = await readAttachmentAsDataUrl(file);
+            return {
+              id,
+              type: "image" as const,
+              data,
+              name: file.name,
+              size: file.size,
+              mimeType: file.type,
+            };
+          }
+          // For PDFs, extract text using the API
+          const isPDF = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+          if (isPDF) {
+            try {
+              const formData = new FormData();
+              formData.append("file", file);
+              const response = await fetch("/api/extract-pdf", {
+                method: "POST",
+                body: formData,
+              });
+              if (response.ok) {
+                const result = await response.json();
+                if (result.ok && result.text) {
+                  return {
+                    id,
+                    type: "file" as const,
+                    name: file.name || "File",
+                    size: file.size,
+                    extension: extractFileExtension(file.name),
+                    content: result.text,
+                    mimeType: file.type,
+                  };
+                }
+              }
+            } catch (e) {
+              console.error("PDF extraction failed:", e);
+            }
+            // Fallback to base64 if extraction fails
+            const data = await readAttachmentAsDataUrl(file);
+            return {
+              id,
+              type: "file" as const,
+              name: file.name || "File",
+              size: file.size,
+              extension: extractFileExtension(file.name),
+              data,
+              mimeType: file.type,
+            };
+          }
+          
+          // For text files, read as text
+          const isTextFile = file.type.startsWith("text/") || 
+            file.type === "application/json" ||
+            file.name.endsWith(".txt") ||
+            file.name.endsWith(".md") ||
+            file.name.endsWith(".csv") ||
+            file.name.endsWith(".json") ||
+            file.name.endsWith(".js") ||
+            file.name.endsWith(".ts") ||
+            file.name.endsWith(".py") ||
+            file.name.endsWith(".html") ||
+            file.name.endsWith(".css");
+          
+          if (isTextFile) {
+            try {
+              const content = await readFileAsText(file);
+              return {
+                id,
+                type: "file" as const,
+                name: file.name || "File",
+                size: file.size,
+                extension: extractFileExtension(file.name),
+                content,
+                mimeType: file.type,
+              };
+            } catch (e) {
+              // Fallback to base64 if text reading fails
+              const data = await readAttachmentAsDataUrl(file);
+              return {
+                id,
+                type: "file" as const,
+                name: file.name || "File",
+                size: file.size,
+                extension: extractFileExtension(file.name),
+                data,
+                mimeType: file.type,
+              };
+            }
+          }
+          // For other binary files, read as base64
+          const data = await readAttachmentAsDataUrl(file);
+          return {
+            id,
+            type: "file" as const,
+            name: file.name || "File",
+            size: file.size,
+            extension: extractFileExtension(file.name),
+            data,
+            mimeType: file.type,
+          };
+        })
+      );
+      const validAttachments = processed.filter(Boolean) as ChatAttachment[];
+      if (validAttachments.length) {
+        setChatAttachments((prev) => [...prev, ...validAttachments]);
+        focusChatInput();
+      }
+    } catch (attachmentError) {
+      console.error("Error processing attachments:", attachmentError);
+    }
+  };
+
+  const handleAttachmentInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length) {
+      await addAttachmentsFromFiles(files);
+    }
+    event.target.value = "";
+  };
+
+  const handleAttachmentDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (homepageSending || isTutorialActive) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    if (!isAttachmentDragActive) {
+      setIsAttachmentDragActive(true);
+    }
+  };
+
+  const handleAttachmentDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (homepageSending || isTutorialActive) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const related = event.relatedTarget as Node | null;
+    if (related && (event.currentTarget === related || event.currentTarget.contains(related))) {
+      return;
+    }
+    if (isAttachmentDragActive) {
+      setIsAttachmentDragActive(false);
+    }
+  };
+
+  const handleAttachmentDrop = async (event: DragEvent<HTMLDivElement>) => {
+    if (homepageSending || isTutorialActive) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setIsAttachmentDragActive(false);
+    const files = Array.from(event.dataTransfer?.files || []);
+    if (files.length) {
+      await addAttachmentsFromFiles(files);
+    }
+  };
+
+  const openAttachmentPicker = () => {
+    if (homepageSending || isTutorialActive) return;
+    attachmentInputRef.current?.click();
+  };
+
+  const removeAttachment = (imageId: string) => {
+    setChatAttachments((prev) => prev.filter((img) => img.id !== imageId));
+  };
+
+
   // Function to render text with styled "Synapse" instances
   const renderTextWithSynapse = (text: string) => {
     const parts: React.ReactNode[] = [];
@@ -1757,8 +2010,11 @@ Surge is for those who want to minimize friction and get results fast. I will pr
   };
 
   const handleSendMessage = async (messageOverride?: string) => {
-    const text = (messageOverride || inputValue).trim();
-    if (!text || !welcomeText || homepageSending || isTutorialActive) return;
+    const rawInput = messageOverride ?? inputValue;
+    const text = rawInput.trim();
+    const isManualSend = !messageOverride;
+    const hasAttachments = isManualSend && chatAttachments.length > 0;
+    if ((!text && !hasAttachments) || !welcomeText || homepageSending || isTutorialActive) return;
     
     // If this is the first message, add the welcome message as the first assistant message
     const isFirstMessage = homepageMessages.length === 0;
@@ -1767,9 +2023,21 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     }
     
     // Add user message
-    const userMessage = { role: 'user' as const, content: text };
+    const attachmentsForMessage = hasAttachments ? [...chatAttachments] : [];
+    const userMessage: HomepageMessage = {
+      role: 'user',
+      content: text,
+      ...(attachmentsForMessage.length ? { attachments: attachmentsForMessage } : {})
+    };
     setHomepageMessages(prev => [...prev, userMessage]);
-    setInputValue("");
+    if (isManualSend) {
+      setInputValue("");
+      setChatAttachments([]);
+      setShowAttachmentMenu(false);
+      setIsAttachmentDragActive(false);
+    } else {
+      setInputValue("");
+    }
     // Reset textarea height
     if (chatInputRef.current) {
       chatInputRef.current.style.height = 'auto';
@@ -1779,7 +2047,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     setShowThinking(true);
     thinkingRef.current = true;
 
-    if (text.toLowerCase() === 'create course') {
+    if (!hasAttachments && text.toLowerCase() === 'create course') {
       const uploadId = `create-course-${Date.now()}`;
       setHomepageMessages(prev => [
         ...prev,
@@ -1831,11 +2099,19 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       } catch {}
 
       // Send message to API
-      const baseHistory = homepageMessages.length > 0
+      const baseHistory: HomepageMessage[] = homepageMessages.length > 0
         ? homepageMessages
-        : [{ role: 'assistant' as const, content: welcomeText }];
-      const apiHistory = baseHistory.map((m) => ({ role: m.role, content: m.content }));
-      apiHistory.push(userMessage);
+        : [{ role: 'assistant', content: welcomeText }];
+      const apiHistory = baseHistory.map((m: HomepageMessage) => ({
+        role: m.role,
+        content: m.content,
+        ...(m.attachments ? { attachments: m.attachments } : {}),
+      }));
+      apiHistory.push({
+        role: userMessage.role,
+        content: userMessage.content,
+        ...(userMessage.attachments ? { attachments: userMessage.attachments } : {}),
+      });
 
       const res = await fetch('/api/chat/stream', {
         method: 'POST',
@@ -1992,6 +2268,276 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     }
   };
 
+  const isImageAttachment = (attachment: ChatAttachment) => {
+    if (attachment.type === "image") return true;
+    // Backwards compatibility for older messages that only stored data URLs
+    if (
+      (attachment as any)?.data &&
+      typeof (attachment as any).data === "string" &&
+      (attachment as any).data.startsWith("data:image")
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  const renderAttachmentPreview = (attachment: ChatAttachment) => {
+    if (isImageAttachment(attachment)) {
+      const src =
+        attachment.type === "image"
+          ? attachment.data
+          : (attachment as any).data || "";
+      return (
+        <img
+          src={src}
+          alt={attachment.name || "Attachment"}
+          className="w-full h-full object-cover rounded-lg border border-[var(--foreground)]/15"
+        />
+      );
+    }
+
+    const extension =
+      (attachment.type === "file" ? attachment.extension : undefined) ||
+      extractFileExtension(attachment.name) ||
+      "FILE";
+    return (
+      <div className="w-full h-full rounded-lg border border-[var(--foreground)]/15 bg-[var(--foreground)]/5 flex flex-col items-center justify-center text-[7px] font-semibold uppercase text-[var(--foreground)]/80">
+        <svg
+          width="14"
+          height="18"
+          viewBox="0 0 14 18"
+          aria-hidden="true"
+          className="text-[var(--foreground)]/50 mb-0.5"
+        >
+          <path
+            d="M2 1c-.552 0-1 .448-1 1v14c0 .552.448 1 1 1h10c.552 0 1-.448 1-1V5.414A2 2 0 0 0 12.414 4L9 0.586A2 2 0 0 0 7.586 0H2Z"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.2"
+          />
+          <path
+            d="M9 0.75V4.5h3.75"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.2"
+          />
+        </svg>
+        <span>{extension.slice(0, 4)}</span>
+      </div>
+    );
+  };
+
+  const renderMessageAttachments = (attachments?: ChatAttachment[]) => {
+    if (!attachments?.length) return null;
+    return (
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {attachments.map((attachment) => (
+          <div
+            key={attachment.id}
+            className="relative inline-block"
+            style={{
+              width: `${ATTACHMENT_TILE_SIZE}px`,
+              height: `${ATTACHMENT_TILE_SIZE}px`,
+            }}
+            title={
+              attachment.name
+                ? `${attachment.name}${attachment.size ? ` • ${formatFileSize(attachment.size)}` : ""}`
+                : undefined
+            }
+          >
+            {renderAttachmentPreview(attachment)}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const ChatInputArea = () => {
+    const hasInputText = inputValue.trim().length > 0;
+    const disabled = homepageSending || isTutorialActive;
+    return (
+      <div className="space-y-2">
+        {chatAttachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {chatAttachments.map((attachment) => (
+              <div
+                key={attachment.id}
+                className="relative inline-block group"
+                style={{
+                  width: `${ATTACHMENT_TILE_SIZE}px`,
+                  height: `${ATTACHMENT_TILE_SIZE}px`,
+                }}
+                title={
+                  attachment.name
+                    ? `${attachment.name}${attachment.size ? ` • ${formatFileSize(attachment.size)}` : ""}`
+                    : undefined
+                }
+              >
+                {renderAttachmentPreview(attachment)}
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(attachment.id)}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center hover:bg-red-600 shadow-lg"
+                  aria-label={`Remove ${attachment.type === "file" ? "file" : "image"}`}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div
+          className={`chat-input-container flex items-center gap-2 pl-0 pr-2 py-2 border ${
+            isAttachmentDragActive ? "border-[var(--accent-cyan)]" : "border-[var(--foreground)]/10"
+          } overflow-visible`}
+          style={{
+            boxShadow: "none",
+            borderRadius: "1.5rem",
+          }}
+          onDragEnter={handleAttachmentDragOver}
+          onDragOver={handleAttachmentDragOver}
+          onDragLeave={handleAttachmentDragLeave}
+          onDrop={handleAttachmentDrop}
+        >
+          <div className="flex-1 relative min-w-0 flex items-center">
+            <div
+              className="absolute left-1.5 top-1/2 -translate-y-1/2 z-30"
+              data-chat-attachment-dropdown
+              style={{ pointerEvents: "auto" }}
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (disabled) return;
+                  setShowAttachmentMenu((prev) => !prev);
+                }}
+                className="chat-attach-button inline-flex items-center justify-center rounded-full bg-transparent text-[var(--foreground)] transition-colors w-8 h-8 focus-visible:outline-none"
+                style={{ border: "0", boxShadow: "none" }}
+                aria-label="Add attachment"
+                title="Add attachment"
+                disabled={disabled}
+              >
+                +
+              </button>
+              {showAttachmentMenu && !disabled && (
+                <div
+                  className="absolute left-0 bottom-full mb-2 w-48 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/95 shadow-lg overflow-hidden z-50"
+                  data-chat-attachment-dropdown
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openAttachmentPicker();
+                      setShowAttachmentMenu(false);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors"
+                  >
+                    Upload attachment
+                  </button>
+                </div>
+              )}
+            </div>
+            <textarea
+              ref={chatInputRef}
+              value={inputValue}
+              onChange={(e) => {
+                setInputValue(e.target.value);
+                if (chatInputRef.current) {
+                  chatInputRef.current.style.height = "auto";
+                  chatInputRef.current.style.height = `${Math.min(
+                    chatInputRef.current.scrollHeight,
+                    120
+                  )}px`;
+                }
+              }}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (!disabled && (inputValue.trim() || chatAttachments.length > 0)) {
+                    void handleSendMessage();
+                  }
+                }
+              }}
+              onPaste={async (event) => {
+                if (disabled) return;
+                const files = Array.from(event.clipboardData?.files || []).filter((file) =>
+                  file.type.startsWith("image/")
+                );
+                if (files.length) {
+                  event.preventDefault();
+                  await addAttachmentsFromFiles(files);
+                }
+              }}
+              placeholder={isTutorialActive ? "Use the tutorial controls above" : "Chat with Chad..."}
+              disabled={disabled}
+              className="w-full bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden pl-10 pr-4 self-center"
+              style={{
+                boxShadow: "none",
+                minHeight: "1.5rem",
+                lineHeight: "1.5rem",
+                backgroundColor: "transparent",
+                paddingTop: 4,
+                paddingBottom: 4,
+                transform: "translateY(-2px)",
+              }}
+              rows={1}
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handleToggleRecording}
+              disabled={homepageSending || isTutorialActive || isTranscribing}
+              aria-pressed={isRecording}
+              title={isRecording ? "Stop recording" : "Record voice message"}
+              className={`unified-button transition-colors flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10 ${
+                isRecording ? "text-[#FFB347] border-[#FFB347]/60" : ""
+              } disabled:opacity-50`}
+              style={{ boxShadow: "none" }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 15c1.66 0 3-1.34 3-3V7a3 3 0 0 0-6 0v5c0 1.66 1.34 3 3 3z" />
+                <path d="M19 11v1a7 7 0 0 1-14 0v-1" />
+                <path d="M12 19v3" />
+              </svg>
+            </button>
+            <button
+              onClick={() => {
+                if (!disabled && (inputValue.trim() || chatAttachments.length > 0)) {
+                  void handleSendMessage();
+                }
+              }}
+              disabled={disabled || (!inputValue.trim() && chatAttachments.length === 0)}
+              className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10"
+              style={{
+                boxShadow: "none",
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M5 12h14M12 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <input
+          ref={attachmentInputRef}
+          type="file"
+          accept="*/*"
+          multiple
+          className="hidden"
+          onChange={handleAttachmentInputChange}
+        />
+      </div>
+    );
+  };
+
   const appendTranscriptionText = useCallback((text: string) => {
     const trimmed = text?.trim();
     if (!trimmed) return;
@@ -2133,76 +2679,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
             </div>
           </div>
           <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%', overflowY: 'visible' }}>
-            <div 
-              className="chat-input-container flex items-center gap-2 px-4 py-2 border border-[var(--foreground)]/10 overflow-hidden"
-              style={{ 
-                boxShadow: 'none',
-                borderRadius: '1.5rem', // More rounded than rounded-2xl
-              }}
-            >
-              <textarea
-                ref={chatInputRef}
-                value={inputValue}
-                onChange={(e) => {
-                  setInputValue(e.target.value);
-                  // Auto-resize textarea
-                  if (chatInputRef.current) {
-                    chatInputRef.current.style.height = 'auto';
-                    chatInputRef.current.style.height = `${Math.min(chatInputRef.current.scrollHeight, 120)}px`;
-                  }
-                }}
-                onFocus={() => setInputFocused(true)}
-                onBlur={() => setInputFocused(false)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
-                placeholder={isTutorialActive ? "Use the tutorial controls above" : "Chat with Chad..."}
-                disabled={homepageSending || isTutorialActive}
-                className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden"
-                style={{ boxShadow: 'none', padding: '0.25rem 0.5rem', minHeight: '1.5rem', maxHeight: '120px', lineHeight: '1.5rem', borderRadius: '0', backgroundColor: 'transparent' }}
-                rows={1}
-              />
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={handleToggleRecording}
-                  disabled={homepageSending || isTutorialActive || isTranscribing}
-                  aria-pressed={isRecording}
-                  title={isRecording ? "Stop recording" : "Record voice message"}
-                  className={`unified-button transition-colors flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10 ${
-                    isRecording
-                      ? 'text-[#FFB347] border-[#FFB347]/60'
-                      : ''
-                  } disabled:opacity-50`}
-                  style={{ boxShadow: 'none' }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M12 15c1.66 0 3-1.34 3-3V7a3 3 0 0 0-6 0v5c0 1.66 1.34 3 3 3z" />
-                    <path d="M19 11v1a7 7 0 0 1-14 0v-1" />
-                    <path d="M12 19v3" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => {
-                    if (inputValue.trim() && !homepageSending && !isTutorialActive) {
-                      handleSendMessage();
-                    }
-                  }}
-                  disabled={homepageSending || !inputValue.trim() || isTutorialActive}
-                  className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10"
-                  style={{ 
-                    boxShadow: 'none',
-                  }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M5 12h14M12 5l7 7-7 7"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
+            {ChatInputArea()}
             {(voiceError || isRecording || isTranscribing) && (
               <p className={`mt-2 text-[11px] ${voiceError ? 'text-[#FF8A8A]' : 'text-[var(--foreground)]/60'}`}>
                 {voiceError
@@ -2305,9 +2782,12 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                   <div 
                     className="chat-bubble-user max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10"
                   >
-                    <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
-                      {m.content}
-                    </div>
+                    {m.content ? (
+                      <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
+                        {m.content}
+                      </div>
+                    ) : null}
+                    {renderMessageAttachments(m.attachments)}
                   </div>
                 ) : (
                   <div 
@@ -2327,6 +2807,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                         </div>
                       )}
                     </div>
+                    {renderMessageAttachments(m.attachments)}
                     {/* Render UI elements */}
                     {m.uiElements && m.uiElements.length > 0 && (
                       <div className="mt-3 space-y-2">
@@ -2380,76 +2861,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
             </div>
           )}
           <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%', overflowY: 'visible' }}>
-            <div 
-              className="chat-input-container flex items-center gap-2 px-4 py-2 border border-[var(--foreground)]/10 overflow-hidden"
-              style={{ 
-                boxShadow: 'none',
-                borderRadius: '1.5rem', // More rounded than rounded-2xl
-              }}
-            >
-              <textarea
-                ref={chatInputRef}
-              value={inputValue}
-                onChange={(e) => {
-                  setInputValue(e.target.value);
-                  // Auto-resize textarea
-                  if (chatInputRef.current) {
-                    chatInputRef.current.style.height = 'auto';
-                    chatInputRef.current.style.height = `${Math.min(chatInputRef.current.scrollHeight, 120)}px`;
-                  }
-                }}
-              onFocus={() => setInputFocused(true)}
-              onBlur={() => setInputFocused(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSendMessage();
-                }
-              }}
-                placeholder={isTutorialActive ? "Use the tutorial controls above" : "Chat with Chad..."}
-            disabled={homepageSending || isTutorialActive}
-                className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden"
-                style={{ boxShadow: 'none', padding: '0.25rem 0.5rem', minHeight: '1.5rem', maxHeight: '120px', lineHeight: '1.5rem', borderRadius: '0', backgroundColor: 'transparent' }}
-                rows={1}
-              />
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={handleToggleRecording}
-                  disabled={homepageSending || isTutorialActive || isTranscribing}
-                  aria-pressed={isRecording}
-                  title={isRecording ? "Stop recording" : "Record voice message"}
-                  className={`unified-button transition-colors flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10 ${
-                    isRecording
-                      ? 'text-[#FFB347] border-[#FFB347]/60'
-                      : ''
-                  } disabled:opacity-50`}
-                  style={{ boxShadow: 'none' }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M12 15c1.66 0 3-1.34 3-3V7a3 3 0 0 0-6 0v5c0 1.66 1.34 3 3 3z" />
-                    <path d="M19 11v1a7 7 0 0 1-14 0v-1" />
-                    <path d="M12 19v3" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => {
-                    if (inputValue.trim() && !homepageSending && !isTutorialActive) {
-                      handleSendMessage();
-                    }
-                  }}
-                  disabled={homepageSending || !inputValue.trim() || isTutorialActive}
-                  className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10"
-                  style={{ 
-                    boxShadow: 'none',
-                  }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M5 12h14M12 5l7 7-7 7"/>
-                  </svg>
-                </button>
-          </div>
-        </div>
+            {ChatInputArea()}
             {(voiceError || isRecording || isTranscribing) && (
               <p className={`mt-2 text-[11px] ${voiceError ? 'text-[#FF8A8A]' : 'text-white/60'}`}>
                 {voiceError
@@ -3105,7 +3517,8 @@ function Home() {
         progress: {},
         course_context: syllabus,
         course_language_name: normalizedCourseLanguage || undefined,
-        course_language_code: languageNameToCode(normalizedCourseLanguage) || undefined
+        course_language_code: languageNameToCode(normalizedCourseLanguage) || undefined,
+        examDates: [],
       };
       saveSubjectData(unique, initData);
 
@@ -3407,6 +3820,7 @@ function Home() {
           topics: [],
           nodes: {},
           progress: {},
+          examDates: [],
         };
       }
 

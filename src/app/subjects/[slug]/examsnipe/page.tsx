@@ -388,6 +388,7 @@ function CourseExamSnipeInner() {
             ...existingLesson,
             title: lessonTitle,
             body: typeof existingLesson.body === "string" ? existingLesson.body : "",
+            origin: "exam-snipe",
             quiz: (existingLesson as any)?.quiz?.length ? (existingLesson as any).quiz : [],
           });
         }

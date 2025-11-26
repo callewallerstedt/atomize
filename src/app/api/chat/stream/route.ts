@@ -10,7 +10,22 @@ export async function POST(req: Request) {
       return new Response("Missing OPENAI_API_KEY", { status: 500 });
     }
     const body = await req.json().catch(() => ({}));
-    const messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }> = Array.isArray(body.messages) ? body.messages : [];
+    type IncomingAttachment = {
+      type?: 'image' | 'file';
+      data?: string;
+      url?: string;
+      name?: string;
+      size?: number;
+      extension?: string;
+      content?: string; // text content for text files
+      mimeType?: string;
+    };
+    type IncomingMessage = {
+      role: 'user' | 'assistant' | 'system';
+      content?: string;
+      attachments?: IncomingAttachment[];
+    };
+    const incomingMessages: IncomingMessage[] = Array.isArray(body.messages) ? body.messages : [];
     const rawContext = String(body.context || "");
     // Increased limit to 50,000 to accommodate full practice logs, course files, and exam analysis
     // Practice logs, course context, and exam analysis are critical and must be included
@@ -70,6 +85,14 @@ export async function POST(req: Request) {
       "- If something depends on assumptions or missing data, state it explicitly",
       "- Focus on what to do, not how to feel. Be practical and action-oriented",
       "- Show eagerness to help them learn and improve - be proactive, not passive",
+      "",
+      "FILE ATTACHMENTS:",
+      "- When users attach files, the file contents are included directly in the message",
+      "- For text files (TXT, MD, JSON, code files, etc.), you can read and analyze the full content",
+      "- For PDFs, the text content is automatically extracted and included in the message - you can read and analyze it just like text files",
+      "- Always read and respond to file contents when they're attached - don't say you can't view them",
+      "- If a file is attached, analyze its contents and help the user with it",
+      "- The file content will appear in the message marked with '--- Content of [filename] ---'",
       "",
       "You can interact with the site using special action commands. When you want to perform an action, use this format:",
       "ACTION:action_name|param1:value1|param2:value2",
@@ -239,14 +262,95 @@ export async function POST(req: Request) {
     
     // Check if this is a topic suggestion request in Surge Learn phase
     const isTopicSuggestionRequest = path.includes('/surge') && 
-      messages.length > 0 && 
-      messages[0]?.role === 'system' && 
-      messages[0]?.content?.includes('TOPIC_SUGGESTION');
+      incomingMessages.length > 0 && 
+      incomingMessages[0]?.role === 'system' && 
+      typeof incomingMessages[0]?.content === 'string' &&
+      incomingMessages[0]?.content?.includes('TOPIC_SUGGESTION');
+
+    const formatAttachmentSize = (size?: number) => {
+      if (typeof size !== 'number') return '';
+      if (size < 1024) return `${size} B`;
+      if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+      return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+    };
+
+    const convertMessageToOpenAI = (msg: IncomingMessage) => {
+      let textContent = typeof msg.content === 'string' ? msg.content : '';
+      const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
+      const imageAttachments = attachments.filter(
+        (attachment) =>
+          attachment?.type === 'image' ||
+          (typeof attachment?.data === 'string' && attachment.data.startsWith('data:image'))
+      );
+      const fileAttachments = attachments.filter((attachment) => attachment?.type === 'file');
+
+      if (fileAttachments.length) {
+        const fileBlocks: string[] = [];
+        fileAttachments.forEach((file) => {
+          const sizeLabel = formatAttachmentSize(file?.size);
+          const fileName = file?.name || 'File';
+          const mimeType = file?.mimeType || '';
+          
+          // If we have text content (extracted from PDF or text file), include it directly
+          if (file?.content) {
+            const isPDF = mimeType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf');
+            if (isPDF) {
+              fileBlocks.push(`\n\n--- Content of PDF: ${fileName}${sizeLabel ? ` (${sizeLabel})` : ''} ---\n${file.content}\n--- End of ${fileName} ---`);
+            } else {
+              fileBlocks.push(`\n\n--- Content of ${fileName}${sizeLabel ? ` (${sizeLabel})` : ''}${mimeType ? ` [${mimeType}]` : ''} ---\n${file.content}\n--- End of ${fileName} ---`);
+            }
+          } 
+          // If we have base64 data but no extracted content, note that the file is attached
+          else if (file?.data) {
+            const isPDF = mimeType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf');
+            if (isPDF) {
+              fileBlocks.push(`\n\n[Attached PDF file: ${fileName}${sizeLabel ? ` (${sizeLabel})` : ''}. PDF text extraction was not available, but the file is attached.]`);
+            } else {
+              fileBlocks.push(`\n\n[Attached file: ${fileName}${sizeLabel ? ` (${sizeLabel})` : ''}${mimeType ? ` [${mimeType}]` : ''}. File data is available.]`);
+            }
+          }
+          // Fallback: just metadata
+          else {
+            fileBlocks.push(`\n\n[Attached file: ${fileName}${sizeLabel ? ` (${sizeLabel})` : ''}${mimeType ? ` [${mimeType}]` : ''}]`);
+          }
+        });
+        const fileBlock = fileBlocks.join('\n');
+        textContent = textContent ? `${textContent}${fileBlock}` : fileBlock.trim();
+      }
+
+      if (imageAttachments.length === 0) {
+        return { role: msg.role, content: textContent };
+      }
+
+      const imageParts = imageAttachments
+        .map((attachment) => {
+          const url =
+            typeof attachment?.url === 'string'
+              ? attachment.url
+              : typeof attachment?.data === 'string'
+                ? attachment.data
+                : null;
+          if (!url) return null;
+          return { type: 'image_url', image_url: { url } };
+        })
+        .filter(Boolean);
+
+      if (!imageParts.length) {
+        return { role: msg.role, content: textContent };
+      }
+
+      const parts: any[] = [];
+      if (textContent) {
+        parts.push({ type: 'text', text: textContent });
+      }
+      parts.push(...imageParts);
+      return { role: msg.role, content: parts };
+    };
     
     const chatMessages: any[] = [
       { role: "system", content: system },
       { role: "user", content: `Today's date: ${todayFormatted} (ISO: ${todayISO})\nCurrent page: ${path}${homepageWarning}${surgeModeInstructions}\n\nCONTEXT:\n${context}` },
-      ...messages.map((m) => {
+      ...incomingMessages.map((m) => {
         // If it's a topic suggestion system message, convert it to a user message with explicit instructions
         if (isTopicSuggestionRequest && m.role === 'system') {
           return {
@@ -278,14 +382,14 @@ RULES:
 - Just copy the format above exactly with your 4 topic names`
           };
         }
-        return { role: m.role, content: m.content };
+        return convertMessageToOpenAI(m);
       })
     ];
 
     // Check if this is a Surge lesson generation request
     const isSurgeLessonGeneration = path.includes('/surge') && 
       (context.includes('TEACHING TOPIC:') || 
-       messages.some(m => m.content?.includes('Generate a comprehensive lesson')));
+       incomingMessages.some(m => typeof m.content === 'string' && m.content.includes('Generate a comprehensive lesson')));
     
     const maxTokens = isSurgeLessonGeneration ? 7000 : 3000;
 

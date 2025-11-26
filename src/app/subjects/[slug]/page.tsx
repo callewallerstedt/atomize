@@ -495,17 +495,20 @@ export default function SubjectPage() {
       setTopics(gotTopics);
       setCombinedText(json.combinedText || "");
       setSavedFiles(json.files || []);
+      // Load existing data to preserve examDates and other fields
+      const existingData = loadSubjectData(slug);
       const saveObj: StoredSubjectData = {
         subject: subjectName || slug,
         files: json.files || [],
         combinedText: json.combinedText || "",
         tree: null,
         topics: gotTopics,
-        nodes: {},
-        progress: {},
+        nodes: existingData?.nodes || {},
+        progress: existingData?.progress || {},
         course_context: json.course_context || "",
         course_language_code: json.detected_language_code || "en",
         course_language_name: json.detected_language_name || "English",
+        examDates: existingData?.examDates || [],
       };
       saveSubjectData(slug, saveObj);
       setProgress({});
