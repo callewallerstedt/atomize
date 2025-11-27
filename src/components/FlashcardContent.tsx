@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { type ComponentPropsWithoutRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
@@ -9,6 +9,11 @@ import "katex/dist/katex.min.css";
 
 type FlashcardContentProps = {
   content: string;
+};
+
+type CodeProps = ComponentPropsWithoutRef<"code"> & {
+  inline?: boolean;
+  node?: unknown;
 };
 
 export function FlashcardContent({ content }: FlashcardContentProps) {
@@ -26,7 +31,7 @@ export function FlashcardContent({ content }: FlashcardContentProps) {
           ul: ({ node, ...props }) => <ul {...props} className="list-disc list-inside mb-2" />,
           ol: ({ node, ...props }) => <ol {...props} className="list-decimal list-inside mb-2" />,
           li: ({ node, ...props }) => <li {...props} className="mb-1" />,
-          code: ({ inline, className, children, ...props }) =>
+          code: ({ inline, className, children, ...props }: CodeProps) =>
             inline ? (
               <code {...props} className="px-1 py-0.5 rounded bg-[var(--foreground)]/10 text-xs">
                 {children}
