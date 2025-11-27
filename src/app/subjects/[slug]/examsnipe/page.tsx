@@ -430,6 +430,7 @@ function CourseExamSnipeInner() {
         course_context: combinedContext,
         combinedText: existingData?.combinedText || "",
         topics: topicsList,
+        examDates: existingData?.examDates || [],
         nodes: {
           ...(existingData?.nodes || {}),
           [topic]: {
