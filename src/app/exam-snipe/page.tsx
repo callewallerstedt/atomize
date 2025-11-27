@@ -345,6 +345,136 @@ function normalizeGeneratedLessons(raw: any): Record<string, Record<string, Gene
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+type SyncCourseResult = { slug: string };
+
+async function syncExamSnipeLessonsToCourse(record: ExamSnipeRecord | null | undefined, conceptName: string): Promise<SyncCourseResult | null> {
+  if (!record || typeof window === "undefined") return null;
+
+  const results = record.results || {};
+  const concepts = Array.isArray(results.concepts) ? results.concepts : [];
+  const concept = concepts.find((c: any) => c.name === conceptName);
+  const lessonPlans = results.lessonPlans || {};
+  const conceptPlan = lessonPlans[conceptName] || concept?.lessonPlan;
+  const lessons = conceptPlan?.lessons || [];
+  if (lessons.length === 0) return null;
+
+  const normalizedGenerated = normalizeGeneratedLessons(results.generatedLessons) || {};
+  const generatedMap = normalizedGenerated[conceptName] || {};
+
+  const slugBase = (record.courseName || conceptName || "exam-snipe-lessons")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+  const lessonSlug = `${slugBase}-${record.slug || "exams"}`.slice(0, 64);
+  const topic = conceptName;
+
+  const existingData = loadSubjectData(lessonSlug) as StoredSubjectData | null;
+  const nextData: StoredSubjectData = existingData
+    ? { ...existingData }
+    : {
+        subject: record.courseName || "Exam Snipe Lessons",
+        files: [],
+        combinedText: "",
+        tree: null,
+        topics: [],
+        nodes: {},
+        progress: {},
+        examDates: [],
+      };
+
+  const existingNode = nextData.nodes?.[topic];
+  const existingLessons = Array.isArray((existingNode as any)?.lessons) ? (existingNode as any).lessons : [];
+  const existingSymbols = (existingNode as any)?.symbols || [];
+  const existingRawLesson = (existingNode as any)?.rawLessonJson || [];
+
+  const planIdMapping: Record<number, string> = {};
+  const lessonsMeta: Array<{ type: string; title: string; planId?: string; tag?: string }> = [];
+  const lessonsArray = lessons.map((lessonPlanItem: any, idx: number) => {
+    const lessonPlanId = String(lessonPlanItem.id ?? idx);
+    planIdMapping[idx] = lessonPlanId;
+    const lessonGenerated = generatedMap?.[lessonPlanId];
+    const lessonTitle = String(lessonGenerated?.title || lessonPlanItem.title || `Lesson ${idx + 1}`);
+    const existingLesson = existingLessons[idx] || {};
+
+    lessonsMeta.push({
+      type: lessonGenerated ? "Exam Snipe" : "Exam Snipe Outline",
+      title: lessonTitle,
+      planId: lessonPlanId,
+      tag: "Exam Snipe",
+    });
+
+    if (lessonGenerated) {
+      const quizFromGenerated = Array.isArray((lessonGenerated as any)?.quiz)
+        ? (lessonGenerated as any).quiz.map((q: any) => ({
+            question: String(q?.question || ""),
+            answer: q?.answer ? String(q.answer) : undefined,
+          }))
+        : [];
+
+      return {
+        ...existingLesson,
+        title: lessonTitle,
+        body: String(lessonGenerated.body || ""),
+        origin: "exam-snipe",
+        quiz: (existingLesson as any)?.quiz?.length ? (existingLesson as any).quiz : quizFromGenerated,
+      };
+    }
+
+    return {
+      ...existingLesson,
+      title: lessonTitle,
+      body: typeof existingLesson?.body === "string" ? existingLesson.body : "",
+      origin: "exam-snipe",
+      quiz: (existingLesson as any)?.quiz?.length ? (existingLesson as any).quiz : [],
+    };
+  });
+
+  const topicSummary = concept?.description || `Exam Snipe concept: ${topic}`;
+  const topicsList = Array.isArray(nextData.topics) ? [...nextData.topics] : [];
+  if (!topicsList.some((t: any) => (typeof t === "string" ? t === topic : t?.name === topic))) {
+    topicsList.push({ name: topic, summary: topicSummary });
+  }
+  nextData.topics = topicsList;
+
+  const planLessons = lessons.map((lessonPlanItem: any) => ({
+    id: String(lessonPlanItem.id ?? ""),
+    title: String(lessonPlanItem.title || ""),
+    summary: lessonPlanItem.summary || "",
+    objectives: Array.isArray(lessonPlanItem.objectives) ? lessonPlanItem.objectives : [],
+  }));
+
+  nextData.nodes = {
+    ...(nextData.nodes || {}),
+    [topic]: {
+      overview: (existingNode as any)?.overview || `Lessons generated from Exam Snipe for: ${topic}`,
+      symbols: existingSymbols,
+      lessonsMeta,
+      lessons: lessonsArray,
+      rawLessonJson: existingRawLesson,
+      examSnipeMeta: {
+        historySlug: record.slug || "",
+        conceptName: topic,
+        conceptDescription: concept?.description || "",
+        keySkills: conceptPlan?.keySkills || [],
+        examConnections: conceptPlan?.examConnections || [],
+        planIdMapping,
+        planLessons,
+        courseName: record.courseName || "",
+        patternAnalysis: results.patternAnalysis || "",
+        detectedLanguage: results.detectedLanguage || null,
+      },
+    } as any,
+  };
+
+  await saveSubjectDataAsync(lessonSlug, nextData);
+  try {
+    window.dispatchEvent(new CustomEvent("synapse:subject-data-updated", { detail: { slug: lessonSlug } }));
+  } catch {}
+
+  return { slug: lessonSlug };
+}
+
 function normalizeHistoryRecord(record: any): ExamSnipeRecord {
   const rawResults = record?.results ?? {};
   const courseName = normalizeCourseName(
@@ -1604,111 +1734,20 @@ function ExamSnipeInner() {
 
               const handleRowClick = async () => {
                 try {
-                  const slugBase = (activeHistoryMeta?.courseName || 'Exam Snipe Lessons')
-                    .toLowerCase()
-                    .replace(/[^a-z0-9]+/g, '-')
-                    .replace(/^-+|-+$/g, '');
-                  const slug = `${slugBase}-${activeHistoryMeta?.slug || 'exams'}`.slice(0, 64);
-                  const topic = concept.name;
-                  
-                  // Load existing subject data if it exists
-                  const existingData = loadSubjectData(slug) || null;
-                  
-                  // Build lessonsMeta and lessons arrays from all lesson plans
-                  const lessonsMeta: Array<{ type: string; title: string; planId?: string }> = [];
-                  const lessonsArray: Array<any> = [];
-                  const planIdMapping: Record<number, string> = {}; // Map lesson index to planId
+                  if (!activeHistoryMeta) return;
+
                   let clickedLessonIndex = -1;
-                  
-                  // Get existing lessons to preserve user data (flashcards, quiz answers, etc.)
-                  const existingLessons = (existingData?.nodes?.[topic] && typeof existingData.nodes[topic] === 'object' && !Array.isArray(existingData.nodes[topic])) 
-                    ? (existingData.nodes[topic] as any).lessons || []
-                    : [];
-                  
                   (lessons || []).forEach((lessonPlanItem: any, idx: number) => {
-                    const lessonPlanId = String(lessonPlanItem.id);
-                    const lessonGenerated = generatedMap?.[lessonPlanId] as GeneratedLesson | undefined;
-                    const lessonTitle = String(lessonPlanItem.title || `Lesson ${idx + 1}`);
-                    
-                    // Track which lesson was clicked
-                    if (lessonPlanId === planId) {
+                    if (String(lessonPlanItem.id) === planId) {
                       clickedLessonIndex = idx;
                     }
-                    
-                    // Store mapping of lesson index to planId
-                    planIdMapping[idx] = lessonPlanId;
-                    
-                    // Get existing lesson data to preserve user progress
-                    const existingLesson = existingLessons[idx] || {};
-                    
-                    if (lessonGenerated) {
-                      lessonsMeta.push({ type: 'Generated Lesson', title: String(lessonGenerated.title || lessonTitle), planId: lessonPlanId });
-                      // MERGE with existing lesson data to preserve flashcards, quiz answers, etc.
-                      lessonsArray.push({
-                        ...existingLesson, // Keep all existing data (flashcards, quiz progress, etc.)
-                        title: String(lessonGenerated.title || lessonTitle),
-                        body: String(lessonGenerated.body || ''),
-                        origin: 'exam-snipe', // Mark as exam-snipe lesson
-                        // Only update quiz if there's no existing quiz (to preserve user answers/results)
-                        quiz: (existingLesson as any)?.quiz?.length 
-                          ? (existingLesson as any).quiz 
-                          : (Array.isArray(lessonGenerated.quiz) 
-                              ? lessonGenerated.quiz.map((q: any) => ({ question: String(q?.question || q || "") }))
-                              : []),
-                      });
-                    } else {
-                      lessonsMeta.push({ type: 'Lesson Outline', title: lessonTitle, planId: lessonPlanId });
-                      // MERGE with existing lesson data, but keep empty body for Start button
-                      lessonsArray.push({
-                        ...existingLesson, // Keep all existing data
-                        title: lessonTitle,
-                        body: '', // Empty body to trigger Start button
-                        origin: 'exam-snipe', // Mark as exam-snipe lesson
-                        // Only clear quiz if there's no existing quiz (preserve user data)
-                        quiz: (existingLesson as any)?.quiz?.length ? (existingLesson as any).quiz : [],
-                      });
-                    }
                   });
-                  
-                  // Ensure topic is added to topics array
-                  const topicsList = Array.isArray(existingData?.topics) ? [...existingData.topics] : [];
-                  if (!topicsList.some((t: any) => (typeof t === 'string' ? t === topic : t?.name === topic))) {
-                    topicsList.push({
-                      name: topic,
-                      summary: concept?.description || `Exam Snipe concept: ${topic}`,
-                    });
-                  }
-                  
-                  // Merge with existing data
-                  const data: StoredSubjectData = {
-                    subject: activeHistoryMeta?.courseName || existingData?.subject || 'Exam Snipe Lessons',
-                    course_context: (examResults.patternAnalysis || '') + "\n" + (examResults.gradeInfo || '') || existingData?.course_context || '',
-                    combinedText: existingData?.combinedText || '',
-                    topics: topicsList,
-                    nodes: {
-                      ...(existingData?.nodes || {}),
-                      [topic]: {
-                        overview: `Lessons generated from Exam Snipe for: ${topic}`,
-                        symbols: (existingData?.nodes?.[topic] && typeof existingData.nodes[topic] === 'object' && !Array.isArray(existingData.nodes[topic])) ? (existingData.nodes[topic] as any).symbols || [] : [],
-                        lessonsMeta,
-                        lessons: lessonsArray,
-                        rawLessonJson: (existingData?.nodes?.[topic] && typeof existingData.nodes[topic] === 'object' && !Array.isArray(existingData.nodes[topic])) ? (existingData.nodes[topic] as any).rawLessonJson || [] : [],
-                        // Store exam snipe metadata for saving back to history
-                        examSnipeMeta: {
-                          historySlug: activeHistoryMeta?.slug || '',
-                          conceptName: concept.name,
-                          planIdMapping,
-                        },
-                      } as any,
-                    },
-                    files: existingData?.files || [],
-                    progress: existingData?.progress || {},
-                    examDates: existingData?.examDates || [],
-                  };
-                  
-                  await saveSubjectDataAsync(slug, data);
-                  
-                  // Always navigate to the lesson page - if generated, show lesson; if not, show Start button
+
+                  const persisted = await syncExamSnipeLessonsToCourse(activeHistoryMeta, concept.name);
+                  if (!persisted) return;
+                  const slug = persisted.slug;
+                  const topic = concept.name;
+
                   if (clickedLessonIndex >= 0) {
                     router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}/lesson/${clickedLessonIndex}`);
                   } else {
@@ -1823,8 +1862,13 @@ function ExamSnipeInner() {
                       const filtered = prev.filter((r) => r.slug !== updated.slug);
                       return [updated, ...filtered].slice(0, MAX_HISTORY_ITEMS);
                     });
+
+                    try {
+                      await syncExamSnipeLessonsToCourse(updated, concept.name);
+                    } catch (syncErr) {
+                      console.error("Failed to sync exam snipe lesson to course:", syncErr);
+                    }
                     
-                    // Navigate to the lesson page after generation (like courses do)
                     const slugBase = (updated.courseName || 'Exam Snipe Lessons')
                       .toLowerCase()
                       .replace(/[^a-z0-9]+/g, '-')
@@ -1832,7 +1876,6 @@ function ExamSnipeInner() {
                     const slug = `${slugBase}-${updated.slug || 'exams'}`.slice(0, 64);
                     const topic = concept.name;
                     
-                    // Find the lesson index
                     const lessonIdx = (lessons || []).findIndex((l: any) => String(l.id) === planId);
                     if (lessonIdx >= 0) {
                       router.push(`/subjects/${slug}/node/${encodeURIComponent(topic)}/lesson/${lessonIdx}`);
