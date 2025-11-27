@@ -260,11 +260,15 @@ function sanitizeJsonPayload(raw: string): string {
 
 function extractQuizQuestionsFromJson(raw: string): SurgeQuizQuestion[] {
   const cleaned = sanitizeJsonPayload(raw);
-  if (!cleaned) return [];
+  if (!cleaned) {
+    console.error("extractQuizQuestionsFromJson: cleaned payload is empty");
+    return [];
+  }
   let json: any;
   try {
     json = JSON.parse(cleaned);
-  } catch {
+  } catch (parseError) {
+    console.error("extractQuizQuestionsFromJson: JSON parse error", parseError);
     return [];
   }
   const results: SurgeQuizQuestion[] = [];
@@ -273,6 +277,15 @@ function extractQuizQuestionsFromJson(raw: string): SurgeQuizQuestion[] {
     : Array.isArray(json?.questions)
     ? json.questions
     : [];
+  
+  if (mcArray.length === 0) {
+    console.warn("extractQuizQuestionsFromJson: No MC questions found in JSON", { 
+      hasMc: !!json?.mc, 
+      hasQuestions: !!json?.questions,
+      jsonKeys: Object.keys(json || {})
+    });
+  }
+  
   mcArray.forEach((item, idx) => {
     const question = (item?.question ?? "").toString().trim();
     const optionsRaw: any[] = Array.isArray(item?.options) ? item.options : [];
@@ -285,11 +298,31 @@ function extractQuizQuestionsFromJson(raw: string): SurgeQuizQuestion[] {
       text = text.replace(/^[A-Z]\s*[\.:]\s*/i, "");
       return text;
     }).filter(Boolean).slice(0, 4);
-    const correctOption = (item?.correctOption ?? item?.correct ?? item?.answer ?? "").toString().trim().charAt(0).toUpperCase();
+    
+    const correctOptionRaw = (item?.correctOption ?? item?.correct ?? item?.answer ?? "").toString().trim();
+    const correctOption = correctOptionRaw ? correctOptionRaw.charAt(0).toUpperCase() : "";
     const explanation = (item?.explanation ?? "").toString().trim();
-    if (!question || options.length < 2 || !correctOption) {
+    
+    if (!question) {
+      console.warn(`extractQuizQuestionsFromJson: Question ${idx} has no question text`);
       return;
     }
+    if (options.length < 2) {
+      console.warn(`extractQuizQuestionsFromJson: Question ${idx} has insufficient options`, { 
+        optionsCount: options.length, 
+        optionsRawCount: optionsRaw.length,
+        question: question.substring(0, 50)
+      });
+      return;
+    }
+    if (!correctOption) {
+      console.warn(`extractQuizQuestionsFromJson: Question ${idx} has no correct option`, { 
+        correctOptionRaw,
+        question: question.substring(0, 50)
+      });
+      return;
+    }
+    
     results.push({
       id: createQuizQuestionId("mc", question + idx),
       question,
@@ -324,6 +357,29 @@ function parseQuizJson(raw: string, stage: "mc" | "harder"): SurgeQuizQuestion[]
   const questions = extractQuizQuestionsFromJson(raw);
   if (!questions.length) {
     console.error("Surge quiz JSON parse failed; raw payload:", raw?.slice?.(0, 4000) ?? raw);
+    // Try to parse and see what we got
+    try {
+      const cleaned = sanitizeJsonPayload(raw);
+      if (cleaned) {
+        const json = JSON.parse(cleaned);
+        console.error("Parsed JSON structure:", {
+          hasMc: !!json?.mc,
+          mcLength: Array.isArray(json?.mc) ? json.mc.length : 0,
+          hasQuestions: !!json?.questions,
+          questionsLength: Array.isArray(json?.questions) ? json.questions.length : 0,
+          keys: Object.keys(json || {}),
+          firstMcItem: Array.isArray(json?.mc) && json.mc.length > 0 ? {
+            hasQuestion: !!json.mc[0]?.question,
+            hasOptions: !!json.mc[0]?.options,
+            optionsLength: Array.isArray(json.mc[0]?.options) ? json.mc[0].options.length : 0,
+            hasCorrectOption: !!json.mc[0]?.correctOption,
+            correctOption: json.mc[0]?.correctOption
+          } : null
+        });
+      }
+    } catch (e) {
+      console.error("Failed to parse JSON for debugging:", e);
+    }
     throw new Error("Empty quiz payload");
   }
   

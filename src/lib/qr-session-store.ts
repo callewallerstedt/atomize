@@ -39,18 +39,18 @@ if (
   !globalWithSessions.__qrSessionCleanupInterval__
 ) {
   globalWithSessions.__qrSessionCleanupInterval__ = setInterval(() => {
-    const now = Date.now();
+  const now = Date.now();
     let cleaned = 0;
-    for (const [sessionId, session] of sessions.entries()) {
-      if (session.expiresAt < now) {
-        sessions.delete(sessionId);
+  for (const [sessionId, session] of sessions.entries()) {
+    if (session.expiresAt < now) {
+      sessions.delete(sessionId);
         cleaned++;
       }
     }
     if (cleaned > 0) {
       console.log(`[QR] Cleaned up ${cleaned} expired sessions`);
-    }
-  }, 5 * 60 * 1000);
+  }
+}, 5 * 60 * 1000);
 }
 
 export function getSession(sessionId: string): QRSession | undefined {

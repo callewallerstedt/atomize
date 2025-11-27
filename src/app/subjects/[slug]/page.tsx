@@ -72,10 +72,12 @@ export default function SubjectPage() {
   const [showFlashcardTopicList, setShowFlashcardTopicList] = useState(true);
   const [selectedFlashcardTopic, setSelectedFlashcardTopic] = useState<string | null>(null);
   const [examDateUpdateTrigger, setExamDateUpdateTrigger] = useState(0); // Force re-render when exam dates change
+  const [daysLeft, setDaysLeft] = useState<number | null>(null); // Days until next exam
   const [examSnipes, setExamSnipes] = useState<Array<{ id: string; courseName: string; slug: string; createdAt: string; fileNames: string[] }>>([]);
   const [loadingExamSnipes, setLoadingExamSnipes] = useState(false);
   const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
   const [topicInfoOpen, setTopicInfoOpen] = useState<string | null>(null);
+  const isSyncingExamSnipesRef = useRef(false);
 
   function getRandomCardIndex(filteredFlashcards: typeof allFlashcards, currentIndex: number): number {
     if (filteredFlashcards.length <= 1) return currentIndex;
@@ -196,33 +198,6 @@ export default function SubjectPage() {
     }
   }, [showOnlyStarred, starredFlashcards, allFlashcards, allFlashcardsModalOpen, currentFlashcardIndex]);
 
-  const loadExamSnipes = useCallback(async () => {
-    setLoadingExamSnipes(true);
-    try {
-      console.log(`Loading exam snipes for course: ${slug}`);
-      const res = await fetch(`/api/exam-snipe/history?subjectSlug=${encodeURIComponent(slug)}`, {
-        credentials: "include",
-      });
-      const json = await res.json().catch(() => ({}));
-      console.log(`Exam snipes response for ${slug}:`, { ok: res.ok, count: json?.history?.length || 0, history: json?.history });
-      if (res.ok && Array.isArray(json?.history)) {
-        setExamSnipes(json.history.map((record: any) => ({
-          id: record.id || record.slug,
-          courseName: record.courseName || "Untitled Exam Snipe",
-          slug: record.slug,
-          createdAt: record.createdAt,
-          fileNames: Array.isArray(record.fileNames) ? record.fileNames : [],
-        })));
-      } else {
-        setExamSnipes([]);
-      }
-    } catch {
-      setExamSnipes([]);
-    } finally {
-      setLoadingExamSnipes(false);
-    }
-  }, [slug]);
-
   const refreshSubjectData = useCallback(() => {
     const saved = loadSubjectData(slug);
 
@@ -264,6 +239,261 @@ export default function SubjectPage() {
     return saved || null;
   }, [slug]);
 
+  // Helper function to normalize generated lessons
+  function normalizeGeneratedLessons(generatedLessons: any): Record<string, Record<string, any>> {
+    if (!generatedLessons || typeof generatedLessons !== "object") return {};
+    const normalized: Record<string, Record<string, any>> = {};
+    for (const [conceptName, conceptLessons] of Object.entries(generatedLessons)) {
+      if (conceptLessons && typeof conceptLessons === "object") {
+        normalized[conceptName] = conceptLessons as Record<string, any>;
+      }
+    }
+    return normalized;
+  }
+
+  const syncExamSnipeLessonsToMainCourse = useCallback(async (examSnipeRecords: any[]) => {
+    if (!examSnipeRecords || examSnipeRecords.length === 0) return;
+    if (isSyncingExamSnipesRef.current) return; // Prevent concurrent syncing
+    
+    isSyncingExamSnipesRef.current = true;
+    try {
+      const courseData = loadSubjectData(slug) as StoredSubjectData | null;
+      if (!courseData) return;
+      
+      let hasUpdates = false;
+      const updatedNodes = { ...(courseData.nodes || {}) };
+      const updatedTopics = [...(courseData.topics || [])];
+      
+      // Sort exam snipes by most recent first, and only process ones with valid data
+      const validRecords = examSnipeRecords
+        .filter(record => {
+          // Only process records with valid results
+          if (!record.results || typeof record.results !== 'object') return false;
+          const results = record.results;
+          const normalizedGenerated = normalizeGeneratedLessons(results.generatedLessons) || {};
+          
+          // Only sync from exam snipes that have actually generated lessons (not just plans)
+          const hasGeneratedLessons = Object.keys(normalizedGenerated).length > 0 && 
+            Object.values(normalizedGenerated).some((conceptLessons: any) => 
+              conceptLessons && typeof conceptLessons === 'object' && Object.keys(conceptLessons).length > 0
+            );
+          
+          return hasGeneratedLessons;
+        })
+        .sort((a, b) => {
+          // Sort by most recent first (if createdAt is available)
+          const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return bTime - aTime;
+        });
+      
+      for (const record of validRecords) {
+        const results = record.results || {};
+        const concepts = Array.isArray(results.concepts) ? results.concepts : [];
+        const lessonPlans = results.lessonPlans || {};
+        const normalizedGenerated = normalizeGeneratedLessons(results.generatedLessons) || {};
+        
+        for (const concept of concepts) {
+          const conceptName = concept.name;
+          if (!conceptName) continue;
+          
+          const conceptPlan = lessonPlans[conceptName] || concept?.lessonPlan;
+          const lessons = conceptPlan?.lessons || [];
+          if (lessons.length === 0) continue;
+          
+          // Only sync concepts that have generated lessons
+          const generatedMap = normalizedGenerated[conceptName] || {};
+          if (Object.keys(generatedMap).length === 0) {
+            // Skip concepts that don't have any generated lessons yet
+            continue;
+          }
+          const existingNode = updatedNodes[conceptName];
+          const existingLessons = Array.isArray((existingNode as any)?.lessons) ? (existingNode as any).lessons : [];
+          const existingSymbols = (existingNode as any)?.symbols || [];
+          const existingRawLesson = (existingNode as any)?.rawLessonJson || [];
+          const existingLessonsMeta = Array.isArray((existingNode as any)?.lessonsMeta) ? (existingNode as any).lessonsMeta : [];
+          
+          const planIdMapping: Record<number, string> = {};
+          const lessonsMeta: Array<{ type: string; title: string; planId?: string; tag?: string }> = [...existingLessonsMeta];
+          // Merge existing lessons with new ones from exam snipe
+          const lessonsArray: any[] = [];
+          const maxLength = Math.max(lessons.length, existingLessons.length);
+          
+          for (let idx = 0; idx < maxLength; idx++) {
+            const lessonPlanItem = lessons[idx];
+            const existingLesson = existingLessons[idx];
+            
+            // If there's an existing lesson and no plan item, keep the existing one
+            if (existingLesson && !lessonPlanItem) {
+              lessonsArray.push(existingLesson);
+              continue;
+            }
+            
+            // If there's a plan item, process it
+            if (lessonPlanItem) {
+              const lessonPlanId = String(lessonPlanItem.id ?? idx);
+              planIdMapping[idx] = lessonPlanId;
+              const lessonGenerated = generatedMap?.[lessonPlanId];
+              const lessonTitle = String(lessonGenerated?.title || lessonPlanItem.title || `Lesson ${idx + 1}`);
+              
+              // Check if this lesson already exists by planId or title
+              const matchingExisting = existingLessons.find((l: any) => 
+                l && ((l as any).planId === lessonPlanId || l.title === lessonTitle)
+              );
+              
+              const finalLesson = matchingExisting || existingLesson || {};
+              
+              // Only add to lessonsMeta if not already present
+              if (!lessonsMeta.some((m: any) => m.title === lessonTitle || m.planId === lessonPlanId)) {
+                lessonsMeta.push({
+                  type: lessonGenerated ? "Exam Snipe" : "Exam Snipe Outline",
+                  title: lessonTitle,
+                  planId: lessonPlanId,
+                  tag: "Exam Snipe",
+                });
+              }
+              
+              if (lessonGenerated) {
+                const quizFromGenerated = Array.isArray((lessonGenerated as any)?.quiz)
+                  ? (lessonGenerated as any).quiz.map((q: any) => ({
+                      question: String(q?.question || ""),
+                      answer: q?.answer ? String(q.answer) : undefined,
+                    }))
+                  : [];
+                
+                lessonsArray.push({
+                  ...finalLesson,
+                  title: lessonTitle,
+                  body: String(lessonGenerated.body || finalLesson.body || ""),
+                  origin: "exam-snipe",
+                  planId: lessonPlanId,
+                  quiz: (finalLesson as any)?.quiz?.length ? (finalLesson as any).quiz : quizFromGenerated,
+                });
+              } else {
+                lessonsArray.push({
+                  ...finalLesson,
+                  title: lessonTitle,
+                  body: typeof finalLesson?.body === "string" ? finalLesson.body : "",
+                  origin: "exam-snipe",
+                  planId: lessonPlanId,
+                  quiz: (finalLesson as any)?.quiz?.length ? (finalLesson as any).quiz : [],
+                });
+              }
+            }
+          }
+          
+          // Update or create the node
+          const topicSummary = concept?.description || `Exam Snipe concept: ${conceptName}`;
+          if (!updatedTopics.some((t: any) => (typeof t === "string" ? t === conceptName : t?.name === conceptName))) {
+            updatedTopics.push({ name: conceptName, summary: topicSummary });
+            hasUpdates = true;
+          }
+          
+          const planLessons = lessons.map((lessonPlanItem: any) => ({
+            id: String(lessonPlanItem.id ?? ""),
+            title: String(lessonPlanItem.title || ""),
+            summary: lessonPlanItem.summary || "",
+            objectives: Array.isArray(lessonPlanItem.objectives) ? lessonPlanItem.objectives : [],
+          }));
+          
+          // Preserve existing examSnipeMeta if it exists, otherwise create new one
+          const existingExamSnipeMeta = (existingNode as any)?.examSnipeMeta;
+          const examSnipeMeta = existingExamSnipeMeta ? {
+            ...existingExamSnipeMeta,
+            // Update with latest data but preserve existing planIdMapping and planLessons
+            historySlug: record.slug || existingExamSnipeMeta.historySlug || "",
+            conceptName: conceptName,
+            conceptDescription: concept?.description || existingExamSnipeMeta.conceptDescription || "",
+            keySkills: conceptPlan?.keySkills || existingExamSnipeMeta.keySkills || [],
+            examConnections: conceptPlan?.examConnections || existingExamSnipeMeta.examConnections || [],
+            planIdMapping: { ...existingExamSnipeMeta.planIdMapping, ...planIdMapping },
+            planLessons: existingExamSnipeMeta.planLessons || planLessons,
+            courseName: record.courseName || existingExamSnipeMeta.courseName || "",
+            patternAnalysis: results.patternAnalysis || existingExamSnipeMeta.patternAnalysis || "",
+            detectedLanguage: results.detectedLanguage || existingExamSnipeMeta.detectedLanguage || null,
+          } : {
+            historySlug: record.slug || "",
+            conceptName: conceptName,
+            conceptDescription: concept?.description || "",
+            keySkills: conceptPlan?.keySkills || [],
+            examConnections: conceptPlan?.examConnections || [],
+            planIdMapping,
+            planLessons,
+            courseName: record.courseName || "",
+            patternAnalysis: results.patternAnalysis || "",
+            detectedLanguage: results.detectedLanguage || null,
+          };
+          
+          updatedNodes[conceptName] = {
+            ...(existingNode || {}),
+            overview: (existingNode as any)?.overview || `Lessons generated from Exam Snipe for: ${conceptName}`,
+            symbols: existingSymbols,
+            lessonsMeta,
+            lessons: lessonsArray,
+            rawLessonJson: existingRawLesson,
+            examSnipeMeta,
+          } as any;
+          
+          hasUpdates = true;
+        }
+      }
+      
+      if (hasUpdates) {
+        const updatedData: StoredSubjectData = {
+          ...courseData,
+          nodes: updatedNodes,
+          topics: updatedTopics,
+        };
+        await saveSubjectDataAsync(slug, updatedData);
+        refreshSubjectData();
+        try {
+          window.dispatchEvent(new CustomEvent("synapse:subject-data-updated", { 
+            detail: { slug, fromExamSnipeSync: true } 
+          }));
+        } catch {}
+      }
+    } finally {
+      isSyncingExamSnipesRef.current = false;
+    }
+  }, [slug, refreshSubjectData]);
+
+  const loadExamSnipes = useCallback(async () => {
+    setLoadingExamSnipes(true);
+    try {
+      console.log(`Loading exam snipes for course: ${slug}`);
+      const res = await fetch(`/api/exam-snipe/history?subjectSlug=${encodeURIComponent(slug)}`, {
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => ({}));
+      console.log(`Exam snipes response for ${slug}:`, { ok: res.ok, count: json?.history?.length || 0, history: json?.history });
+      if (res.ok && Array.isArray(json?.history)) {
+        const records = json.history.map((record: any) => ({
+          id: record.id || record.slug,
+          courseName: record.courseName || "Untitled Exam Snipe",
+          slug: record.slug,
+          createdAt: record.createdAt,
+          fileNames: Array.isArray(record.fileNames) ? record.fileNames : [],
+          results: record.results || {},
+        }));
+        setExamSnipes(records.map((r: any) => ({
+          id: r.id,
+          courseName: r.courseName,
+          slug: r.slug,
+          createdAt: r.createdAt,
+          fileNames: r.fileNames,
+        })));
+        // Sync lessons from exam snipes to main course
+        await syncExamSnipeLessonsToMainCourse(records);
+      } else {
+        setExamSnipes([]);
+      }
+    } catch {
+      setExamSnipes([]);
+    } finally {
+      setLoadingExamSnipes(false);
+    }
+  }, [slug, syncExamSnipeLessonsToMainCourse]);
+
   useEffect(() => {
     const saved = refreshSubjectData();
     void loadExamSnipes();
@@ -277,7 +507,8 @@ export default function SubjectPage() {
         collectAllFlashcards();
       }, 50);
     }
-  }, [slug, loadExamSnipes, refreshSubjectData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
 
   // Refresh exam snipes when page gains focus (in case user created one in another tab)
   useEffect(() => {
@@ -286,21 +517,55 @@ export default function SubjectPage() {
     };
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
-  }, [loadExamSnipes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const handleSubjectDataUpdated = (event: Event) => {
       const detail = (event as CustomEvent).detail;
       if (detail?.slug === slug) {
         refreshSubjectData();
-        void loadExamSnipes();
+        // Only reload exam snipes if the update didn't come from exam snipe sync
+        // (to prevent infinite loops)
+        if (!detail?.fromExamSnipeSync) {
+          void loadExamSnipes();
+        }
       }
     };
     window.addEventListener('synapse:subject-data-updated', handleSubjectDataUpdated as EventListener);
     return () => {
       window.removeEventListener('synapse:subject-data-updated', handleSubjectDataUpdated as EventListener);
     };
-  }, [slug, refreshSubjectData, loadExamSnipes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug]);
+
+  // Calculate days until next exam (client-side only to avoid hydration mismatch)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = loadSubjectData(slug);
+    if (!saved?.examDates || saved.examDates.length === 0) {
+      setDaysLeft(null);
+      return;
+    }
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const upcoming = saved.examDates
+      .map(ed => {
+        const examDate = new Date(ed.date);
+        examDate.setHours(0, 0, 0, 0);
+        return examDate;
+      })
+      .filter(d => d >= now)
+      .sort((a, b) => a.getTime() - b.getTime());
+    if (upcoming.length === 0) {
+      setDaysLeft(null);
+      return;
+    }
+    const nextExam = upcoming[0];
+    const diffTime = nextExam.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    setDaysLeft(diffDays);
+  }, [slug, examDateUpdateTrigger]);
 
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -580,39 +845,14 @@ export default function SubjectPage() {
         )}
 
         {/* Course Header with Exam Date */}
-        {(() => {
-          // Use examDateUpdateTrigger to force re-render when exam dates change
-          const _ = examDateUpdateTrigger;
-          const saved = loadSubjectData(slug);
-          const daysLeft = (() => {
-            if (!saved?.examDates || saved.examDates.length === 0) return null;
-            const now = new Date();
-            now.setHours(0, 0, 0, 0);
-            const upcoming = saved.examDates
-              .map(ed => {
-                const examDate = new Date(ed.date);
-                examDate.setHours(0, 0, 0, 0);
-                return examDate;
-              })
-              .filter(d => d >= now)
-              .sort((a, b) => a.getTime() - b.getTime());
-            if (upcoming.length === 0) return null;
-            const nextExam = upcoming[0];
-            const diffTime = nextExam.getTime() - now.getTime();
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            return diffDays;
-          })();
-          return (
-            <div className="mb-6 flex items-center justify-between gap-4">
-              <h1 className="text-2xl font-bold text-[var(--foreground)]">{subjectName || slug}</h1>
-              {daysLeft !== null && (
-                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--foreground)]/5 border border-[var(--foreground)]/15 text-[var(--foreground)]/70">
-                  <span>{daysLeft} day{daysLeft === 1 ? '' : 's'} left</span>
-                </div>
-              )}
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-bold text-[var(--foreground)]">{subjectName || slug}</h1>
+          {daysLeft !== null && (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--foreground)]/5 border border-[var(--foreground)]/15 text-[var(--foreground)]/70">
+              <span>{daysLeft} day{daysLeft === 1 ? '' : 's'} left</span>
             </div>
-          );
-        })()}
+          )}
+        </div>
 
         {activeTab === 'tree' && (
           <div className="mt-4">

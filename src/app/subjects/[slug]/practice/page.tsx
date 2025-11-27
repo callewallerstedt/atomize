@@ -1551,6 +1551,8 @@ export default function PracticePage() {
   }
 };
 
+const ATTACHMENT_TILE_SIZE = 36;
+
 const attachmentsToMarkdown = (images: Array<{ id: string; data: string }>) =>
   images.map((img) => `![photo](${img.data})`).join("\n");
 
@@ -3129,8 +3131,8 @@ Respond with ONLY the specific topic name, no explanation.`;
         </div>
       )}
 
-      <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 py-6 sm:px-6">
-        <div className="flex-1 space-y-4 overflow-y-auto rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-4">
+      <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 py-6 sm:px-6 min-h-0">
+        <div className="flex-1 min-h-0 space-y-4 overflow-y-auto rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-4">
           {messages.length === 0 && (
             <div className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/80 px-4 py-6 text-sm text-[var(--foreground)]/70">
               Chad will lead a focused practice session for this course. Get
@@ -3150,19 +3152,22 @@ Respond with ONLY the specific topic name, no explanation.`;
                 key={`${msg.role}-${idx}`}
                 className={`flex ${isUser ? "justify-end" : "justify-start"}`}
               >
-                <div className="max-w-[82%]">
-                  <div className="mb-1 text-[10px] text-[var(--foreground)]/60">
-                    {isUser ? "You" : "Chad"}
+                {isUser ? (
+                  <div 
+                    className="chat-bubble-user max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10"
+                  >
+                    {msg.content ? (
+                      <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
+                        {msg.content}
+                      </div>
+                    ) : null}
                   </div>
-                  <div
-                    className={`rounded-2xl border px-4 py-3 text-sm leading-relaxed ${
-                      isUser
-                        ? "border-[var(--accent-cyan)]/40 bg-[var(--accent-cyan)]/15"
-                        : "border-[var(--foreground)]/15 bg-[var(--background)]/85"
-                    }`}
+                ) : (
+                  <div 
+                    className="chat-bubble-assistant max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10"
                   >
                     {showSpinner ? (
-                      <div className="flex items-center gap-2 text-xs text-[var(--foreground)]/60">
+                      <div className="text-sm text-[var(--foreground)]/90 leading-relaxed flex items-center gap-2">
                         <GlowSpinner
                           size={16}
                           ariaLabel={isPreparing ? "Preparing" : "Chad thinking"}
@@ -3170,9 +3175,11 @@ Respond with ONLY the specific topic name, no explanation.`;
                         />
                         {isPreparing ? "Preparing..." : "Thinking..."}
                       </div>
-                    ) : isAssistant ? (
+                    ) : (
                       <>
-                        {renderPracticeContent(msg.content || "", handleOpenLesson, generatingLessonFor)}
+                        <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
+                          {renderPracticeContent(msg.content || "", handleOpenLesson, generatingLessonFor)}
+                        </div>
                         {/* Render UI elements */}
                         {msg.uiElements && msg.uiElements.length > 0 && (
                           <div className="mt-3 space-y-2">
@@ -3211,11 +3218,9 @@ Respond with ONLY the specific topic name, no explanation.`;
                           </div>
                         )}
                       </>
-                    ) : (
-                      <span>{msg.content}</span>
                     )}
                   </div>
-                </div>
+                )}
               </div>
             );
           })}
@@ -3227,193 +3232,163 @@ Respond with ONLY the specific topic name, no explanation.`;
             e.preventDefault();
             void sendMessage();
           }}
-          className="mt-4 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4"
+          className="mt-4 sticky bottom-4 z-20"
         >
-          <div className="flex items-center gap-3">
-            <div className="flex-1 relative">
-              {/* Plus button for dropdown */}
-              <div
-                className="absolute left-2 top-1/2 -translate-y-1/2 z-20"
-                data-attachment-dropdown
-                style={{ pointerEvents: 'auto' }}
-              >
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setShowAttachmentMenu((prev) => !prev);
+          {qrImages.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {qrImages.map((image) => (
+                <div
+                  key={image.id}
+                  className="relative inline-block group"
+                  style={{
+                    width: `${ATTACHMENT_TILE_SIZE}px`,
+                    height: `${ATTACHMENT_TILE_SIZE}px`,
                   }}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-base leading-none text-[var(--foreground)] hover:bg-[var(--background)]/70 disabled:opacity-50 transition-colors"
-                  style={{ pointerEvents: 'auto' }}
-                  aria-label="More options"
-                  title="More options"
                 >
-                  +
-                </button>
-                {/* Dropdown menu */}
-                {showAttachmentMenu && (
-                  <div
-                    className="absolute left-0 bottom-full mb-2 w-48 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/95 shadow-lg overflow-hidden z-20"
-                    data-attachment-dropdown
+                  <img
+                    src={image.data}
+                    alt="Uploaded"
+                    className="w-full h-full object-cover rounded-lg border border-[var(--foreground)]/15"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeQrImage(image.id)}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center hover:bg-red-600 shadow-lg"
+                    aria-label="Remove image"
                   >
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openAttachmentPicker();
-                        setShowAttachmentMenu(false);
-                      }}
-                      className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors"
-                    >
-                      Upload image
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void createQrSession();
-                      }}
-                      className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors border-t border-[var(--foreground)]/10"
-                    >
-                      Answer with phone
-                    </button>
-                  </div>
-                )}
-              </div>
-              <div
-                className="relative w-full"
-                onDragEnter={handleAttachmentDragOver}
-                onDragOver={handleAttachmentDragOver}
-                onDragLeave={handleAttachmentDragLeave}
-                onDrop={handleAttachmentDrop}
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div
+            className={`chat-input-container flex items-center gap-2 pl-0 pr-2 py-2 border ${
+              isAttachmentDragActive ? "border-[var(--accent-cyan)]" : "border-[var(--foreground)]/10"
+            } rounded-full`}
+            style={{
+              backgroundColor: "rgba(255,255,255,0.08)",
+              boxShadow: "none",
+            }}
+            onDragEnter={handleAttachmentDragOver}
+            onDragOver={handleAttachmentDragOver}
+            onDragLeave={handleAttachmentDragLeave}
+            onDrop={handleAttachmentDrop}
+          >
+            <div className="relative" data-attachment-dropdown style={{ pointerEvents: "auto" }}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowAttachmentMenu((prev) => !prev);
+                }}
+                className="chat-attach-button inline-flex items-center justify-center rounded-full bg-transparent text-[var(--foreground)] transition-colors w-8 h-8 focus-visible:outline-none"
+                style={{ border: "0", boxShadow: "none" }}
+                aria-label="More options"
+                title="More options"
               >
-                {(() => {
-                  const images = qrImages;
-                  const hasText = input.trim().length > 0;
-                  
-                  return (
-                    <>
-                      {/* Hidden textarea for form submission - contains full input with markdown */}
-                      <textarea
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            void sendMessage();
-                          }
-                        }}
-                        onPaste={async (event) => {
-                          const files = Array.from(event.clipboardData?.files || []).filter((file) =>
-                            file.type.startsWith("image/")
-                          );
-                          if (files.length) {
-                            event.preventDefault();
-                            await addImagesFromFiles(files);
-                          }
-                        }}
-                        placeholder="Respond with your work, explain your reasoning, or ask for a different drill…"
-                        rows={1}
-                        className={`absolute inset-0 w-full resize-none rounded-xl border ${
-                          isAttachmentDragActive
-                            ? 'border-[var(--accent-cyan)]'
-                            : 'border-[var(--foreground)]/10'
-                        } bg-transparent pl-12 pr-20 py-4.5 text-sm text-transparent placeholder:text-transparent focus:border-[var(--accent-cyan)] focus:outline-none z-10`}
-                        style={{
-                          caretColor: 'var(--foreground)',
-                          pointerEvents: 'auto',
-                        }}
-                      />
-                      {/* Visible overlay showing text and images */}
-                      <div 
-                        className={`w-full min-h-[2.5rem] rounded-xl border ${
-                          isAttachmentDragActive
-                            ? 'border-[var(--accent-cyan)]'
-                            : 'border-[var(--foreground)]/10'
-                        } bg-[var(--background)]/80 pl-12 pr-20 py-4.5 flex flex-wrap items-center gap-2 text-sm overflow-hidden pointer-events-none`}
-                        style={{ 
-                          color: 'var(--foreground)',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                        }}
-                      >
-                        {!hasText && images.length === 0 && (
-                          <span className="text-[var(--foreground)]/40">
-                            Respond with your work, explain your reasoning, or ask for a different drill…
-                          </span>
-                        )}
-                        {hasText && (
-                          <span className="whitespace-pre-wrap">{input}</span>
-                        )}
-                        {images.map((image) => (
-                          <div
-                            key={image.id}
-                            className="relative inline-block pointer-events-auto group"
-                            style={{ maxWidth: '200px', maxHeight: '150px', flexShrink: 0 }}
-                          >
-                            <img
-                              src={image.data}
-                              alt="Uploaded"
-                              className="max-w-full max-h-[150px] object-contain rounded border border-[var(--foreground)]/20"
-                            />
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                removeQrImage(image.id);
-                              }}
-                              className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center hover:bg-red-600 shadow-lg z-30 pointer-events-auto"
-                              aria-label="Remove image"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                      <input
-                        ref={attachmentInputRef}
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        className="hidden"
-                        onChange={handleAttachmentInputChange}
-                      />
-                    </>
-                  );
-                })()}
-              </div>
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => handleDifficultyAdjustment("down")}
-                  disabled={sending}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-base leading-none text-[var(--foreground)] hover:bg-[var(--background)]/70 disabled:opacity-50 transition-colors"
-                  aria-label="Lower difficulty"
-                  title="Lower difficulty"
+                +
+              </button>
+              {showAttachmentMenu && (
+                <div
+                  className="absolute left-0 bottom-full mb-2 w-48 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/95 shadow-lg overflow-hidden z-30"
+                  data-attachment-dropdown
                 >
-                  –
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDifficultyAdjustment("up")}
-                  disabled={sending}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-base leading-none text-[var(--foreground)] hover:bg-[var(--background)]/70 disabled:opacity-50 transition-colors"
-                  aria-label="Raise difficulty"
-                  title="Raise difficulty"
-                >
-                  +
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openAttachmentPicker();
+                      setShowAttachmentMenu(false);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors"
+                  >
+                    Upload image
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void createQrSession();
+                      setShowAttachmentMenu(false);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors border-t border-[var(--foreground)]/10"
+                  >
+                    Answer with phone
+                  </button>
+                </div>
+              )}
+            </div>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void sendMessage();
+                }
+              }}
+              onPaste={async (event) => {
+                const files = Array.from(event.clipboardData?.files || []).filter((file) =>
+                  file.type.startsWith("image/")
+                );
+                if (files.length) {
+                  event.preventDefault();
+                  await addImagesFromFiles(files);
+                }
+              }}
+              placeholder="Respond with your work, explain your reasoning, or ask for a different drill…"
+              rows={1}
+              className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden pl-2 pr-4"
+              style={{ minHeight: "1.5rem", lineHeight: "1.5rem" }}
+            />
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => handleDifficultyAdjustment("down")}
+                disabled={sending}
+                className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full border border-[var(--foreground)]/12 text-[var(--foreground)]"
+                style={{ boxShadow: "none" }}
+                aria-label="Lower difficulty"
+                title="Lower difficulty"
+              >
+                –
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDifficultyAdjustment("up")}
+                disabled={sending}
+                className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full border border-[var(--foreground)]/12 text-[var(--foreground)]"
+                style={{ boxShadow: "none" }}
+                aria-label="Raise difficulty"
+                title="Raise difficulty"
+              >
+                +
+              </button>
             </div>
             <button
               type="submit"
               disabled={sending || (!input.trim() && qrImages.length === 0)}
-              className="inline-flex h-10 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-semibold text-white shadow-lg transition-opacity hover:opacity-95 disabled:opacity-50"
+              className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full border border-[var(--foreground)]/12 text-[var(--foreground)]"
+              style={{ boxShadow: "none" }}
             >
-              {sending ? "Sending…" : "Send"}
+              {sending ? (
+                <GlowSpinner size={16} ariaLabel="Sending message" idSuffix="practice-send" />
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+              )}
             </button>
+            <input
+              ref={attachmentInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleAttachmentInputChange}
+            />
           </div>
         </form>
 
