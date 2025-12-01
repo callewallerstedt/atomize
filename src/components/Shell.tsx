@@ -4243,6 +4243,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [savedDataError, setSavedDataError] = useState<string | null>(null);
   const [copiedSavedDataSlug, setCopiedSavedDataSlug] = useState<string | null>(null);
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+  const [disclaimerModalOpen, setDisclaimerModalOpen] = useState(false);
   const [expandedSurgeTopics, setExpandedSurgeTopics] = useState<Set<string>>(new Set());
   const [expandedSurgeQuestionTypes, setExpandedSurgeQuestionTypes] = useState<Set<string>>(new Set());
   const [expandedSurgeQuestions, setExpandedSurgeQuestions] = useState<Set<string>>(new Set());
@@ -4307,6 +4308,20 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       setSavedDataLoading(false);
     }
   };
+
+  // Check if user has seen the disclaimer on first visit
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const hasSeenDisclaimer = localStorage.getItem('synapse:disclaimer-seen');
+      if (!hasSeenDisclaimer) {
+        // Show disclaimer after a short delay to ensure page is loaded
+        setTimeout(() => {
+          setDisclaimerModalOpen(true);
+        }, 500);
+      }
+    } catch {}
+  }, []);
 
   // Allow other parts of the app (e.g. homepage) to open the pricing/settings modal
   useEffect(() => {
@@ -4619,7 +4634,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       {/* Main content */}
       <div className="flex min-h-screen w-full flex-col">
         {authChecked && isAuthenticated && (
-        <header className="sticky top-0 z-50" style={{ paddingTop: 0, backgroundColor: 'var(--background)', backdropFilter: 'blur(10px) saturate(180%)', WebkitBackdropFilter: 'blur(10px) saturate(180%)', isolation: 'isolate' }}>
+        <header className="sticky top-0 z-50" style={{ paddingTop: 'env(safe-area-inset-top, 0px)', backgroundColor: 'var(--background)', backdropFilter: 'blur(10px) saturate(180%)', WebkitBackdropFilter: 'blur(10px) saturate(180%)', isolation: 'isolate' }}>
           <nav className="relative flex h-14 items-center px-3 sm:px-4 gap-2">
             <div className="flex items-center gap-3 min-w-0 flex-shrink-0">
               <button
@@ -4754,7 +4769,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                     title="Leave Feedback"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-4l-4 4z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                     </svg>
                   </button>
                   {/* Promo Code Management Button - Only for cwallerstedt */}
@@ -4948,6 +4963,73 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           onSubscriptionLevelChange={(level) => setSubscriptionLevel(level)}
         />
       </div>
+      {/* Disclaimer Modal - shown on first visit */}
+      <Modal
+        open={disclaimerModalOpen}
+        onClose={() => {
+          setDisclaimerModalOpen(false);
+          try {
+            localStorage.setItem('synapse:disclaimer-seen', 'true');
+          } catch {}
+        }}
+      >
+        <div className="space-y-6 pb-2">
+          {/* Synapse Logo Header */}
+          <div className="text-center pb-2">
+            <h1 className="text-4xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider" style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}>
+              SYNAPSE
+            </h1>
+            <p className="text-sm font-medium text-[var(--foreground)]/70 mt-2">⚠️ In Active Development</p>
+          </div>
+
+          {/* Content */}
+          <div className="text-sm text-[var(--foreground)] leading-relaxed space-y-4">
+            <p>
+              <strong>Synapse is still being developed</strong> and contains untested features that may bug or not work as expected.
+            </p>
+            <p>
+              Some features might be incomplete, unstable, or behave unexpectedly. We're actively working to improve stability and add new capabilities.
+            </p>
+            
+            {/* Feedback Section with Icon */}
+            <div className="pt-4 border-t border-[var(--foreground)]/20">
+              <p className="mb-3">
+                <strong>Found a bug or have an idea?</strong> Please report it using the Feedback button in the top right corner.
+              </p>
+              <div className="flex items-center gap-3 p-3 rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/60">
+                <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full bg-[var(--foreground)]/10">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  </svg>
+                </div>
+                <p className="text-xs text-[var(--foreground)]/70">
+                  Look for this <strong className="text-[var(--foreground)]">Feedback</strong> icon in the top right corner of the header.
+                </p>
+              </div>
+              <p className="mt-3 text-xs text-[var(--foreground)]/60">
+                Your feedback helps us build a better product!
+              </p>
+            </div>
+          </div>
+
+          {/* Button */}
+          <div className="flex justify-end gap-2 pt-4">
+            <button
+              onClick={() => {
+                setDisclaimerModalOpen(false);
+                try {
+                  localStorage.setItem('synapse:disclaimer-seen', 'true');
+                } catch {}
+              }}
+              className="synapse-style px-6 py-2.5 rounded-full text-sm font-medium !text-white transition-opacity hover:opacity-90"
+            >
+              <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                Got it
+              </span>
+            </button>
+          </div>
+        </div>
+      </Modal>
       <Modal
         open={accountOpen}
         onClose={() => { if (!authLoading) { setAccountOpen(false); setAuthError(null); } }}
@@ -5879,18 +5961,33 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <div className="space-y-6">
           <div>
             <h3 className="text-sm font-medium text-[var(--foreground)] mb-3">Tools</h3>
-            <button
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent('synapse:tutorial-trigger'));
-                setDevToolsModalOpen(false);
-                if (pathname !== '/') {
-                  router.push('/');
-                }
-              }}
-              className="inline-flex items-center rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-white/30 hover:bg-white/5 transition-colors"
-            >
-              Tutorial
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('synapse:tutorial-trigger'));
+                  setDevToolsModalOpen(false);
+                  if (pathname !== '/') {
+                    router.push('/');
+                  }
+                }}
+                className="inline-flex items-center rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-white/30 hover:bg-white/5 transition-colors"
+              >
+                Tutorial
+              </button>
+              <button
+                onClick={() => {
+                  // Clear the disclaimer seen flag and open the modal
+                  try {
+                    localStorage.removeItem('synapse:disclaimer-seen');
+                  } catch {}
+                  setDevToolsModalOpen(false);
+                  setDisclaimerModalOpen(true);
+                }}
+                className="inline-flex items-center rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-white/30 hover:bg-white/5 transition-colors"
+              >
+                Show Disclaimer Modal
+              </button>
+            </div>
           </div>
 
           {subscriptionLevel === "Tester" && (

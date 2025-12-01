@@ -37,13 +37,13 @@ function Node({ name, childrenNodes, depth, hrefBase, path, onGenerate, generate
   const isGenerating = generatingNames.includes(topicKey);
   const [expanded, setExpanded] = useState(true);
   return (
-    <div className="relative">
+    <div className="relative group">
       <div className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 hover:bg-[#0F141D]">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
           {hasChildren && (
             <button
               onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
-              className="inline-flex h-5 w-5 items-center justify-center rounded-md border border-[#2B3140] text-[10px] text-[#9AA3B2]"
+              className="inline-flex h-5 w-5 items-center justify-center rounded-md border border-[#2B3140] text-[10px] text-[#9AA3B2] flex-shrink-0"
               aria-label={expanded ? "Collapse" : "Expand"}
               title={expanded ? "Collapse" : "Expand"}
             >
@@ -55,24 +55,25 @@ function Node({ name, childrenNodes, depth, hrefBase, path, onGenerate, generate
           ) : (
             <Link
               href={`${hrefBase}/${encodeURIComponent(name)}`}
-              className={`text-sm text-[#E5E7EB] hover:underline`}
+              className={`text-sm text-[#E5E7EB] hover:underline flex-1 min-w-0`}
               title="Open topic"
+              onClick={(e) => e.stopPropagation()}
             >
               {name}
             </Link>
           )}
         </div>
         {!isRoot && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             {onGenerate && !isGenerated && (
               <button
-                onClick={(e) => { e.stopPropagation(); onGenerate(name, path); }}
-                className="inline-flex h-6 w-6 items-center justify-center rounded-full text-white shadow synapse-style"
-                style={{ zIndex: 100, position: 'relative' }}
+                onClick={(e) => { e.stopPropagation(); e.preventDefault(); onGenerate(name, path); }}
+                className="inline-flex h-6 w-6 items-center justify-center rounded-full text-white shadow synapse-style opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                style={{ zIndex: 10, position: 'relative' }}
                 title="Generate AI for this topic"
                 aria-label="Generate AI"
               >
-                <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                <span style={{ color: '#ffffff', zIndex: 11, position: 'relative', opacity: 1, textShadow: 'none' }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 2v4M12 18v4M4 12H2M6 12H4M18 12h-2M20 12h-2M19.07 19.07l-1.41-1.41M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M4.93 19.07l1.41-1.41" />
                     <circle cx="12" cy="12" r="3" />

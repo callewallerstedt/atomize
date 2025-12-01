@@ -41,7 +41,7 @@ export default function Modal({
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60" />
-      <div className="relative z-10 flex min-h-full items-center justify-center p-4" onClick={(e) => e.stopPropagation()}>
+      <div className="relative z-10 flex min-h-full items-center justify-center p-4">
         <div
           className={`${contentClass} max-h-[calc(100vh-4rem)] my-auto`}
           onClick={(e) => e.stopPropagation()}

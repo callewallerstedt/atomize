@@ -1004,16 +1004,31 @@ export default function SubjectPage() {
                     }
                   } catch {}
                   return (
-                    <li key={`${name}-${i}`} className={`group relative flex items-center justify-between px-4 py-3 transition-colors cursor-pointer overflow-hidden ${roundedClass} ${isGen ? 'bg-transparent' : 'hover:bg-[var(--background)]/80'}`} onClick={() => {
-                      // Don't navigate if this topic is currently generating
-                      if (isGenerating) return;
-                      // Use Next.js router for clean navigation without interrupting async operations
-                      router.push(`/subjects/${slug}/node/${encodeURIComponent(name)}`);
-                    }}>
+                    <li 
+                      key={`${name}-${i}`} 
+                      className={`group relative flex items-center justify-between px-4 py-3 transition-colors cursor-pointer overflow-hidden ${roundedClass} ${isGen ? 'bg-transparent' : 'hover:bg-[var(--background)]/80'}`} 
+                      onClick={(e) => {
+                        // Don't navigate if clicking on buttons or if generating
+                        if ((e.target as HTMLElement).closest('button') || isGenerating) return;
+                        // Use Next.js router for clean navigation
+                        router.push(`/subjects/${slug}/node/${encodeURIComponent(name)}`);
+                      }}
+                      onTouchStart={(e) => {
+                        // Ensure touch events work on mobile/iPad
+                        if ((e.target as HTMLElement).closest('button') || isGenerating) return;
+                      }}
+                    >
                       {isGen && (
                         <div className={`pointer-events-none absolute inset-0 opacity-20 ${roundedClass}`} style={{ backgroundImage: 'linear-gradient(90deg, #00E5FF, #FF2D96)' }} />
                       )}
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-1 min-w-0" onClick={(e) => {
+                        // Allow clicking on the text area to navigate
+                        if (!(e.target as HTMLElement).closest('button')) {
+                          if (!isGenerating) {
+                            router.push(`/subjects/${slug}/node/${encodeURIComponent(name)}`);
+                          }
+                        }
+                      }}>
                         <span
                           className={`text-sm transition-colors ${
                             isGen
@@ -1034,7 +1049,7 @@ export default function SubjectPage() {
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                         {subscriptionLevel === "Tester" && (
                           <button
                             onClick={(e) => {
@@ -1126,10 +1141,17 @@ export default function SubjectPage() {
                                   setNodeGenerating((m) => ({ ...m, [name]: false }));
                                 }
                               }}
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-full synapse-style text-[11px] text-white shadow cursor-pointer opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:shadow-lg hover:scale-110  transition-all duration-300"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-full synapse-style text-[11px] text-white shadow cursor-pointer opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:shadow-lg hover:scale-110 transition-all duration-300"
                               aria-label="Generate AI"
                               title="Generate AI"
-                            />
+                            >
+                              <span style={{ color: '#ffffff', opacity: 1, textShadow: 'none' }}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M12 2v4M12 18v4M4 12H2M6 12H4M18 12h-2M20 12h-2M19.07 19.07l-1.41-1.41M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M4.93 19.07l1.41-1.41" />
+                                  <circle cx="12" cy="12" r="3" />
+                                </svg>
+                              </span>
+                            </button>
                           )}
                           {isGenerating && (
                           <span className="inline-flex items-center gap-2 rounded-full border border-[var(--foreground)]/20 bg-[var(--background)] px-2 py-0.5 text-[11px] text-[var(--foreground)]/70">

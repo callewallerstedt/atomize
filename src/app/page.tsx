@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import React, { Suspense, useEffect, useState, useRef, useCallback, useMemo, type ChangeEvent, type DragEvent } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import GlowSpinner from "@/components/GlowSpinner";
 import CourseCreateModal from "@/components/CourseCreateModal";
 import LoginPage from "@/components/LoginPage";
@@ -471,6 +471,7 @@ function HomepageFileUploadArea({
 
 function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn }: { tutorialSignal: number; setTutorialSignal: (updater: (prev: number) => number) => void; onQuickLearn?: (query: string) => void }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [welcomeText, setWelcomeText] = useState("");
   const [aiName, setAiName] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -666,21 +667,8 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       window.removeEventListener('synapse:tutorial-trigger', handleTutorialTrigger);
     };
   }, [setTutorialSignal]);
-  // Load saved homepage chat history on mount
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const stored = localStorage.getItem('synapse:home-chat');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.every((m) => typeof m?.role === 'string' && typeof m?.content === 'string')) {
-          setHomepageMessages(parsed);
-        }
-      }
-    } catch {}
-  }, []);
-
-  // Persist chat history (limit to last 200 messages)
+  // Persist chat history during session (limit to last 200 messages)
+  // Note: Chat is reset when navigating to homepage (see resetHomepageChat useEffect)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -713,6 +701,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
   const resetHomepageChat = useCallback(() => {
     tutorialPlaybackRef.current = false;
     setHomepageMessages([]);
+    setWelcomeText("");
     setShowThinking(false);
     thinkingRef.current = false;
     setHomepageSending(false);
@@ -722,10 +711,21 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     setChatAttachments([]);
     setShowAttachmentMenu(false);
     setIsAttachmentDragActive(false);
+    setInputValue("");
+    hasStreamed.current = false;
     if (typeof window !== 'undefined') {
       localStorage.removeItem('synapse:home-chat');
     }
   }, []);
+
+  // Reset chat when navigating to homepage
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (pathname === '/') {
+      // Reset chat when on homepage - clear messages and state
+      resetHomepageChat();
+    }
+  }, [pathname, resetHomepageChat]);
 
   // Handle scroll for pills container 1
   useEffect(() => {
