@@ -54,6 +54,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#0F1216",
+  viewportFit: "cover", // Allows content to extend into safe areas on iOS
 };
 
 export default function RootLayout({

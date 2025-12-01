@@ -26,6 +26,9 @@
 body {
   background: var(--background);
   color: var(--foreground);
+  /* Safe area padding for iOS/iPad to prevent content showing under status bar */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: constant(safe-area-inset-top); /* iOS 11.0-11.2 fallback */
 }
 
 /* Globally hide scrollbars while preserving scrollability */
