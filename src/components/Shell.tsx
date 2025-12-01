@@ -4244,6 +4244,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [copiedSavedDataSlug, setCopiedSavedDataSlug] = useState<string | null>(null);
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
   const [disclaimerModalOpen, setDisclaimerModalOpen] = useState(false);
+  const [headerVisible, setHeaderVisible] = useState(true);
+  const [lastScrollY, setLastScrollY] = useState(0);
   const [expandedSurgeTopics, setExpandedSurgeTopics] = useState<Set<string>>(new Set());
   const [expandedSurgeQuestionTypes, setExpandedSurgeQuestionTypes] = useState<Set<string>>(new Set());
   const [expandedSurgeQuestions, setExpandedSurgeQuestions] = useState<Set<string>>(new Set());
@@ -4440,6 +4442,30 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     window.addEventListener('resize', updateLayout);
     return () => window.removeEventListener('resize', updateLayout);
   }, [isIOSStandalone]);
+
+  // Header hide/show on scroll
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const scrollDifference = currentScrollY - lastScrollY;
+      
+      // Show header when scrolling up or at the top
+      if (currentScrollY < 10 || scrollDifference < 0) {
+        setHeaderVisible(true);
+      } 
+      // Hide header when scrolling down (only if scrolled past a threshold)
+      else if (scrollDifference > 5 && currentScrollY > 100) {
+        setHeaderVisible(false);
+      }
+      
+      setLastScrollY(currentScrollY);
+    };
+    
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [lastScrollY]);
 
   // Load surge log data when modal opens or refresh key changes
   useEffect(() => {
@@ -4644,7 +4670,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           />
         )}
         {authChecked && isAuthenticated && (
-        <header className="sticky top-0 z-50" style={{ paddingTop: 'env(safe-area-inset-top, 0px)', backgroundColor: 'var(--background)', backdropFilter: 'blur(10px) saturate(180%)', WebkitBackdropFilter: 'blur(10px) saturate(180%)', isolation: 'isolate' }}>
+        <header 
+          className="sticky top-0 z-50 transition-transform duration-300 ease-in-out" 
+          style={{ 
+            paddingTop: 'env(safe-area-inset-top, 0px)', 
+            backgroundColor: 'var(--background)', 
+            backdropFilter: 'blur(10px) saturate(180%)', 
+            WebkitBackdropFilter: 'blur(10px) saturate(180%)', 
+            isolation: 'isolate',
+            transform: headerVisible ? 'translateY(0)' : 'translateY(-100%)',
+          }}
+        >
           <nav className="relative flex h-14 items-center px-3 sm:px-4 gap-2">
             <div className="flex items-center gap-3 min-w-0 flex-shrink-0">
               <button
