@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Modal from "@/components/Modal";
+import { APP_VERSION } from "@/lib/version";
 
 type Theme = {
   background: string;
@@ -308,7 +309,7 @@ export default function SettingsModal({
 
       {/* Subscription Level */}
       {isAuthenticated && (
-        <div className="mb-6">
+        <div className="mb-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium text-[var(--foreground)]">Subscription</span>
             <span className={`text-sm font-semibold capitalize ${
@@ -403,6 +404,14 @@ export default function SettingsModal({
           )}
         </div>
       )}
+
+      {/* App version */}
+      <div className="mb-6">
+        <p className="text-xs text-[var(--foreground)]/50">
+          <span className="font-medium text-[var(--foreground)]/70">Version</span>{" "}
+          <span className="font-mono text-[var(--foreground)]/70">{APP_VERSION}</span>
+        </p>
+      </div>
 
       {/* Preferred Title */}
       {isAuthenticated && (

@@ -493,7 +493,8 @@ function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn }: { t
   const courseCreationInProgress = useRef(false);
   const isCreatingCourseRef = useRef(false);
 
-  const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
+  const [subscriptionLevel, setSubscriptionLevel] = useState<string | null>(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
 
   const hasPremiumAccess =
     subscriptionLevel === "Tester" ||
@@ -502,14 +503,22 @@ function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn }: { t
 
   useEffect(() => {
     // Fetch subscription level for gating premium features on the homepage
+    setSubscriptionLoading(true);
     fetch("/api/me", { credentials: "include" })
       .then((r) => r.json().catch(() => ({})))
       .then((data) => {
         if (data?.user?.subscriptionLevel) {
           setSubscriptionLevel(data.user.subscriptionLevel);
+        } else {
+          setSubscriptionLevel("Free");
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        setSubscriptionLevel("Free");
+      })
+      .finally(() => {
+        setSubscriptionLoading(false);
+      });
   }, []);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -2674,6 +2683,11 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     };
   }, [cleanupMediaStream, stopActiveRecording]);
 
+  // Don't render until subscription level is loaded to prevent flash
+  if (subscriptionLoading) {
+    return null;
+  }
+
   // If user does not have premium (Free or unknown), show a focused upgrade screen instead of interactive chat
   if (!hasPremiumAccess) {
     return (
@@ -3133,7 +3147,8 @@ function Home() {
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
   
-  const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
+  const [subscriptionLevel, setSubscriptionLevel] = useState<string | null>(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
   const hasPremiumAccess =
     subscriptionLevel === "Tester" ||
     subscriptionLevel === "Paid" ||
@@ -3141,6 +3156,7 @@ function Home() {
 
   // Check authentication, subscription and sync subjects from server
   useEffect(() => {
+    setSubscriptionLoading(true);
     fetch("/api/me", { credentials: "include" })
       .then((r) => r.json().catch(() => ({})))
       .then(async (data) => {
@@ -3149,6 +3165,8 @@ function Home() {
         setCheckingAuth(false);
         if (data?.user?.subscriptionLevel) {
           setSubscriptionLevel(data.user.subscriptionLevel);
+        } else {
+          setSubscriptionLevel("Free");
         }
         
         // If authenticated, load subjects from server
@@ -3228,6 +3246,10 @@ function Home() {
       .catch(() => {
         setIsAuthenticated(false);
         setCheckingAuth(false);
+        setSubscriptionLevel("Free");
+      })
+      .finally(() => {
+        setSubscriptionLoading(false);
       });
   }, []);
 
@@ -4134,15 +4156,17 @@ function Home() {
         }}
       />
       <div className="relative z-10">
-      <WelcomeMessage 
-        tutorialSignal={tutorialSignal}
-        setTutorialSignal={setTutorialSignal}
-        onQuickLearn={(query) => {
-          setQuickLearnQuery(query);
-          handleQuickLearn();
-        }}
-      />
-      <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
+        {subscriptionLoading ? null : (
+          <>
+            <WelcomeMessage 
+            tutorialSignal={tutorialSignal}
+            setTutorialSignal={setTutorialSignal}
+            onQuickLearn={(query) => {
+              setQuickLearnQuery(query);
+              handleQuickLearn();
+            }}
+          />
+          <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-semibold text-[var(--foreground)]">Your subjects</h1>
           {!hasPremiumAccess && (
@@ -4457,6 +4481,8 @@ function Home() {
         )}
         {subjects.length === 0 && null}
       </div>
+          </>
+        )}
 
       {/* Sniped exams section removed per user request */}
 

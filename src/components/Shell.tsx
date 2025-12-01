@@ -9,7 +9,6 @@ import { usePathname, useRouter } from "next/navigation";
 import SettingsModal from "@/components/SettingsModal";
 import Modal from "@/components/Modal";
 import GlowSpinner from "@/components/GlowSpinner";
-import { APP_VERSION } from "@/lib/version";
 import type { StoredSubjectData } from "@/utils/storage";
 
 // Generate stable dots that don't change on re-render
@@ -4692,10 +4691,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               >
                 <GlowSpinner size={24} ariaLabel="Synapse" idSuffix="header" />
                 <div style={{ transform: "scale(1.2)", transformOrigin: "left center" }}>
-                  <h1 className="text-lg font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider relative inline-block" style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}>
+                  <h1
+                    className="text-lg font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider relative inline-block"
+                    style={{ fontFamily: "var(--font-rajdhani), sans-serif" }}
+                  >
                     SYNAPSE
-                    <sup className="text-xs text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] absolute -top-0.5 left-full ml-1" style={{ fontFamily: 'var(--font-ibm-plex-mono), monospace' }}>(ALPHA)</sup>
-                    <span className="text-[7px] text-[var(--foreground)]/40 absolute bottom-1 left-20 whitespace-nowrap" style={{ fontFamily: 'var(--font-ibm-plex-mono), monospace' }}>{APP_VERSION}</span>
+                    <sup
+                      className="text-xs text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] absolute -top-0.5 left-full ml-1"
+                      style={{ fontFamily: "var(--font-ibm-plex-mono), monospace" }}
+                    >
+                      (ALPHA)
+                    </sup>
                   </h1>
                 </div>
               </button>
