@@ -424,8 +424,12 @@ export default function SubjectPage() {
             detectedLanguage: results.detectedLanguage || null,
           };
           
+          // Ensure we only spread plain object-like data to satisfy TypeScript
+          const existingNodeObject =
+            existingNode && typeof existingNode === "object" ? (existingNode as Record<string, any>) : {};
+
           updatedNodes[conceptName] = {
-            ...(existingNode || {}),
+            ...existingNodeObject,
             overview: (existingNode as any)?.overview || `Lessons generated from Exam Snipe for: ${conceptName}`,
             symbols: existingSymbols,
             lessonsMeta,
