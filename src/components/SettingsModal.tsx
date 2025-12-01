@@ -95,10 +95,36 @@ export default function SettingsModal({
   const [preferredTitle, setPreferredTitle] = useState<string>("");
   const [customTitle, setCustomTitle] = useState<string>("");
 
+  const isUpgradeView = upgradeModalOpen;
+
+  const handleClose = () => {
+    setUpgradeModalOpen(false);
+    setShowCodeInput(false);
+    setCode("");
+    setShowCancelConfirm(false);
+    onClose();
+  };
+
+  const modalTitle =
+    isUpgradeView
+      ? (subscriptionLevel === "Paid" ? "Cancel Subscription" : "Upgrade Subscription")
+      : "Settings";
+
   // Update subscription level when prop changes
   useEffect(() => {
     setSubscriptionLevel(subscriptionLevelProp);
   }, [subscriptionLevelProp]);
+
+  // Allow external triggers (e.g. homepage) to jump straight into the upgrade / subscription flow
+  useEffect(() => {
+    const handleOpenUpgradeModal = () => {
+      setUpgradeModalOpen(true);
+    };
+    document.addEventListener("synapse:open-upgrade-modal", handleOpenUpgradeModal as EventListener);
+    return () => {
+      document.removeEventListener("synapse:open-upgrade-modal", handleOpenUpgradeModal as EventListener);
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -189,14 +215,32 @@ export default function SettingsModal({
   return (
     <Modal
       open={open}
-      onClose={onClose}
-      title="Settings"
+      onClose={handleClose}
+      title={modalTitle}
+      headerRight={
+        isAuthenticated && onLogout ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onLogout();
+            }}
+            className="inline-flex h-7 items-center justify-center rounded-full bg-red-600 hover:bg-red-700 !text-white px-3 text-xs font-medium transition-colors"
+          >
+            Log out
+          </button>
+        ) : null
+      }
       footer={
-        <div className="flex justify-end">
-          <button onClick={onClose} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium !text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]">Close</button>
+        <div className="flex justify-end px-2 md:px-4">
+          <button onClick={handleClose} className="synapse-style inline-flex h-9 items-center rounded-full px-4 text-sm font-medium !text-white" style={{ zIndex: 100, position: 'relative' }}>
+            <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>Close</span>
+          </button>
         </div>
       }
     >
+      <div className="px-2 md:px-4">
+      {!isUpgradeView && (
+      <>
       {/* Logged in user info */}
       {isAuthenticated && username && (
         <div className="mb-6 pb-6 border-b border-[var(--foreground)]/20">
@@ -217,7 +261,7 @@ export default function SettingsModal({
               subscriptionLevel === "mylittlepwettybebe" ? "text-[var(--accent-pink)]" :
               "text-[var(--foreground)]/70"
             }`}>
-              {subscriptionLevel}
+              {subscriptionLevel === "Paid" ? "Premium" : subscriptionLevel}
             </span>
           </div>
           {subscriptionLevel === "Free" && (
@@ -228,7 +272,7 @@ export default function SettingsModal({
           {subscriptionLevel === "Paid" && (
             <div className="space-y-1 mb-2">
               <p className="text-xs text-[var(--foreground)]/60">
-                You have full access to all features
+                You have full access to all premium features
               </p>
               <p className="text-xs text-[var(--foreground)]/50">
                 Your subscription will remain active until the end of the billing period
@@ -250,39 +294,42 @@ export default function SettingsModal({
             </div>
           )}
           {(subscriptionLevel === "Tester" || subscriptionLevel === "mylittlepwettybebe") && (
-            <button
-              onClick={async (e) => {
-                e.stopPropagation();
-                const tierName = subscriptionLevel === "Tester" ? "Tester" : "mylittlepwettybebe";
-                if (!confirm(`Are you sure you want to remove your ${tierName} subscription? You will be downgraded to Free tier.`)) {
-                  return;
-                }
-                setProcessing(true);
-                try {
-                  const res = await fetch("/api/subscription/update", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ subscriptionLevel: "Free" }),
-                  });
-                  const json = await res.json();
-                  if (!res.ok || !json?.ok) {
-                    alert(json?.error || "Failed to update subscription");
+            <div className="mt-2 inline-flex pl-1">
+              <button
+                type="button"
+                className="relative z-10 inline-flex h-7 items-center justify-center rounded-full px-3 text-xs text-[var(--foreground)]/70 hover:text-red-500 hover:bg-red-500/10 border border-[var(--foreground)]/10 hover:border-red-500/30 disabled:opacity-60 transition-colors"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  const tierName = subscriptionLevel === "Tester" ? "Tester" : "mylittlepwettybebe";
+                  if (!confirm(`Are you sure you want to remove your ${tierName} subscription? You will be downgraded to Free tier.`)) {
                     return;
                   }
-                  setSubscriptionLevel("Free");
-                  onSubscriptionLevelChange?.("Free");
-                  alert("Successfully downgraded to Free tier");
-                } catch (err: any) {
-                  alert(err?.message || "Failed to update subscription");
-                } finally {
-                  setProcessing(false);
-                }
-              }}
-              disabled={processing}
-              className="inline-flex h-6 items-center justify-center rounded px-2 text-xs text-[var(--foreground)]/60 hover:text-red-500 hover:bg-red-500/10 border border-[var(--foreground)]/10 hover:border-red-500/30 disabled:opacity-60 transition-colors"
-            >
-              {processing ? "Processing..." : "Remove Subscription"}
-            </button>
+                  setProcessing(true);
+                  try {
+                    const res = await fetch("/api/subscription/update", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ subscriptionLevel: "Free" }),
+                    });
+                    const json = await res.json();
+                    if (!res.ok || !json?.ok) {
+                      alert(json?.error || "Failed to update subscription");
+                      return;
+                    }
+                    setSubscriptionLevel("Free");
+                    onSubscriptionLevelChange?.("Free");
+                    alert("Successfully downgraded to Free tier");
+                  } catch (err: any) {
+                    alert(err?.message || "Failed to update subscription");
+                  } finally {
+                    setProcessing(false);
+                  }
+                }}
+                disabled={processing}
+              >
+                {processing ? "Processing..." : "Remove Subscription"}
+              </button>
+            </div>
           )}
           {subscriptionLevel !== "Tester" && subscriptionLevel !== "mylittlepwettybebe" && (
             <button
@@ -290,9 +337,12 @@ export default function SettingsModal({
                 e.stopPropagation();
                 setUpgradeModalOpen(true);
               }}
-              className="w-full inline-flex h-8 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] hover:opacity-95 !text-white px-3 text-xs font-medium transition-opacity"
+              className="synapse-style w-full inline-flex h-8 items-center justify-center rounded-full  !text-white px-3 text-xs font-medium transition-opacity"
+              style={{ zIndex: 100, position: 'relative' }}
             >
-              {subscriptionLevel === "Paid" ? "Manage Subscription" : "Upgrade"}
+              <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                {subscriptionLevel === "Paid" ? "Manage Subscription" : "Upgrade"}
+              </span>
             </button>
           )}
         </div>
@@ -395,7 +445,7 @@ export default function SettingsModal({
       {/* Theme Selector */}
       <div className="mb-6">
         <span className="text-sm font-medium text-[var(--foreground)] mb-3 block">Theme</span>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {/* Dark Theme Preview */}
           <button
             onClick={(e) => {
@@ -486,48 +536,11 @@ export default function SettingsModal({
         </div>
       </div>
 
-      {/* Logout Button */}
-      {isAuthenticated && onLogout && (
-        <div className="mb-6 pt-6 border-t border-[var(--foreground)]/20">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onLogout();
-            }}
-            className="w-full inline-flex h-8 items-center justify-center rounded-full bg-red-600 hover:bg-red-700 !text-white px-3 text-xs font-medium transition-colors"
-          >
-            Log out
-          </button>
-        </div>
+      </>
       )}
 
-      {/* Upgrade Modal */}
-      {upgradeModalOpen && (
-        <Modal
-          open={upgradeModalOpen}
-          onClose={() => {
-            setUpgradeModalOpen(false);
-            setShowCodeInput(false);
-            setCode("");
-            setShowCancelConfirm(false);
-          }}
-          title={subscriptionLevel === "Paid" ? "Cancel Subscription" : "Upgrade Subscription"}
-          footer={
-            <div className="flex justify-end">
-              <button 
-                onClick={() => {
-                  setUpgradeModalOpen(false);
-                  setShowCodeInput(false);
-                  setCode("");
-                  setShowCancelConfirm(false);
-                }} 
-                className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium !text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
-              >
-                Close
-              </button>
-            </div>
-          }
-        >
+      {isUpgradeView && (
+          <>
           {subscriptionLevel === "Paid" ? (
             <div className="space-y-4">
               {!showCancelConfirm ? (
@@ -639,22 +652,16 @@ export default function SettingsModal({
                   </div>
                 </button>
 
-                <div className="relative">
-                  <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 z-10">
-                    <span className="text-xs font-semibold text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-3 py-1 rounded-full">
-                      Most Popular
-                    </span>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (processing) return;
-                      // TODO: Implement yearly subscription
-                      alert("Yearly subscription (1000 SEK/year) coming soon");
-                    }}
-                    disabled={processing}
-                    className="w-full p-4 rounded-xl border-2 border-[var(--accent-cyan)] bg-gradient-to-br from-[var(--accent-cyan)]/10 to-[var(--accent-pink)]/10 hover:border-[var(--accent-cyan)] hover:from-[var(--accent-cyan)]/20 hover:to-[var(--accent-pink)]/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (processing) return;
+                    // TODO: Implement yearly subscription
+                    alert("Yearly subscription (999 SEK/year) coming soon");
+                  }}
+                  disabled={processing}
+                  className="w-full p-4 rounded-xl border-2 border-[var(--accent-cyan)] bg-gradient-to-br from-[var(--accent-cyan)]/10 to-[var(--accent-pink)]/10 hover:border-[var(--accent-cyan)] hover:from-[var(--accent-cyan)]/20 hover:to-[var(--accent-pink)]/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed overflow-hidden"
+                >
                     <div className="flex items-center justify-between">
                       <div className="text-left">
                         <div className="flex items-center gap-2">
@@ -663,7 +670,7 @@ export default function SettingsModal({
                             Save 16%
                           </span>
                         </div>
-                        <div className="text-lg font-bold text-[var(--foreground)]">1000 SEK</div>
+                        <div className="text-lg font-bold text-[var(--foreground)]">999 SEK</div>
                         <div className="text-xs text-[var(--foreground)]/70">per year</div>
                       </div>
                       <svg className="h-5 w-5 text-[var(--accent-cyan)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -671,30 +678,29 @@ export default function SettingsModal({
                       </svg>
                     </div>
                   </button>
-                </div>
               </div>
 
-              <div className="pt-4 border-t border-[var(--foreground)]/20">
+              <div className="pt-4 mt-4 pb-4 border-t border-[var(--foreground)]/20">
                 {!showCodeInput ? (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       setShowCodeInput(true);
                     }}
-                    className="w-full text-center text-xs text-[var(--foreground)]/60 hover:text-[var(--accent-cyan)] underline !shadow-none !bg-transparent !border-none outline-none p-0 m-0 font-inherit"
+                    className="w-full text-center text-xs text-[var(--foreground)]/60 hover:text-[var(--accent-cyan)] underline !shadow-none !bg-transparent !border-none outline-none p-2 font-inherit transition-colors"
                   >
                     Got a code?
                   </button>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <input
                       value={code}
                       onChange={(e) => setCode(e.target.value)}
                       type="text"
                       placeholder="Enter your code"
-                      className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
+                      className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[rgba(255,255,255,0.3)] px-4 py-2.5 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:border-[var(--accent-cyan)] focus:outline-none transition-colors"
                     />
-                    <div className="flex gap-2">
+                    <div className="flex gap-2.5">
                       <button
                         onClick={async (e) => {
                           e.stopPropagation();
@@ -725,6 +731,9 @@ export default function SettingsModal({
                               setSubscriptionLevel(updatedLevel);
                               onSubscriptionLevelChange?.(updatedLevel);
                             }
+                            // Close modal and redirect to homepage with refresh
+                            onClose();
+                            window.location.href = '/';
                           } catch (err: any) {
                             alert(err?.message || "Failed to redeem code");
                           } finally {
@@ -732,9 +741,12 @@ export default function SettingsModal({
                           }
                         }}
                         disabled={!code.trim() || processing}
-                        className="flex-1 inline-flex h-8 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] hover:opacity-95 disabled:opacity-60 !text-white px-3 text-xs font-medium transition-opacity"
+                        className="synapse-style flex-1 inline-flex h-9 items-center justify-center rounded-full  disabled:opacity-60 !text-white px-4 text-xs font-medium transition-opacity"
+                        style={{ zIndex: 100, position: 'relative' }}
                       >
-                        {processing ? "Processing..." : "Redeem"}
+                        <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                          {processing ? "Processing..." : "Redeem"}
+                        </span>
                       </button>
                       <button
                         onClick={(e) => {
@@ -742,7 +754,7 @@ export default function SettingsModal({
                           setShowCodeInput(false);
                           setCode("");
                         }}
-                        className="inline-flex h-8 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-3 text-xs font-medium text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
+                        className="inline-flex h-9 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-4 text-xs font-medium text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
                       >
                         Cancel
                       </button>
@@ -752,8 +764,9 @@ export default function SettingsModal({
               </div>
             </div>
           )}
-        </Modal>
+          </>
       )}
+      </div>
     </Modal>
   );
 }

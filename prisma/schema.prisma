@@ -35,6 +35,7 @@ model User {
   examSnipes           ExamSnipeHistory[]
   promoCodeRedemptions PromoCodeRedemption[]
   usageStats           UsageStats?
+  feedback             Feedback[]
 }
 
 model Session {
@@ -75,7 +76,8 @@ model PromoCode {
   code              String                @unique
   description       String?
   subscriptionLevel SubscriptionLevel
-  expiresAt         DateTime?
+  expiresAt         DateTime?             // When the code itself expires (can't be redeemed after this)
+  validityDays      Int?                  // How many days each user gets from when they redeem (null = unlimited)
   maxUses           Int?
   currentUses       Int                   @default(0)
   createdAt         DateTime              @default(now())
@@ -118,4 +120,17 @@ model ExamSnipeHistory {
   @@unique([userId, slug])
   @@index([userId, createdAt])
   @@index([userId, subjectSlug])
+}
+
+model Feedback {
+  id        String   @id @default(cuid())
+  userId    String
+  message   String
+  page      String   // The page/route where feedback was submitted
+  done      Boolean  @default(false) // Mark if feedback has been addressed
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
 }

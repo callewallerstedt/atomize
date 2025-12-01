@@ -494,6 +494,12 @@ html.light-mode div[data-chat-pill].chat-input-container,
   opacity: 0.9;
 }
 
+/* Light mode input field for redeem code - lighter than theme */
+.light-mode input[placeholder="Enter your code"] {
+  background-color: rgba(255, 255, 255, 1) !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
+}
+
 .light-mode .lesson-content h1 {
   color: var(--foreground);
   opacity: 1;
@@ -634,6 +640,337 @@ html.light-mode div[data-chat-pill].chat-input-container,
   }
   50% {
     background-position: 100% 50%;
+  }
+}
+
+/* Synapse style - reusable liquid animated fill for buttons */
+.synapse-style {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  z-index: 1;
+  background: transparent !important;
+}
+
+.light-mode .synapse-style {
+  background: transparent !important;
+}
+
+/* Ensure text is always visible - override any opacity on the button */
+.synapse-style,
+.synapse-style button,
+.synapse-style span,
+.synapse-style div {
+  color: #ffffff !important;
+}
+
+.synapse-style * {
+  opacity: 1 !important;
+  color: #ffffff !important;
+}
+
+.synapse-style:hover,
+.synapse-style:hover *,
+.synapse-style.hover\:opacity-95,
+.synapse-style.hover\:opacity-95 * {
+  opacity: 1 !important;
+  color: #ffffff !important;
+}
+
+/* Override Tailwind hover:opacity-95 for text content */
+.synapse-style:hover > *,
+.synapse-style:hover *,
+.synapse-style[class*="hover:opacity"] > *,
+.synapse-style[class*="hover:opacity"] * {
+  opacity: 1 !important;
+  color: #ffffff !important;
+}
+
+/* Force text to be visible even when button has opacity */
+.synapse-style[style*="opacity"] > *,
+.synapse-style[style*="opacity"] * {
+  opacity: 1 !important;
+  color: #ffffff !important;
+}
+
+.synapse-style::before,
+.synapse-style::after {
+  content: '';
+  position: absolute;
+  width: 250%;
+  height: 250%;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 1;
+  pointer-events: none;
+  z-index: 0;
+  top: 0;
+  left: 0;
+}
+
+.synapse-style::before {
+  background: radial-gradient(circle, rgba(0, 229, 255, 1) 0%, rgba(0, 229, 255, 0.9) 30%, rgba(0, 229, 255, 0.3) 50%, transparent 65%);
+  top: -75%;
+  left: -75%;
+  animation: blob-float-1 28s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.synapse-style::after {
+  background: radial-gradient(circle, rgba(255, 45, 150, 1) 0%, rgba(255, 45, 150, 0.9) 30%, rgba(255, 45, 150, 0.3) 50%, transparent 65%);
+  bottom: -75%;
+  right: -75%;
+  animation: blob-float-2 34s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.synapse-style,
+.synapse-style *,
+.synapse-style span,
+.synapse-style button,
+.synapse-style div {
+  color: #ffffff !important;
+  opacity: 1 !important;
+  position: relative;
+  z-index: 100 !important;
+}
+
+.synapse-style > *,
+.synapse-style > span,
+.synapse-style > button,
+.synapse-style > div {
+  position: relative;
+  z-index: 100 !important;
+  opacity: 1 !important;
+  color: #ffffff !important;
+  text-shadow: none !important;
+  font-weight: 600;
+}
+
+/* Override any opacity from parent button */
+.synapse-style.hover\:opacity-95,
+.synapse-style.hover\:opacity-95 *,
+.synapse-style.hover\:opacity-95 > * {
+  opacity: 1 !important;
+  color: #ffffff !important;
+}
+
+.light-mode .synapse-style,
+.light-mode .synapse-style *,
+.light-mode .synapse-style span,
+.light-mode .synapse-style button,
+.light-mode .synapse-style div {
+  color: #ffffff !important;
+  opacity: 1 !important;
+  position: relative;
+  z-index: 100 !important;
+}
+
+.light-mode .synapse-style > *,
+.light-mode .synapse-style > span,
+.light-mode .synapse-style > button,
+.light-mode .synapse-style > div {
+  opacity: 1 !important;
+  color: #ffffff !important;
+  text-shadow: none !important;
+}
+
+/* Liquid premium button style with animated blobs */
+.upgrade-liquid-btn {
+  border-radius: 9999px;
+  background: transparent !important;
+  color: #ffffff !important;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  z-index: 1;
+}
+
+/* Force button text to be white - highest priority */
+button.upgrade-liquid-btn {
+  color: #ffffff !important;
+}
+
+.light-mode button.upgrade-liquid-btn {
+  color: #ffffff !important;
+}
+
+/* Ensure text is always visible - override any opacity on the button */
+.upgrade-liquid-btn,
+.upgrade-liquid-btn button,
+.upgrade-liquid-btn span,
+.upgrade-liquid-btn div {
+  color: #ffffff !important;
+}
+
+.upgrade-liquid-btn * {
+  opacity: 1 !important;
+  color: #ffffff !important;
+}
+
+.upgrade-liquid-btn:hover,
+.upgrade-liquid-btn:hover *,
+.upgrade-liquid-btn.hover\:opacity-95,
+.upgrade-liquid-btn.hover\:opacity-95 * {
+  opacity: 1 !important;
+  color: #ffffff !important;
+}
+
+/* Override Tailwind hover:opacity-95 for text content */
+.upgrade-liquid-btn:hover > *,
+.upgrade-liquid-btn:hover *,
+.upgrade-liquid-btn[class*="hover:opacity"] > *,
+.upgrade-liquid-btn[class*="hover:opacity"] * {
+  opacity: 1 !important;
+  color: #ffffff !important;
+}
+
+/* Force text to be visible even when button has opacity */
+.upgrade-liquid-btn[style*="opacity"] > *,
+.upgrade-liquid-btn[style*="opacity"] * {
+  opacity: 1 !important;
+  color: #ffffff !important;
+}
+
+.upgrade-liquid-btn,
+.upgrade-liquid-btn *,
+.upgrade-liquid-btn span,
+.upgrade-liquid-btn button,
+.upgrade-liquid-btn div {
+  color: #ffffff !important;
+  opacity: 1 !important;
+  position: relative;
+  z-index: 100 !important;
+}
+
+.upgrade-liquid-btn > *,
+.upgrade-liquid-btn > span,
+.upgrade-liquid-btn > button,
+.upgrade-liquid-btn > div {
+  position: relative;
+  z-index: 100 !important;
+  opacity: 1 !important;
+  color: #ffffff !important;
+  text-shadow: none !important;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+}
+
+/* Override any opacity from parent button */
+.upgrade-liquid-btn.hover\:opacity-95,
+.upgrade-liquid-btn.hover\:opacity-95 *,
+.upgrade-liquid-btn.hover\:opacity-95 > * {
+  opacity: 1 !important;
+  color: #ffffff !important;
+}
+
+.light-mode .upgrade-liquid-btn {
+  background: transparent !important;
+  color: #ffffff !important;
+}
+
+.light-mode .upgrade-liquid-btn,
+.light-mode .upgrade-liquid-btn *,
+.light-mode .upgrade-liquid-btn span,
+.light-mode .upgrade-liquid-btn button,
+.light-mode .upgrade-liquid-btn div {
+  color: #ffffff !important;
+  opacity: 1 !important;
+  position: relative;
+  z-index: 100 !important;
+}
+
+.light-mode .upgrade-liquid-btn > *,
+.light-mode .upgrade-liquid-btn > span,
+.light-mode .upgrade-liquid-btn > button,
+.light-mode .upgrade-liquid-btn > div {
+  opacity: 1 !important;
+  color: #ffffff !important;
+  text-shadow: none !important;
+}
+
+.upgrade-liquid-btn::before,
+.upgrade-liquid-btn::after {
+  content: '';
+  position: absolute;
+  width: 250%;
+  height: 250%;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 1;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.upgrade-liquid-btn::before {
+  background: radial-gradient(circle, rgba(0, 229, 255, 1) 0%, rgba(0, 229, 255, 0.9) 30%, rgba(0, 229, 255, 0.3) 50%, transparent 65%);
+  top: -75%;
+  left: -75%;
+  animation: blob-float-1 28s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.upgrade-liquid-btn::after {
+  background: radial-gradient(circle, rgba(255, 45, 150, 1) 0%, rgba(255, 45, 150, 0.9) 30%, rgba(255, 45, 150, 0.3) 50%, transparent 65%);
+  bottom: -75%;
+  right: -75%;
+  animation: blob-float-2 34s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes blob-float-1 {
+  0% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+  12% {
+    transform: translate(55px, -42px) scale(1.35) rotate(67deg);
+  }
+  24% {
+    transform: translate(-38px, 62px) scale(0.75) rotate(-45deg);
+  }
+  37% {
+    transform: translate(72px, 18px) scale(1.25) rotate(89deg);
+  }
+  51% {
+    transform: translate(-25px, -58px) scale(0.85) rotate(-72deg);
+  }
+  64% {
+    transform: translate(48px, 35px) scale(1.15) rotate(34deg);
+  }
+  78% {
+    transform: translate(-62px, -28px) scale(0.95) rotate(-56deg);
+  }
+  91% {
+    transform: translate(33px, 52px) scale(1.1) rotate(23deg);
+  }
+  100% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes blob-float-2 {
+  0% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+  15% {
+    transform: translate(-68px, -52px) scale(1.48) rotate(-78deg);
+  }
+  28% {
+    transform: translate(42px, -31px) scale(0.68) rotate(105deg);
+  }
+  41% {
+    transform: translate(-55px, 48px) scale(1.22) rotate(-42deg);
+  }
+  54% {
+    transform: translate(38px, -19px) scale(0.88) rotate(67deg);
+  }
+  67% {
+    transform: translate(-72px, 35px) scale(1.32) rotate(-91deg);
+  }
+  79% {
+    transform: translate(29px, -45px) scale(0.79) rotate(38deg);
+  }
+  92% {
+    transform: translate(-48px, 28px) scale(1.18) rotate(-54deg);
+  }
+  100% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
   }
 }
 
@@ -940,4 +1277,90 @@ button[class*="px-3"][class*="py-1"][class*="rounded-full"]:not([class*="bg-grad
 .light-mode .date-button:hover {
   background-color: rgba(255, 255, 255, 0.7) !important;
   border-color: rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Force white text on synapse-style and upgrade-liquid-btn buttons - must be at end to override light mode button color */
+button.synapse-style,
+button.synapse-style *,
+button.synapse-style::before,
+button.synapse-style::after,
+button.synapse-style span,
+button.synapse-style div,
+button.synapse-style button {
+  color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+button.upgrade-liquid-btn,
+button.upgrade-liquid-btn *,
+button.upgrade-liquid-btn::before,
+button.upgrade-liquid-btn::after,
+button.upgrade-liquid-btn span,
+button.upgrade-liquid-btn div,
+button.upgrade-liquid-btn button {
+  color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+/* Override light mode button color specifically for these buttons - highest priority */
+.light-mode button.synapse-style,
+.light-mode button.synapse-style *,
+.light-mode button.synapse-style::before,
+.light-mode button.synapse-style::after,
+.light-mode button.synapse-style span,
+.light-mode button.synapse-style div,
+.light-mode button.synapse-style button {
+  color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+.light-mode button.upgrade-liquid-btn,
+.light-mode button.upgrade-liquid-btn *,
+.light-mode button.upgrade-liquid-btn::before,
+.light-mode button.upgrade-liquid-btn::after,
+.light-mode button.upgrade-liquid-btn span,
+.light-mode button.upgrade-liquid-btn div,
+.light-mode button.upgrade-liquid-btn button {
+  color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+/* Ensure button text content itself is white - targets direct text nodes */
+button.upgrade-liquid-btn {
+  color: #ffffff !important;
+  text-shadow: none !important;
+}
+
+button.upgrade-liquid-btn span {
+  color: #ffffff !important;
+  opacity: 1 !important;
+  z-index: 101 !important;
+  position: relative !important;
+  text-shadow: none !important;
+}
+
+.light-mode button.upgrade-liquid-btn {
+  color: #ffffff !important;
+  text-shadow: none !important;
+}
+
+.light-mode button.upgrade-liquid-btn span {
+  color: #ffffff !important;
+  opacity: 1 !important;
+  z-index: 101 !important;
+  position: relative !important;
+  text-shadow: none !important;
+}
+
+/* Final override - ensure ALL text inside upgrade button is visible */
+button.upgrade-liquid-btn * {
+  color: #ffffff !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+
+.light-mode button.upgrade-liquid-btn * {
+  color: #ffffff !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
 }

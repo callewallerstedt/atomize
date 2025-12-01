@@ -56,7 +56,22 @@ export async function DELETE(req: Request) {
     const slug = searchParams.get("slug");
     if (!slug) return NextResponse.json({ ok: false, error: "Missing slug" }, { status: 400 });
     
-    // Delete subject and its data (cascade will handle subjectData)
+    // Delete all related data first (in correct order to avoid foreign key issues)
+    
+    // 1. Delete ExamSnipeHistory records linked to this course
+    await prisma.examSnipeHistory.deleteMany({
+      where: { 
+        userId: user.id, 
+        subjectSlug: slug 
+      },
+    });
+    
+    // 2. Delete subject data (lessons, topics, generated content, etc.)
+    await prisma.subjectData.deleteMany({
+      where: { userId: user.id, slug },
+    });
+    
+    // 3. Finally delete the subject itself
     const deleted = await prisma.subject.deleteMany({
       where: { userId: user.id, slug },
     });
@@ -64,11 +79,6 @@ export async function DELETE(req: Request) {
     if (deleted.count === 0) {
       return NextResponse.json({ ok: false, error: "Subject not found" }, { status: 404 });
     }
-    
-    // Also delete subject data
-    await prisma.subjectData.deleteMany({
-      where: { userId: user.id, slug },
-    });
     
     return NextResponse.json({ ok: true });
   } catch (e: any) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState, useRef, useEffect, Fragment } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { saveSubjectDataAsync, loadSubjectData, StoredSubjectData } from "@/utils/storage";
 import GlowSpinner from "@/components/GlowSpinner";
 import Link from "next/link";
@@ -304,6 +304,7 @@ function normalizeHistoryRecord(record: any): ExamSnipeRecord {
 
 function CourseExamSnipeInner() {
   const params = useParams<{ slug: string }>();
+  const searchParams = useSearchParams();
   const slug = params?.slug ?? "";
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -523,18 +524,36 @@ function CourseExamSnipeInner() {
         setLoading(true);
         setError(null);
         
-        // Fetch exam snipe for this course using subjectSlug filter
-        const res = await fetch(`/api/exam-snipe/history?subjectSlug=${encodeURIComponent(slug)}`, {
-          credentials: "include",
-        });
-        const json = await res.json().catch(() => ({}));
+        // Check if a specific exam snipe slug was requested via query parameter
+        const examSnipeSlug = searchParams?.get('examSnipeSlug');
         
-        if (res.ok && Array.isArray(json?.history) && json.history.length > 0) {
-          // Get the most recent exam snipe for this course
-          const record = normalizeHistoryRecord(json.history[0]);
-          setExamSnipe(record);
+        if (examSnipeSlug) {
+          // Fetch the specific exam snipe by slug
+          const res = await fetch(`/api/exam-snipe/history?slug=${encodeURIComponent(examSnipeSlug)}`, {
+            credentials: "include",
+          });
+          const json = await res.json().catch(() => ({}));
+          
+          if (res.ok && json?.record) {
+            const record = normalizeHistoryRecord(json.record);
+            setExamSnipe(record);
+          } else {
+            setError("The requested exam snipe analysis was not found.");
+          }
         } else {
-          setError("No exam snipe analysis found for this course. You can create one by going to the Exam Snipe page.");
+          // Fetch exam snipe for this course using subjectSlug filter
+          const res = await fetch(`/api/exam-snipe/history?subjectSlug=${encodeURIComponent(slug)}`, {
+            credentials: "include",
+          });
+          const json = await res.json().catch(() => ({}));
+          
+          if (res.ok && Array.isArray(json?.history) && json.history.length > 0) {
+            // Get the most recent exam snipe for this course
+            const record = normalizeHistoryRecord(json.history[0]);
+            setExamSnipe(record);
+          } else {
+            setError("No exam snipe analysis found for this course. You can create one by going to the Exam Snipe page.");
+          }
         }
       } catch (err: any) {
         console.error("Failed to load exam snipe:", err);
@@ -543,7 +562,7 @@ function CourseExamSnipeInner() {
         setLoading(false);
       }
     })();
-  }, [slug]);
+  }, [slug, searchParams]);
 
   useEffect(() => {
     setLessonGenerating({});
@@ -577,7 +596,7 @@ function CourseExamSnipeInner() {
             <div className="flex gap-4 justify-center">
               <Link
                 href="/exam-snipe"
-                className="rounded-lg bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 py-3 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+                className="rounded-lg synapse-style px-6 py-3 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
               >
                 Create Exam Analysis
               </Link>
@@ -1021,7 +1040,7 @@ function CourseExamSnipeInner() {
                                         event.stopPropagation();
                                         void triggerLessonGeneration();
                                       }}
-                                      className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-[11px] text-white shadow cursor-pointer opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:shadow-lg hover:bg-gradient-to-r hover:from-[#00E5FF]/80 hover:to-[#FF2D96]/80 transition-all duration-300 focus-visible:opacity-100 focus-visible:scale-100"
+                                      className="inline-flex h-6 w-6 items-center justify-center rounded-full synapse-style text-[11px] text-white shadow cursor-pointer opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:shadow-lg  transition-all duration-300 focus-visible:opacity-100 focus-visible:scale-100"
                                       aria-label="Generate AI"
                                       title="Generate AI"
                                     />
@@ -1184,7 +1203,7 @@ function CourseExamSnipeInner() {
                             setGeneratingPlan(false);
                           }
                         }}
-                        className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
+                        className="inline-flex h-10 items-center rounded-full synapse-style px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
                       >
                         {generatingPlan ? 'Generating…' : 'Generate Lesson Plan'}
                       </button>

@@ -304,7 +304,7 @@ export default function ReadAssistPage() {
             onClick={() => fileInputRef.current?.click()}
           >
             <div className="mx-auto max-w-md space-y-4">
-              <div className="mx-auto h-16 w-16 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] flex items-center justify-center">
+              <div className="mx-auto h-16 w-16 rounded-full synapse-style flex items-center justify-center">
                 <svg className="h-8 w-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                 </svg>
@@ -351,7 +351,7 @@ export default function ReadAssistPage() {
 
         {loading && (
           <div className="flex flex-col items-center justify-center py-20 space-y-4">
-            <div className="h-16 w-16 animate-pulse rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
+            <div className="h-16 w-16 animate-pulse rounded-full synapse-style" />
             <div className="text-sm text-[#A7AFBE]">Loading PDF...</div>
           </div>
         )}
@@ -412,7 +412,7 @@ export default function ReadAssistPage() {
                   {!simplifiedResult && (
                     <button
                       onClick={handleSimplify}
-                      className="w-full rounded-lg bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-2 text-sm font-medium text-white hover:opacity-95"
+                      className="w-full rounded-lg synapse-style px-4 py-2 text-sm font-medium text-white hover:opacity-95"
                     >
                       Simplify
                     </button>

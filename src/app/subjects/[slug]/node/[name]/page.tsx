@@ -911,7 +911,7 @@ function toggleStar(flashcardId: string) {
               </div>
             )}
             <button
-              className="relative inline-flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white font-semibold text-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity shadow-[0_4px_12px_rgba(0,0,0,0.5)]"
+              className="relative inline-flex h-24 w-24 items-center justify-center rounded-full synapse-style text-white font-semibold text-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity shadow-[0_4px_12px_rgba(0,0,0,0.5)]"
               onClick={async () => {
                 try {
                   setLessonLoading(true);
@@ -2212,7 +2212,7 @@ function toggleStar(flashcardId: string) {
                           }
                         }}
                         disabled={lessonLoading}
-                        className="inline-flex h-12 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-8 text-base font-medium text-white hover:opacity-95 disabled:opacity-60 transition-opacity"
+                        className="inline-flex h-12 items-center rounded-full synapse-style px-8 text-base font-medium text-white hover:opacity-95 disabled:opacity-60 transition-opacity"
                       >
                         {shorteningLesson ? "Shortening..." : lessonLoading ? "Generating..." : "Generate Lesson"}
                       </button>
@@ -2644,7 +2644,7 @@ function toggleStar(flashcardId: string) {
                                 } catch {}
                               }}
                               disabled={Object.keys(mcAnswers).length !== mcQuestions.length}
-                              className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60 transition-opacity"
+                              className="inline-flex h-10 items-center rounded-full synapse-style px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60 transition-opacity"
                             >
                               Submit Answers
                             </button>
@@ -2726,7 +2726,7 @@ function toggleStar(flashcardId: string) {
               </div>
             )}
             <button
-              className="relative inline-flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white font-semibold text-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity shadow-[0_4px_12px_rgba(0,0,0,0.5)]"
+              className="relative inline-flex h-24 w-24 items-center justify-center rounded-full synapse-style text-white font-semibold text-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity shadow-[0_4px_12px_rgba(0,0,0,0.5)]"
               onClick={async () => {
                 try {
                   setLessonLoading(true);

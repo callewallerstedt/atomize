@@ -885,7 +885,7 @@ export default function SubjectPage() {
                   +
                 </button>
                 <button
-                  className="inline-flex h-8 items-center rounded-full px-3 text-xs font-medium text-white hover:opacity-95 bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
+                  className="inline-flex h-8 items-center rounded-full px-3 text-xs font-medium text-white hover:opacity-95 synapse-style"
                   style={{ color: 'white' }}
                   onClick={async () => {
                     try {
@@ -1126,7 +1126,7 @@ export default function SubjectPage() {
                                   setNodeGenerating((m) => ({ ...m, [name]: false }));
                                 }
                               }}
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-[11px] text-white shadow cursor-pointer opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:shadow-lg hover:scale-110 hover:bg-gradient-to-r hover:from-[#00E5FF]/80 hover:to-[#FF2D96]/80 transition-all duration-300"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-full synapse-style text-[11px] text-white shadow cursor-pointer opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:shadow-lg hover:scale-110  transition-all duration-300"
                               aria-label="Generate AI"
                               title="Generate AI"
                             />
@@ -1220,11 +1220,11 @@ export default function SubjectPage() {
                         className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 cursor-pointer hover:border-[var(--foreground)]/30 transition-colors"
                         role="link"
                         tabIndex={0}
-                        onClick={() => router.push(`/subjects/${slug}/examsnipe`)}
+                        onClick={() => router.push(`/subjects/${slug}/examsnipe?examSnipeSlug=${encodeURIComponent(examSnipe.slug)}`)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
-                            router.push(`/subjects/${slug}/examsnipe`);
+                            router.push(`/subjects/${slug}/examsnipe?examSnipeSlug=${encodeURIComponent(examSnipe.slug)}`);
                           }
                         }}
                       >
@@ -1313,7 +1313,7 @@ export default function SubjectPage() {
                             <span>{pct}%</span>
                           </div>
                           <div className="h-2 w-full rounded-full bg-[#1A2230]">
-                            <div className="h-2 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" style={{ width: `${pct}%` }} />
+                            <div className="h-2 rounded-full synapse-style" style={{ width: `${pct}%` }} />
                           </div>
                         </div>
                       </div>
@@ -1334,11 +1334,11 @@ export default function SubjectPage() {
                         className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 cursor-pointer hover:border-[var(--foreground)]/30 transition-colors"
                         role="link"
                         tabIndex={0}
-                        onClick={() => router.push(`/subjects/${slug}/examsnipe`)}
+                        onClick={() => router.push(`/subjects/${slug}/examsnipe?examSnipeSlug=${encodeURIComponent(examSnipe.slug)}`)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
-                            router.push(`/subjects/${slug}/examsnipe`);
+                            router.push(`/subjects/${slug}/examsnipe?examSnipeSlug=${encodeURIComponent(examSnipe.slug)}`);
                           }
                         }}
                       >
@@ -1505,10 +1505,14 @@ export default function SubjectPage() {
                     setGeneratingBasics(false);
                   }
                 }}
-                className="inline-flex h-9 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 text-sm font-medium text-white"
+                className="inline-flex h-9 items-center rounded-full synapse-style px-4 text-sm font-medium text-white"
                 style={{ color: 'white' }}
                 disabled={generatingBasics}
-              >{generatingBasics ? 'Extracting…' : 'Extract Topics'}</button>
+              >
+                <span style={{ color: '#ffffff', opacity: 1, textShadow: 'none' }}>
+                  {generatingBasics ? 'Extracting…' : 'Extract Topics'}
+                </span>
+              </button>
             </div>
           }
         >
@@ -1570,7 +1574,7 @@ export default function SubjectPage() {
                     setCreatingTopic(false);
                   }
                 }}
-                className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
+                className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white synapse-style"
                 disabled={creatingTopic}
               >{creatingTopic ? 'Adding…' : 'Add topic'}</button>
             </div>

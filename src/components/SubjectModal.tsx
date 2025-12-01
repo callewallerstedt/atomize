@@ -79,7 +79,7 @@ export default function SubjectModal({
           <button
             form="subject-form"
             type="submit"
-            className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
+            className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white synapse-style"
           >
             {mode === "create" ? "Create" : "Save"}
           </button>

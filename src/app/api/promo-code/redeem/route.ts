@@ -121,6 +121,13 @@ export async function POST(req: Request) {
         data: { currentUses: { increment: 1 } },
       });
 
+      // Calculate subscription end date based on validityDays
+      // Each user gets validityDays from when they redeem (not from code creation)
+      let subscriptionEnd: Date | null = null;
+      if (promoCode.validityDays && promoCode.validityDays > 0) {
+        subscriptionEnd = new Date(Date.now() + promoCode.validityDays * 24 * 60 * 60 * 1000);
+      }
+
       // Update user subscription
       await tx.user.update({
         where: { id: user.id },
@@ -128,10 +135,7 @@ export async function POST(req: Request) {
           subscriptionLevel: promoCode.subscriptionLevel,
           promoCodeUsed: code,
           subscriptionStart: new Date(),
-          // Set subscription end based on level (Tester might be temporary)
-          subscriptionEnd: promoCode.subscriptionLevel === "Tester" 
-            ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days for tester
-            : null,
+          subscriptionEnd: subscriptionEnd, // Per-user expiration based on validityDays
         },
       });
     });

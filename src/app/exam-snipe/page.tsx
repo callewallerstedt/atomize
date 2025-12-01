@@ -1362,7 +1362,7 @@ function ExamSnipeInner() {
                 <button
                   onClick={handleExamSnipe}
                   disabled={examFiles.length === 0}
-                  className="relative inline-flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] !text-white font-semibold text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                  className="relative inline-flex h-16 w-16 items-center justify-center rounded-full synapse-style !text-white font-semibold text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                 >
                   Analyze
                 </button>
@@ -1507,7 +1507,7 @@ function ExamSnipeInner() {
                       <div className="text-xs font-semibold text-[var(--foreground)]/70 mb-2 text-center">AI Processing:</div>
                       <div className="relative rounded-lg overflow-hidden h-20 bg-gradient-to-b from-[var(--background)] via-[var(--background)]/80 to-[var(--background)]">
                         {/* Content */}
-                        <div className="relative p-4 h-full flex flex-col justify-end">
+                        <div className="relative p-4 h-full flex flex-col justify-end z-10">
                           <div className="text-sm font-mono whitespace-pre-wrap break-words leading-relaxed text-left">
                             {(() => {
                               const lines = streamingText.split('\n').filter(line => line.trim());
@@ -1515,14 +1515,31 @@ function ExamSnipeInner() {
 
                               return recentLines.map((line, i) => {
                                 const isCurrentLine = i === recentLines.length - 1;
-                                // Always render gradient text
-                                const gradientText = 'bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] bg-clip-text text-transparent';
 
                                 return (
-                                  <div key={i} className={gradientText}>
-                                    {line}
+                                  <div 
+                                    key={i} 
+                                    className="relative"
+                                  >
+                                    <span
+                                      className="bg-gradient-to-r from-[#00E5FF] via-[#FF2D96] to-[#00E5FF] bg-clip-text text-transparent"
+                                      style={{
+                                        backgroundSize: '200% 100%',
+                                        animation: 'gradient-shift 3s ease infinite',
+                                        WebkitBackgroundClip: 'text',
+                                        WebkitTextFillColor: 'transparent',
+                                      }}
+                                    >
+                                      {line}
+                                    </span>
                                     {isCurrentLine && (
-                                      <span className="inline-block w-1.5 h-3 bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] animate-pulse ml-1"></span>
+                                      <span 
+                                        className="inline-block w-1.5 h-3 animate-pulse ml-1 align-middle"
+                                        style={{
+                                          background: 'linear-gradient(135deg, #00E5FF, #FF2D96)',
+                                          borderRadius: '2px',
+                                        }}
+                                      />
                                     )}
                                   </div>
                                 );
@@ -1532,7 +1549,7 @@ function ExamSnipeInner() {
                         </div>
                         {/* Blur overlay - strong at top, fades at 2/3 */}
                         <div 
-                          className="absolute top-0 left-0 right-0 pointer-events-none"
+                          className="absolute top-0 left-0 right-0 pointer-events-none z-0 rounded-lg"
                           style={{
                             height: '70%',
                             backdropFilter: 'blur(16px)',
@@ -1940,7 +1957,7 @@ function ExamSnipeInner() {
                           event.stopPropagation();
                           void triggerLessonGeneration();
                         }}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-[11px] text-white shadow cursor-pointer opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:shadow-lg hover:bg-gradient-to-r hover:from-[#00E5FF]/80 hover:to-[#FF2D96]/80 transition-all duration-300 focus-visible:opacity-100 focus-visible:scale-100"
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-full synapse-style text-[11px] text-white shadow cursor-pointer opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:shadow-lg  transition-all duration-300 focus-visible:opacity-100 focus-visible:scale-100"
                         aria-label="Generate AI"
                         title="Generate AI"
                       />
@@ -2112,7 +2129,7 @@ function ExamSnipeInner() {
                           setGeneratingPlan(false);
                         }
                       }}
-                      className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
+                      className="inline-flex h-10 items-center rounded-full synapse-style px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60"
                     >
                       {generatingPlan ? 'Generating…' : 'Generate Lesson Plan'}
                     </button>

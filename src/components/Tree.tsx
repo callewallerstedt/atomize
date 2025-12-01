@@ -67,11 +67,17 @@ function Node({ name, childrenNodes, depth, hrefBase, path, onGenerate, generate
             {onGenerate && !isGenerated && (
               <button
                 onClick={(e) => { e.stopPropagation(); onGenerate(name, path); }}
-                className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] text-white shadow hover:opacity-95 bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-full text-white shadow synapse-style"
+                style={{ zIndex: 100, position: 'relative' }}
                 title="Generate AI for this topic"
                 aria-label="Generate AI"
               >
-                {isGenerating ? ' ' : ''}
+                <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2v4M12 18v4M4 12H2M6 12H4M18 12h-2M20 12h-2M19.07 19.07l-1.41-1.41M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M4.93 19.07l1.41-1.41" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </span>
               </button>
             )}
             {isGenerating && (
@@ -90,7 +96,7 @@ function Node({ name, childrenNodes, depth, hrefBase, path, onGenerate, generate
         <ul className="relative ml-6 mt-3 space-y-3 border-l border-[#2B3140] pl-6">
           {childrenNodes!.map((c, i) => (
             <li key={i} className="relative">
-              <span className="absolute -left-6 top-3 h-px w-6 bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
+              <span className="absolute -left-6 top-3 h-px w-6 synapse-style" />
               <Node name={c.name} childrenNodes={c.subtopics} depth={depth + 1} hrefBase={hrefBase} path={[...path, name]} onGenerate={onGenerate} generatedNames={generatedNames} generatingNames={generatingNames} />
             </li>
           ))}

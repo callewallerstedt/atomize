@@ -118,31 +118,88 @@ export async function POST(req: NextRequest) {
         ).join('');
 
         console.log(`Total combined text length: ${combinedText.length} characters`);
-        console.log('=== COMBINED TEXT BEING SENT TO AI ===');
-        console.log(combinedText.substring(0, 1000)); // First 1000 chars
-        console.log('=== END COMBINED TEXT ===');
+        console.log(`Number of exam files processed: ${examTexts.length}`);
+        examTexts.forEach((exam, i) => {
+          console.log(`  Exam ${i + 1} (${exam.name}): ${exam.text.length} characters`);
+        });
+        
+        // Estimate token count (rough approximation: ~4 characters per token)
+        const estimatedTokens = Math.ceil(combinedText.length / 4);
+        console.log(`Estimated input tokens: ~${estimatedTokens.toLocaleString()}`);
+        
+        // GPT-4o has 128k token context window, but we need to reserve space for:
+        // - System prompt (~2000 tokens)
+        // - Output tokens (max_tokens: 8000)
+        // - Safety margin
+        // So we can use roughly ~118k tokens for input
+        const MAX_INPUT_TOKENS = 118000;
+        const MAX_INPUT_CHARS = MAX_INPUT_TOKENS * 4; // Rough estimate
+        
+        let finalText = combinedText;
+        
+        if (combinedText.length > MAX_INPUT_CHARS) {
+          console.warn(`⚠️ WARNING: Combined text (${combinedText.length} chars, ~${estimatedTokens} tokens) exceeds safe limit (~${MAX_INPUT_CHARS} chars, ~${MAX_INPUT_TOKENS} tokens).`);
+          console.warn(`⚠️ OpenAI may truncate the input. Truncating to safe limit to ensure processing...`);
+          
+          // Truncate but keep all exam headers visible, prioritizing earlier exams
+          let truncatedText = '';
+          let remainingChars = MAX_INPUT_CHARS;
+          
+          for (let i = 0; i < examTexts.length; i++) {
+            const exam = examTexts[i];
+            const header = `=== EXAM ${i + 1}: ${exam.name} ===\n`;
+            const headerLength = header.length;
+            
+            if (remainingChars <= headerLength) {
+              console.warn(`⚠️ Could not fit exam ${i + 1} (${exam.name}) - stopping here`);
+              break;
+            }
+            
+            const availableForContent = remainingChars - headerLength - 2; // -2 for \n\n
+            const examContent = exam.text.slice(0, availableForContent);
+            
+            truncatedText += header + examContent + '\n\n';
+            remainingChars -= (headerLength + examContent.length + 2);
+            
+            if (exam.text.length > availableForContent) {
+              console.warn(`⚠️ Exam ${i + 1} (${exam.name}) was truncated: ${exam.text.length} -> ${examContent.length} chars`);
+            }
+          }
+          
+          console.log(`⚠️ Truncated text length: ${truncatedText.length} characters (~${Math.ceil(truncatedText.length / 4)} tokens)`);
+          console.log('=== TRUNCATED TEXT BEING SENT TO AI (first 1000 chars) ===');
+          console.log(truncatedText.substring(0, 1000));
+          console.log('=== END TRUNCATED TEXT ===');
+          
+          finalText = truncatedText;
+        } else {
+          console.log('✓ Combined text is within safe limits');
+          console.log('=== COMBINED TEXT BEING SENT TO AI (first 1000 chars) ===');
+          console.log(combinedText.substring(0, 1000));
+          console.log('=== END COMBINED TEXT ===');
+        }
 
         // Detect language from exam materials
         // Sample from multiple parts of the documents to avoid headers/first pages
         let detectedLanguage = { code: 'en', name: 'English' };
         try {
           // Sample from beginning (skip first 2000 chars to avoid headers), middle, and end
-          const textLength = combinedText.length;
+          const textLength = finalText.length;
           let languageSample = '';
           
           if (textLength > 2000) {
             // Skip first 2000 chars (likely headers/first pages), take next 2000
-            const startSample = combinedText.slice(2000, 4000);
+            const startSample = finalText.slice(2000, 4000);
             // Take middle section
             const midStart = Math.floor(textLength / 2);
-            const midSample = combinedText.slice(midStart, midStart + 2000);
+            const midSample = finalText.slice(midStart, midStart + 2000);
             // Take end section
-            const endSample = combinedText.slice(Math.max(0, textLength - 2000));
+            const endSample = finalText.slice(Math.max(0, textLength - 2000));
             
             languageSample = [startSample, midSample, endSample].filter(s => s.trim().length > 0).join('\n\n---\n\n');
           } else {
             // If text is short, just use it all
-            languageSample = combinedText;
+            languageSample = finalText;
           }
           
           // Limit to 6000 chars total for language detection
@@ -161,7 +218,7 @@ export async function POST(req: NextRequest) {
             response_format: { type: 'json_object' },
             messages: [
               { role: 'system', content: langPrompt },
-              { role: 'user', content: languageSample || combinedText.slice(0, 4000) },
+              { role: 'user', content: languageSample || finalText.slice(0, 4000) },
             ],
             temperature: 0,
             max_tokens: 50,
@@ -269,7 +326,7 @@ Ensure arrays contain meaningful content (no placeholders). Focus on efficiency:
             },
             {
               role: 'user',
-              content: `Analyze these ${numExams} exam PDF(s) and return the structured JSON study blueprint described above.\n\n${combinedText}`
+              content: `Analyze these ${numExams} exam PDF(s) and return the structured JSON study blueprint described above.\n\n${finalText}`
             }
           ],
           stream: true,

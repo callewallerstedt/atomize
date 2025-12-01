@@ -217,7 +217,8 @@ function FileUploadArea({
   onGenerate,
   buttonLabel,
   action,
-  status
+  status,
+  hasPremiumAccess = true
 }: {
   uploadId: string;
   message?: string;
@@ -227,6 +228,7 @@ function FileUploadArea({
   buttonLabel?: string;
   action?: string;
   status?: 'idle' | 'ready' | 'processing' | 'success';
+  hasPremiumAccess?: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -289,7 +291,7 @@ function FileUploadArea({
             </svg>
           </button>
           <div className="text-xs text-[var(--foreground)]/70 text-center flex-1">
-            {isDragging ? 'Drop files here' : (message || 'Upload files or drag and drop')}
+            {isDragging && hasPremiumAccess ? 'Drop files here' : (hasPremiumAccess ? (message || 'Upload files or drag and drop') : '')}
           </div>
         </div>
         {files.length > 0 && (
@@ -314,7 +316,7 @@ function FileUploadArea({
       {files.length > 0 && (
         <button
           onClick={onGenerate}
-          className="w-full inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
+          className="w-full inline-flex items-center justify-center rounded-full synapse-style px-4 py-1.5 text-sm font-medium !text-white  transition-opacity"
           style={{ color: 'white' }}
         >
           {buttonLabel || 'Create'}
@@ -406,7 +408,7 @@ function renderPracticeContent(
             >
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"></div>
+                  <div className="w-2 h-2 rounded-full synapse-style"></div>
                   <span className="text-xs font-semibold uppercase tracking-wide text-[#00E5FF] opacity-80">
                     Practice Question
                   </span>
@@ -1114,6 +1116,11 @@ export default function PracticePage() {
   const [examSnipeMatching, setExamSnipeMatching] = useState(false);
   const [examSnipeMatched, setExamSnipeMatched] = useState(false);
   const [availableExamSnipes, setAvailableExamSnipes] = useState<Array<{ slug: string; courseName: string; createdAt: string }>>([]);
+  const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
+  const hasPremiumAccess =
+    subscriptionLevel === "Tester" ||
+    subscriptionLevel === "Paid" ||
+    subscriptionLevel === "mylittlepwettybebe";
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const conversationRef = useRef<Array<Omit<ChatMessage, "hidden">>>([]);
   
@@ -1634,6 +1641,18 @@ const removeQrImage = (imageId: string) => {
   const openAttachmentPicker = () => {
     attachmentInputRef.current?.click();
   };
+
+  // Fetch subscription level
+  useEffect(() => {
+    fetch("/api/me", { credentials: "include" })
+      .then((r) => r.json().catch(() => ({})))
+      .then((data) => {
+        if (data?.user?.subscriptionLevel) {
+          setSubscriptionLevel(data.user.subscriptionLevel);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -3189,7 +3208,7 @@ Respond with ONLY the specific topic name, no explanation.`;
                                   <button
                                     key={uiIdx}
                                     onClick={() => handleButtonClick(ui.action, ui.params)}
-                                    className="inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
+                                    className="inline-flex items-center rounded-full synapse-style px-4 py-1.5 text-sm font-medium !text-white  transition-opacity"
                                     style={{ color: 'white' }}
                                   >
                                     {ui.label || 'Button'}
@@ -3199,6 +3218,7 @@ Respond with ONLY the specific topic name, no explanation.`;
                                 const files = uploadedFiles[ui.id] || [];
                                 const status = uploadStatus[ui.id] || 'idle';
                                 const buttonLabel = ui.params?.buttonLabel || 'Generate';
+                                if (!hasPremiumAccess) return null;
                                 return (
                                   <FileUploadArea
                                     key={uiIdx}
@@ -3208,6 +3228,7 @@ Respond with ONLY the specific topic name, no explanation.`;
                                     buttonLabel={buttonLabel}
                                     action={ui.action}
                                     status={status}
+                                    hasPremiumAccess={hasPremiumAccess}
                                     onFilesChange={(newFiles) => handleFileUpload(ui.id, newFiles)}
                                     onGenerate={() => handleButtonClick(ui.action, ui.params, ui.id)}
                                   />

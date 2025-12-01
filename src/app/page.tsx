@@ -363,7 +363,8 @@ function HomepageFileUploadArea({
   onGenerate,
   buttonLabel,
   action,
-  status
+  status,
+  hasPremiumAccess = true
 }: { 
   uploadId: string; 
   message?: string; 
@@ -373,6 +374,7 @@ function HomepageFileUploadArea({
   buttonLabel?: string;
   action?: string;
   status?: 'idle' | 'ready' | 'processing' | 'success';
+  hasPremiumAccess?: boolean;
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -425,7 +427,7 @@ function HomepageFileUploadArea({
         }}
       >
         <div className="text-xs text-[var(--foreground)]/70 text-center">
-          {isDragging ? 'Drop files here' : (message || 'Upload files or drag and drop')}
+          {isDragging && hasPremiumAccess ? 'Drop files here' : (hasPremiumAccess ? (message || 'Upload files or drag and drop') : '')}
         </div>
         {files.length > 0 && (
           <div className="mt-2 text-xs text-[var(--foreground)]/60">
@@ -450,10 +452,12 @@ function HomepageFileUploadArea({
         <button
           onClick={onGenerate}
           disabled={status === 'processing'}
-          className="w-full inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity disabled:opacity-50"
-          style={{ color: 'white' }}
+          className="synapse-style w-full inline-flex items-center justify-center rounded-full px-4 py-1.5 text-sm font-medium !text-white transition-opacity disabled:opacity-50"
+          style={{ color: 'white', zIndex: 100, position: 'relative' }}
         >
-          {status === 'processing' ? 'Processing...' : (buttonLabel || 'Create')}
+          <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+            {status === 'processing' ? 'Processing...' : (buttonLabel || 'Create')}
+          </span>
         </button>
       )}
       {status === 'processing' && (
@@ -487,6 +491,25 @@ function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn }: { t
   const thinkingRef = useRef(false);
   const courseCreationInProgress = useRef(false);
   const isCreatingCourseRef = useRef(false);
+
+  const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
+
+  const hasPremiumAccess =
+    subscriptionLevel === "Tester" ||
+    subscriptionLevel === "Paid" ||
+    subscriptionLevel === "mylittlepwettybebe";
+
+  useEffect(() => {
+    // Fetch subscription level for gating premium features on the homepage
+    fetch("/api/me", { credentials: "include" })
+      .then((r) => r.json().catch(() => ({})))
+      .then((data) => {
+        if (data?.user?.subscriptionLevel) {
+          setSubscriptionLevel(data.user.subscriptionLevel);
+        }
+      })
+      .catch(() => {});
+  }, []);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -2355,6 +2378,12 @@ Surge is for those who want to minimize friction and get results fast. I will pr
   const ChatInputArea = () => {
     const hasInputText = inputValue.trim().length > 0;
     const disabled = homepageSending || isTutorialActive;
+    
+    // Don't render chat input for free users
+    if (!hasPremiumAccess) {
+      return null;
+    }
+    
     return (
       <div className="space-y-2">
         {chatAttachments.length > 0 && (
@@ -2645,6 +2674,65 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     };
   }, [cleanupMediaStream, stopActiveRecording]);
 
+  // If user does not have premium (Free or unknown), show a focused upgrade screen instead of interactive chat
+  if (!hasPremiumAccess) {
+    return (
+      <div className="mx-auto mb-6 w-full max-w-3xl" style={{ overflowY: 'visible' }}>
+        <div className="mt-10 mb-8 flex flex-col items-center text-center gap-3">
+          <h1 className="text-2xl md:text-3xl font-semibold text-[var(--foreground)]/90">
+            Unlock the full Synapse experience
+          </h1>
+          <p className="max-w-xl text-xs md:text-sm text-[var(--foreground)]/65">
+            Turn your course materials into step‑by‑step lessons, practice questions and exam snipes tailored to your exact syllabus.
+          </p>
+        </div>
+
+        <div className="relative max-w-2xl mx-auto rounded-3xl border border-[var(--foreground)]/15 bg-[var(--background)]/80 py-5 px-5 md:px-6 overflow-hidden">
+          <div className="pointer-events-none absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_top,_rgba(0,229,255,0.12),_transparent_55%),radial-gradient(circle_at_bottom,_rgba(255,45,150,0.14),_transparent_55%)]" />
+          <div className="relative grid gap-4 md:grid-cols-2">
+            <div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--foreground)]/70">
+                What you get
+              </p>
+              <ul className="space-y-2 text-xs text-[var(--foreground)]/70">
+                <li className="flex items-start gap-2.5">
+                  <span className="mt-[4px] h-2 w-2 rounded-full flex-shrink-0 bg-gradient-to-br from-[var(--accent-cyan)] to-[var(--accent-pink)] shadow-[0_0_4px_rgba(0,229,255,0.4)]" />
+                  <span>Unlimited lesson generation that actually follows your course notes and exams.</span>
+                </li>
+                <li className="flex items-start gap-2.5">
+                  <span className="mt-[4px] h-2 w-2 rounded-full flex-shrink-0 bg-gradient-to-br from-[var(--accent-cyan)] to-[var(--accent-pink)] shadow-[0_0_4px_rgba(0,229,255,0.4)]" />
+                  <span>Unlimited Exam Snipes to find patterns in previous exams so you can focus on the most high value concepts.</span>
+                </li>
+              </ul>
+            </div>
+            <div className="space-y-3 flex flex-col justify-between">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--foreground)]/70">
+                  Start in under a minute
+                </p>
+                <p className="text-xs text-[var(--foreground)]/65">
+                  Upload a couple of PDFs from your course and let Synapse build your personal learning system around them.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (typeof document !== "undefined") {
+                    document.dispatchEvent(new CustomEvent("synapse:open-subscription-upgrade"));
+                  }
+                }}
+                className="upgrade-liquid-btn !text-white inline-flex items-center justify-center rounded-full px-5 py-2 text-xs md:text-sm font-semibold shadow-[0_0_16px_rgba(0,0,0,0.6)] transition-opacity mt-4 md:mt-0"
+                style={{ color: '#ffffff', zIndex: 100, position: 'relative' }}
+              >
+                <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>Upgrade now</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto mb-6 w-full max-w-3xl" style={{ overflowY: 'visible' }}>
       {(aiName || homepageMessages.length > 0) && (
@@ -2678,6 +2766,36 @@ Surge is for those who want to minimize friction and get results fast. I will pr
               )}
             </div>
           </div>
+          {!hasPremiumAccess && (
+            <div className="mt-4 w-full max-w-2xl mx-auto">
+              <div className="relative overflow-hidden rounded-2xl border border-[var(--foreground)]/15 bg-gradient-to-r from-[var(--background)]/90 via-[var(--background)] to-[var(--background)]/90 px-4 py-3 flex items-center gap-3">
+                <div className="absolute inset-y-0 right-0 w-32 opacity-30 pointer-events-none" aria-hidden="true" />
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-tr from-[#00E5FF]/20 to-[#FF2D96]/30 border border-[var(--foreground)]/10">
+                  <span className="text-xs font-semibold text-[var(--foreground)]/80">PRO</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-[var(--foreground)]/80 tracking-wide uppercase">
+                    Premium features locked
+                  </p>
+                  <p className="text-xs text-[var(--foreground)]/65">
+                    Unlock Quick Learn, Exam Snipe and more with a Tester or Premium subscription.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (typeof document !== "undefined") {
+                      document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
+                    }
+                  }}
+                  className="synapse-style inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold text-white shadow-sm transition-opacity whitespace-nowrap"
+                  style={{ zIndex: 100, position: 'relative' }}
+                >
+                  <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>Unlock premium</span>
+                </button>
+              </div>
+            </div>
+          )}
           <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%', overflowY: 'visible' }}>
             {ChatInputArea()}
             {(voiceError || isRecording || isTranscribing) && (
@@ -2716,6 +2834,12 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                 </button>
                 <button
                   onClick={() => {
+                    if (!hasPremiumAccess) {
+                      if (typeof document !== "undefined") {
+                        document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
+                      }
+                      return;
+                    }
                     if (!homepageSending && !isTutorialActive) {
                       setInputValue("Please create a quick learn on the subject: ");
                       chatInputRef.current?.focus();
@@ -2726,9 +2850,20 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                   style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
                 >
                   Quick Learn
+                  {!hasPremiumAccess && (
+                    <span className="ml-1 inline-flex items-center rounded-full bg-[var(--foreground)]/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--foreground)]/60">
+                      Pro
+                    </span>
+                  )}
                 </button>
                 <button
                   onClick={() => {
+                    if (!hasPremiumAccess) {
+                      if (typeof document !== "undefined") {
+                        document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
+                      }
+                      return;
+                    }
                     if (!homepageSending && !isTutorialActive) {
                       handleSendMessage("Do an exam snipe please.");
                     }
@@ -2738,6 +2873,11 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                   style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
                 >
                   Exam Snipe
+                  {!hasPremiumAccess && (
+                    <span className="ml-1 inline-flex items-center rounded-full bg-[var(--foreground)]/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--foreground)]/60">
+                      Pro
+                    </span>
+                  )}
                 </button>
                 <button
                   onClick={() => {
@@ -2817,10 +2957,10 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                               <button
                                 key={uiIdx}
                                 onClick={() => handleButtonClick(ui.action, ui.params)}
-                                className="inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
-                                style={{ color: 'white' }}
+                                className="synapse-style inline-flex items-center rounded-full px-4 py-1.5 text-sm font-medium !text-white transition-opacity"
+                                style={{ color: 'white', zIndex: 100, position: 'relative' }}
                               >
-                                {ui.label || 'Button'}
+                                <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>{ui.label || 'Button'}</span>
                               </button>
                             );
                           } else if (ui.type === 'file_upload') {
@@ -2836,6 +2976,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                                 buttonLabel={buttonLabel}
                                 action={ui.action}
                                 status={status}
+                                hasPremiumAccess={hasPremiumAccess}
                                 onFilesChange={(newFiles) => handleFileUpload(ui.id, newFiles)}
                                 onGenerate={() => handleButtonClick(ui.action, ui.params, ui.id)}
                               />
@@ -2992,7 +3133,13 @@ function Home() {
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
   
-  // Check authentication and sync subjects from server
+  const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
+  const hasPremiumAccess =
+    subscriptionLevel === "Tester" ||
+    subscriptionLevel === "Paid" ||
+    subscriptionLevel === "mylittlepwettybebe";
+
+  // Check authentication, subscription and sync subjects from server
   useEffect(() => {
     fetch("/api/me", { credentials: "include" })
       .then((r) => r.json().catch(() => ({})))
@@ -3000,6 +3147,9 @@ function Home() {
         const authenticated = !!data?.user;
         setIsAuthenticated(authenticated);
         setCheckingAuth(false);
+        if (data?.user?.subscriptionLevel) {
+          setSubscriptionLevel(data.user.subscriptionLevel);
+        }
         
         // If authenticated, load subjects from server
         if (authenticated) {
@@ -3993,7 +4143,14 @@ function Home() {
         }}
       />
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
-        <h1 className="text-xl font-semibold text-[var(--foreground)]">Your subjects</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold text-[var(--foreground)]">Your subjects</h1>
+          {!hasPremiumAccess && (
+            <span className="text-[11px] font-medium text-[var(--foreground)]/40">
+              Upgrade to access
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="mx-auto mt-6 grid w-full max-w-5xl grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -4003,11 +4160,11 @@ function Home() {
           <div
             key={s.slug}
             className={`course-box relative rounded-2xl border border-[var(--foreground)]/10 p-5 text-[var(--foreground)] transition-all duration-200 ${
-              preparingSlug === s.slug
-                ? 'cursor-not-allowed opacity-75'
-                : surgeButtonHovered === s.slug
-                ? 'cursor-pointer'
-                : 'cursor-pointer'
+              !hasPremiumAccess
+                ? 'cursor-not-allowed opacity-40'
+                : preparingSlug === s.slug
+                  ? 'cursor-not-allowed opacity-75'
+                  : 'cursor-pointer'
             }`}
             style={{ 
               boxShadow: 'none',
@@ -4023,14 +4180,28 @@ function Home() {
               }
             }}
             role="link"
-            tabIndex={preparingSlug === s.slug ? -1 : 0}
-            onClick={preparingSlug === s.slug ? undefined : () => router.push(`/subjects/${s.slug}`)}
-            onKeyDown={preparingSlug === s.slug ? undefined : (e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                router.push(`/subjects/${s.slug}`);
-              }
-            }}
+            tabIndex={!hasPremiumAccess || preparingSlug === s.slug ? -1 : 0}
+            onClick={
+              !hasPremiumAccess
+                ? () => {
+                    if (typeof document !== "undefined") {
+                      document.dispatchEvent(new CustomEvent("synapse:open-subscription-upgrade"));
+                    }
+                  }
+                : preparingSlug === s.slug
+                  ? undefined
+                  : () => router.push(`/subjects/${s.slug}`)
+            }
+            onKeyDown={
+              !hasPremiumAccess || preparingSlug === s.slug
+                ? undefined
+                : (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      router.push(`/subjects/${s.slug}`);
+                    }
+                  }
+            }
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex-1 min-w-0">
@@ -4112,73 +4283,78 @@ function Home() {
               </div>
             </div>
             
-            {/* Surge button - bottom right */}
+            {/* Surge button - bottom right (always visible, disabled for non-premium tiers) */}
             <button
               onClick={(e) => {
                 e.stopPropagation();
+                if (!hasPremiumAccess || preparingSlug === s.slug) return;
                 router.push(`/subjects/${s.slug}/surge`);
               }}
               onMouseEnter={(e) => {
                 e.stopPropagation();
+                if (!hasPremiumAccess || preparingSlug === s.slug) return;
                 setSurgeButtonHovered(s.slug);
               }}
               onMouseLeave={(e) => {
                 e.stopPropagation();
                 setSurgeButtonHovered(null);
               }}
-              disabled={preparingSlug === s.slug}
+              disabled={preparingSlug === s.slug || !hasPremiumAccess}
               className={`absolute bottom-4 right-4 inline-flex items-center justify-center w-8 h-8 rounded-full transition-all z-20 ${
-                preparingSlug === s.slug
+                !hasPremiumAccess || preparingSlug === s.slug
                   ? 'opacity-40 cursor-not-allowed'
                   : 'cursor-pointer hover:bg-[var(--foreground)]/15'
               }`}
               style={{
-                background: preparingSlug === s.slug 
-                  ? 'rgba(229, 231, 235, 0.05)'
+                background: preparingSlug === s.slug || !hasPremiumAccess
+                  ? 'rgba(229, 231, 235, 0.03)'
                   : 'rgba(229, 231, 235, 0.08)',
-                boxShadow: surgeButtonHovered === s.slug
-                  ? '0 2px 8px rgba(0, 0, 0, 0.7), 0 0 10px rgba(0, 229, 255, 0.7), 0 0 20px rgba(0, 229, 255, 0.5), 0 0 30px rgba(255, 45, 150, 0.4), 0 0 40px rgba(255, 45, 150, 0.2)'
-                  : undefined,
+                boxShadow:
+                  !hasPremiumAccess || preparingSlug === s.slug
+                    ? undefined
+                    : surgeButtonHovered === s.slug
+                        ? '0 2px 8px rgba(0, 0, 0, 0.7), 0 0 10px rgba(0, 229, 255, 0.7), 0 0 20px rgba(0, 229, 255, 0.5), 0 0 30px rgba(255, 45, 150, 0.4), 0 0 40px rgba(255, 45, 150, 0.2)'
+                        : undefined,
                 border: 'none',
                 transition: 'box-shadow 0.3s ease, background 0.3s ease'
               }}
               aria-label="Start Surge"
-              title="Start Synapse Surge"
+              title={hasPremiumAccess ? "Start Synapse Surge" : "Surge is available on Premium"}
             >
-              {preparingSlug === s.slug ? (
-                <svg 
-                  width="16" 
-                  height="16" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="text-[var(--foreground)]/30"
-                >
-                  <g transform="translate(12 12) scale(0.8,1.1) translate(-12 -12)">
-                    <path 
-                      d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" 
-                      fill="currentColor"
-                    />
-                  </g>
-                </svg>
-              ) : (
-                <svg 
-                  width="16" 
-                  height="16" 
-                  viewBox="0 0 24 24" 
-                  fill="none" 
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <g transform="translate(12 12) scale(0.8,1.1) translate(-12 -12)">
-                    <path 
-                      d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" 
-                      fill="currentColor"
-                      className="text-[var(--foreground)]"
-                    />
-                  </g>
-                </svg>
-              )}
-            </button>
+                {preparingSlug === s.slug ? (
+                  <svg 
+                    width="16" 
+                    height="16" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="text-[var(--foreground)]/30"
+                  >
+                    <g transform="translate(12 12) scale(0.8,1.1) translate(-12 -12)">
+                      <path 
+                        d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" 
+                        fill="currentColor"
+                      />
+                    </g>
+                  </svg>
+                ) : (
+                  <svg 
+                    width="16" 
+                    height="16" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <g transform="translate(12 12) scale(0.8,1.1) translate(-12 -12)">
+                      <path 
+                        d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" 
+                        fill="currentColor"
+                        className="text-[var(--foreground)]"
+                      />
+                    </g>
+                  </svg>
+                )}
+              </button>
             
             {preparingSlug === s.slug && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--background)]/80 backdrop-blur-sm rounded-2xl z-10">
@@ -4210,6 +4386,7 @@ function Home() {
                     const next = subjects.filter((t) => t.slug !== s.slug);
                     localStorage.setItem("atomicSubjects", JSON.stringify(next));
                     try { localStorage.removeItem("atomicSubjectData:" + s.slug); } catch {}
+                    try { localStorage.removeItem("atomicPracticeLog:" + s.slug); } catch {}
                     setSubjects(next);
                     setMenuOpenFor(null);
                   }}
@@ -4246,36 +4423,38 @@ function Home() {
             )}
           </div>
         );})}
-        <div
-          onDragEnter={(e) => {
-            e.preventDefault();
-            setIsDragging(true);
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setIsDragging(true);
-          }}
-          onDragLeave={(e) => {
-            e.preventDefault();
-            setIsDragging(false);
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            const files = Array.from(e.dataTransfer?.files || []);
-            createCourseFromFiles(files);
-          }}
-          className={`drop-files-area relative rounded-2xl border border-dashed p-6 text-center text-sm transition-all duration-200 min-h-[80px] flex flex-col items-center justify-center gap-2 ${
-            isDragging
-              ? 'border-[var(--foreground)]/40 shadow-[0_4px_12px_rgba(0,0,0,0.8)] dragging'
-              : 'border-[var(--foreground)]/20 hover:border-[var(--foreground)]/30'
-          }`}
-          style={{
-            boxShadow: 'none',
-          }}
-        >
-          <span className="text-[var(--foreground)]/70">Drop files here to auto-create a course</span>
-          <span className="text-xs text-[var(--foreground)]/50">We’ll scan the files and name it for you</span>
-        </div>
+        {hasPremiumAccess && (
+          <div
+            onDragEnter={(e) => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setIsDragging(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const files = Array.from(e.dataTransfer?.files || []);
+              createCourseFromFiles(files);
+            }}
+            className={`drop-files-area relative rounded-2xl border border-dashed p-6 text-center text-sm transition-all duration-200 min-h-[80px] flex flex-col items-center justify-center gap-2 ${
+              isDragging
+                ? 'border-[var(--foreground)]/40 shadow-[0_4px_12px_rgba(0,0,0,0.8)] dragging'
+                : 'border-[var(--foreground)]/20 hover:border-[var(--foreground)]/30'
+            }`}
+            style={{
+              boxShadow: 'none',
+            }}
+          >
+            <span className="text-[var(--foreground)]/70">Drop files here to auto-create a course</span>
+            <span className="text-xs text-[var(--foreground)]/50">We'll scan the files and name it for you</span>
+          </div>
+        )}
         {subjects.length === 0 && null}
       </div>
 
@@ -4294,8 +4473,14 @@ function Home() {
 
       {/* Quick Lesson Modal */}
       {quickLearnOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className={isIOSStandalone ? "relative w-full max-w-md rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)] p-6" : "relative w-full max-w-md rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md p-6"}>
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setInfoModalOpen(null)}
+        >
+          <div 
+            className={isIOSStandalone ? "relative w-full max-w-md rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)] p-6" : "relative w-full max-w-md rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md p-6"}
+            onClick={(e) => e.stopPropagation()}
+          >
             {quickLearnLoading && (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl bg-[var(--background)]/95 backdrop-blur-md">
                 <GlowSpinner size={120} ariaLabel="Generating quick lesson" idSuffix="home-quicklesson" />
@@ -4340,10 +4525,12 @@ function Home() {
               <button
                 onClick={handleQuickLearn}
                 disabled={!quickLearnQuery.trim() || quickLearnLoading}
-                className="inline-flex h-10 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60 transition-opacity"
-                style={{ color: 'white' }}
+                className="synapse-style inline-flex h-10 items-center rounded-full px-6 text-sm font-medium text-white disabled:opacity-60 transition-opacity"
+                style={{ color: 'white', zIndex: 100, position: 'relative' }}
               >
-                {quickLearnLoading ? "Generating..." : "Generate Lesson"}
+                <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                  {quickLearnLoading ? "Generating..." : "Generate Lesson"}
+                </span>
               </button>
             </div>
           </div>

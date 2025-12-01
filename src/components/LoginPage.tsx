@@ -410,7 +410,7 @@ export default function LoginPage({
           <button
             type="submit"
             disabled={loading || !username.trim() || password.length < 6 || (authMode === "signup" && password !== confirmPassword)}
-            className="w-full inline-flex h-12 items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 text-sm font-medium !text-white hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed transition-opacity"
+            className="w-full inline-flex h-12 items-center justify-center rounded-full synapse-style px-6 text-sm font-medium !text-white hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed transition-opacity"
           >
             {loading ? (authMode === "login" ? "Signing in..." : "Creating account...") : authMode === "login" ? "Sign in" : "Sign up"}
           </button>

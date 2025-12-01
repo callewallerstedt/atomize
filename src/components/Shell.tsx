@@ -135,6 +135,802 @@ function LoadingScreen({ onComplete }: { onComplete: () => void }) {
   );
 }
 
+// Feedback Modal Component
+function PromoCodeModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [promoCodes, setPromoCodes] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [editingCode, setEditingCode] = useState<any | null>(null);
+  const [formData, setFormData] = useState({
+    code: "",
+    description: "",
+    subscriptionLevel: "Tester" as "Free" | "Paid" | "Tester" | "mylittlepwettybebe",
+    expiresAt: "", // When the code itself expires (can't be redeemed after this)
+    validityDays: "", // How many days each user gets from when they redeem
+    maxUses: "",
+  });
+
+  useEffect(() => {
+    if (open) {
+      loadPromoCodes();
+    }
+  }, [open]);
+
+  const handleResetAll = async () => {
+    if (!confirm("Are you sure you want to reset ALL user subscriptions to Free and delete ALL promo codes? This cannot be undone!")) {
+      return;
+    }
+    if (!confirm("This will affect ALL users. Are you absolutely sure?")) {
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const res = await fetch("/api/admin/reset-subscriptions", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert(data.summary || `Successfully reset ${data.usersUpdated} users and deleted ${data.promoCodesDeleted} promo codes.`);
+        await loadPromoCodes();
+      } else {
+        alert(data.error || "Failed to reset subscriptions");
+      }
+    } catch (err) {
+      console.error("Error resetting subscriptions:", err);
+      alert("Failed to reset subscriptions");
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const loadPromoCodes = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/promo-code/list", { credentials: "include" });
+      const data = await res.json();
+      if (data.ok) {
+        setPromoCodes(data.promoCodes || []);
+      } else {
+        alert(data.error || "Failed to load promo codes");
+      }
+    } catch (err) {
+      console.error("Error loading promo codes:", err);
+      alert("Failed to load promo codes");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!formData.code.trim()) {
+      alert("Code is required");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/promo-code/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          code: formData.code.trim().toUpperCase(),
+          description: formData.description.trim() || null,
+          subscriptionLevel: formData.subscriptionLevel,
+          expiresAt: formData.expiresAt || null, // When code itself expires
+          validityDays: formData.validityDays ? Number(formData.validityDays) : null, // Days each user gets
+          maxUses: formData.maxUses ? Number(formData.maxUses) : null,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        setFormData({ code: "", description: "", subscriptionLevel: "Tester", expiresAt: "", validityDays: "", maxUses: "" });
+        await loadPromoCodes();
+      } else {
+        alert(data.error || "Failed to create promo code");
+      }
+    } catch (err) {
+      console.error("Error creating promo code:", err);
+      alert("Failed to create promo code");
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!editingCode) return;
+
+    try {
+      const res = await fetch("/api/promo-code/update", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          id: editingCode.id,
+          code: formData.code.trim().toUpperCase(),
+          description: formData.description.trim() || null,
+          subscriptionLevel: formData.subscriptionLevel,
+          expiresAt: formData.expiresAt || null, // When code itself expires
+          validityDays: formData.validityDays ? Number(formData.validityDays) : null, // Days each user gets
+          maxUses: formData.maxUses ? Number(formData.maxUses) : null,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        setEditingCode(null);
+        setFormData({ code: "", description: "", subscriptionLevel: "Tester", expiresAt: "", validityDays: "", maxUses: "" });
+        await loadPromoCodes();
+      } else {
+        alert(data.error || "Failed to update promo code");
+      }
+    } catch (err) {
+      console.error("Error updating promo code:", err);
+      alert("Failed to update promo code");
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this promo code?")) return;
+
+    try {
+      const res = await fetch(`/api/promo-code/delete?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        await loadPromoCodes();
+      } else {
+        alert(data.error || "Failed to delete promo code");
+      }
+    } catch (err) {
+      console.error("Error deleting promo code:", err);
+      alert("Failed to delete promo code");
+    }
+  };
+
+  const startEdit = (code: any) => {
+    setEditingCode(code);
+    setFormData({
+      code: code.code,
+      description: code.description || "",
+      subscriptionLevel: code.subscriptionLevel,
+      expiresAt: code.expiresAt ? new Date(code.expiresAt).toISOString().slice(0, 16) : "",
+      validityDays: code.validityDays ? String(code.validityDays) : "",
+      maxUses: code.maxUses ? String(code.maxUses) : "",
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingCode(null);
+    setFormData({ code: "", description: "", subscriptionLevel: "Tester", expiresAt: "", validityDays: "", maxUses: "" });
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Manage Promo Codes">
+      <div className="space-y-4 pb-4">
+        {/* Reset All Button */}
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-red-400 mb-1">Danger Zone</h3>
+              <p className="text-xs text-[var(--foreground)]/60">
+                Reset all user subscriptions to Free and delete all promo codes
+              </p>
+            </div>
+            <button
+              onClick={handleResetAll}
+              disabled={resetLoading}
+              className="px-4 py-2 rounded-full border border-red-500/50 bg-red-500/20 text-sm font-medium text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {resetLoading ? "Resetting..." : "Reset All"}
+            </button>
+          </div>
+        </div>
+
+        {/* Create/Edit Form */}
+        <div className="rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/60 p-4 space-y-3">
+          <h3 className="text-sm font-semibold text-[var(--foreground)]">
+            {editingCode ? "Edit Promo Code" : "Create New Promo Code"}
+          </h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Code</label>
+              <input
+                type="text"
+                value={formData.code}
+                onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                placeholder="PROMO123"
+                className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Subscription Level</label>
+              <select
+                value={formData.subscriptionLevel}
+                onChange={(e) => setFormData({ ...formData, subscriptionLevel: e.target.value as any })}
+                className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+              >
+                <option value="Free">Free</option>
+                <option value="Paid">Premium</option>
+                <option value="Tester">Tester</option>
+                <option value="mylittlepwettybebe">mylittlepwettybebe</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Max Uses</label>
+              <input
+                type="number"
+                value={formData.maxUses}
+                onChange={(e) => setFormData({ ...formData, maxUses: e.target.value })}
+                placeholder="Unlimited"
+                className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Validity Days (Per User)</label>
+              <input
+                type="number"
+                value={formData.validityDays}
+                onChange={(e) => {
+                  setFormData({ ...formData, validityDays: e.target.value });
+                }}
+                placeholder="e.g., 30 (days each user gets)"
+                min="1"
+                className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+              />
+              <p className="text-[10px] text-[var(--foreground)]/50 mt-1">Each user gets this many days from when they redeem (leave empty for unlimited)</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Code Expires At (Optional)</label>
+              <input
+                type="datetime-local"
+                value={formData.expiresAt}
+                onChange={(e) => {
+                  setFormData({ ...formData, expiresAt: e.target.value });
+                }}
+                className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+              />
+              <p className="text-[10px] text-[var(--foreground)]/50 mt-1">When the code itself expires (can't be redeemed after this date)</p>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Description</label>
+            <input
+              type="text"
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              placeholder="Optional description"
+              className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            {editingCode && (
+              <button
+                onClick={cancelEdit}
+                className="px-4 py-2 rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
+              >
+                Cancel
+              </button>
+            )}
+            <button
+              onClick={editingCode ? handleUpdate : handleCreate}
+              disabled={!formData.code.trim()}
+              className="synapse-style px-4 py-2 rounded-full text-sm font-medium !text-white transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span style={{ color: '#ffffff', opacity: 1, textShadow: 'none' }}>
+                {editingCode ? "Update" : "Create"}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* List of Promo Codes */}
+        <div className="border-t border-[var(--foreground)]/20 pt-4">
+          <h3 className="text-sm font-semibold text-[var(--foreground)] mb-3">All Promo Codes</h3>
+          {loading ? (
+            <div className="text-sm text-[var(--foreground)]/60 text-center py-4">Loading...</div>
+          ) : promoCodes.length === 0 ? (
+            <div className="text-sm text-[var(--foreground)]/60 text-center py-4">No promo codes yet</div>
+          ) : (
+            <div className="space-y-3 max-h-[400px] overflow-y-auto">
+              {promoCodes.map((code) => (
+                <div
+                  key={code.id}
+                  className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-semibold text-[var(--foreground)] font-mono">{code.code}</span>
+                        <span className="text-xs px-2 py-0.5 rounded bg-[var(--accent-cyan)]/20 text-[var(--accent-cyan)]">
+                          {code.subscriptionLevel}
+                        </span>
+                      </div>
+                      {code.description && (
+                        <p className="text-xs text-[var(--foreground)]/70 mb-2">{code.description}</p>
+                      )}
+                      <div className="text-xs text-[var(--foreground)]/60 space-y-0.5">
+                        <div>
+                          Uses: {code.currentUses || 0}
+                          {code.maxUses ? ` / ${code.maxUses}` : " / Unlimited"}
+                        </div>
+                        {code.validityDays && (
+                          <div>
+                            Validity: {code.validityDays} days per user
+                          </div>
+                        )}
+                        {code.expiresAt && (
+                          <div>
+                            Code expires: {new Date(code.expiresAt).toLocaleString()}
+                          </div>
+                        )}
+                        <div>
+                          Created: {new Date(code.createdAt).toLocaleString()}
+                        </div>
+                        {code.redemptions && code.redemptions.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-[var(--foreground)]/10">
+                            <div className="font-medium mb-1">Redeemed by:</div>
+                            {code.redemptions.map((r: any) => (
+                              <div key={r.id} className="text-[10px]">
+                                {r.user?.username || "Unknown"} ({r.user?.email || "no email"}) - {new Date(r.redeemedAt).toLocaleString()}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => startEdit(code)}
+                        className="px-3 py-1.5 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/70 text-xs text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDelete(code.id)}
+                        className="px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/10 text-xs text-red-400 hover:bg-red-500/20 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function FeedbackModal({ 
+  open, 
+  onClose, 
+  subscriptionLevel,
+  pathname 
+}: { 
+  open: boolean; 
+  onClose: () => void;
+  subscriptionLevel: string;
+  pathname: string;
+}) {
+  const [feedback, setFeedback] = useState("");
+  const [sending, setSending] = useState(false);
+  const [allFeedback, setAllFeedback] = useState<any[]>([]);
+  const [loadingFeedback, setLoadingFeedback] = useState(false);
+  const isTester = subscriptionLevel === "Tester" || subscriptionLevel === "mylittlepwettybebe";
+
+  useEffect(() => {
+    if (open && isTester) {
+      // Load all feedback for testers
+      setLoadingFeedback(true);
+      fetch("/api/feedback")
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.ok) {
+            setAllFeedback(data.feedback || []);
+          }
+          setLoadingFeedback(false);
+        })
+        .catch((err) => {
+          console.error("Error loading feedback:", err);
+          setLoadingFeedback(false);
+        });
+    }
+  }, [open, isTester]);
+
+  const handleSubmit = async () => {
+    if (!feedback.trim() || sending) return;
+
+    setSending(true);
+    try {
+      const res = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: feedback.trim(),
+          page: pathname,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        setFeedback("");
+        alert("Thank you for your feedback!");
+        if (isTester) {
+          // Reload feedback list
+          const refreshRes = await fetch("/api/feedback");
+          const refreshData = await refreshRes.json();
+          if (refreshData.ok) {
+            setAllFeedback(refreshData.feedback || []);
+          }
+        }
+      } else {
+        alert(data.error || "Failed to submit feedback");
+      }
+    } catch (err) {
+      console.error("Error submitting feedback:", err);
+      alert("Failed to submit feedback");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={isTester ? "Feedback" : "Leave Feedback"}
+    >
+      <div className="space-y-4 pb-4">
+        {!isTester ? (
+          <>
+            <div>
+              <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-2">
+                Your feedback
+              </label>
+              <textarea
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+                placeholder="Tell us what you think, report bugs, or suggest features..."
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none"
+                rows={6}
+                disabled={sending}
+              />
+            </div>
+            <div className="flex justify-end gap-2 px-2 md:px-4 pb-2">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
+                disabled={sending}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={!feedback.trim() || sending}
+                className="synapse-style px-4 py-2 rounded-full text-sm font-medium !text-white transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ zIndex: 100, position: 'relative' }}
+              >
+                <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                  {sending ? "Sending..." : "Send Feedback"}
+                </span>
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="space-y-4 pb-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-2">
+                Submit new feedback
+              </label>
+              <textarea
+                value={feedback}
+                onChange={(e) => setFeedback(e.target.value)}
+                placeholder="Tell us what you think, report bugs, or suggest features..."
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none"
+                rows={4}
+                disabled={sending}
+              />
+            </div>
+            <div className="flex justify-end gap-2 px-2 md:px-4 pb-2">
+              <button
+                onClick={handleSubmit}
+                disabled={!feedback.trim() || sending}
+                className="synapse-style px-4 py-2 rounded-full text-sm font-medium !text-white transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ zIndex: 100, position: 'relative' }}
+              >
+                <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                  {sending ? "Sending..." : "Send Feedback"}
+                </span>
+              </button>
+            </div>
+            <div className="border-t border-[var(--foreground)]/20 pt-4">
+              <h3 className="text-sm font-semibold text-[var(--foreground)] mb-3">All Feedback</h3>
+              {loadingFeedback ? (
+                <div className="text-sm text-[var(--foreground)]/60 text-center py-4">Loading...</div>
+              ) : allFeedback.length === 0 ? (
+                <div className="text-sm text-[var(--foreground)]/60 text-center py-4">No feedback yet</div>
+              ) : (
+                <div className="space-y-3 max-h-[400px] overflow-y-auto">
+                  {allFeedback.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`rounded-xl border p-3 space-y-2 ${
+                        item.done 
+                          ? "border-[var(--foreground)]/10 bg-[var(--background)]/40 opacity-60" 
+                          : "border-[var(--foreground)]/15 bg-[var(--background)]/60"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <div className="text-xs text-[var(--foreground)]/60 mb-1">
+                            <span className="font-medium">{item.user?.username || "Unknown"}</span>
+                            {" • "}
+                            <span className="font-mono text-[10px]">{item.page}</span>
+                            {" • "}
+                            <span>{new Date(item.createdAt).toLocaleString()}</span>
+                            {item.done && (
+                              <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-green-500/20 text-green-400">
+                                Done
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-sm whitespace-pre-wrap ${item.done ? "text-[var(--foreground)]/50 line-through" : "text-[var(--foreground)]"}`}>
+                            {item.message}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={item.done || false}
+                              onChange={async (e) => {
+                                const newDone = e.target.checked;
+                                // Optimistically update UI immediately
+                                setAllFeedback((prev) =>
+                                  prev.map((f) =>
+                                    f.id === item.id ? { ...f, done: newDone } : f
+                                  )
+                                );
+                                try {
+                                  const res = await fetch("/api/feedback", {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      id: item.id,
+                                      done: newDone,
+                                    }),
+                                  });
+                                  const data = await res.json();
+                                  if (!data.ok) {
+                                    // Revert on error
+                                    setAllFeedback((prev) =>
+                                      prev.map((f) =>
+                                        f.id === item.id ? { ...f, done: !newDone } : f
+                                      )
+                                    );
+                                    alert(data.error || "Failed to update feedback");
+                                  }
+                                } catch (err) {
+                                  console.error("Error updating feedback:", err);
+                                  // Revert on error
+                                  setAllFeedback((prev) =>
+                                    prev.map((f) =>
+                                      f.id === item.id ? { ...f, done: !newDone } : f
+                                    )
+                                  );
+                                  alert("Failed to update feedback");
+                                }
+                              }}
+                              className="sr-only"
+                            />
+                            <div 
+                              className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                                item.done 
+                                  ? 'bg-[var(--accent-cyan)] border-[var(--accent-cyan)]' 
+                                  : 'bg-[var(--background)] border-[var(--foreground)]/40'
+                              }`}
+                            >
+                              {item.done && (
+                                <svg 
+                                  className="w-3 h-3 text-white" 
+                                  fill="none" 
+                                  viewBox="0 0 24 24" 
+                                  stroke="currentColor" 
+                                  strokeWidth="3"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                            </div>
+                          </label>
+                          <button
+                            onClick={async () => {
+                              if (!confirm("Are you sure you want to delete this feedback?")) return;
+                              try {
+                                const res = await fetch("/api/feedback", {
+                                  method: "DELETE",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ id: item.id }),
+                                });
+                                const data = await res.json();
+                                if (data.ok) {
+                                  // Remove from local state
+                                  setAllFeedback((prev) => prev.filter((f) => f.id !== item.id));
+                                } else {
+                                  alert(data.error || "Failed to delete feedback");
+                                }
+                              } catch (err) {
+                                console.error("Error deleting feedback:", err);
+                                alert("Failed to delete feedback");
+                              }
+                            }}
+                            className="px-2 py-1 rounded text-xs text-red-400 hover:bg-red-500/20 transition-colors flex-shrink-0"
+                            title="Delete feedback"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// Clock Display Component
+function ClockDisplay() {
+  const [time, setTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: false 
+    });
+  };
+
+  return (
+    <div className="flex items-center justify-center">
+      <span className="text-lg font-mono font-medium text-[var(--foreground)]">
+        {formatTime(time)}
+      </span>
+    </div>
+  );
+}
+
+// Temperature Display Component
+function TemperatureDisplay() {
+  const [temperature, setTemperature] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchTemperature = async () => {
+      try {
+        // Get user's location
+        if (!navigator.geolocation) {
+          setError("Geolocation not supported");
+          setLoading(false);
+          return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const { latitude, longitude } = position.coords;
+            
+            try {
+              // Using OpenWeatherMap API (free tier)
+              // You'll need to add your API key to environment variables
+              const apiKey = process.env.NEXT_PUBLIC_WEATHER_API_KEY || '';
+              
+              if (!apiKey) {
+                // Fallback: Use a free weather API that doesn't require key
+                const response = await fetch(
+                  `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m&timezone=auto`
+                );
+                
+                if (!response.ok) throw new Error('Weather API failed');
+                
+                const data = await response.json();
+                const temp = Math.round(data.current.temperature_2m);
+                setTemperature(temp);
+                setLoading(false);
+              } else {
+                // Use OpenWeatherMap if API key is available
+                const response = await fetch(
+                  `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${apiKey}&units=metric`
+                );
+                
+                if (!response.ok) throw new Error('Weather API failed');
+                
+                const data = await response.json();
+                setTemperature(Math.round(data.main.temp));
+                setLoading(false);
+              }
+            } catch (err) {
+              console.error('Error fetching weather:', err);
+              setError("Failed to fetch");
+              setLoading(false);
+            }
+          },
+          (err) => {
+            console.error('Geolocation error:', err);
+            setError("Location denied");
+            setLoading(false);
+          },
+          { timeout: 10000 }
+        );
+      } catch (err) {
+        console.error('Error:', err);
+        setError("Error");
+        setLoading(false);
+      }
+    };
+
+    fetchTemperature();
+    
+    // Refresh temperature every 10 minutes
+    const interval = setInterval(fetchTemperature, 10 * 60 * 1000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-[var(--background)]/60 backdrop-blur-sm border border-[var(--foreground)]/10">
+        <svg className="w-4 h-4 text-[var(--foreground)]/70 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span className="text-sm text-[var(--foreground)]/50">--°</span>
+      </div>
+    );
+  }
+
+  if (error || temperature === null) {
+    return null; // Don't show anything if there's an error
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-[var(--background)]/60 backdrop-blur-sm border border-[var(--foreground)]/10">
+      <svg className="w-4 h-4 text-[var(--foreground)]/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+      </svg>
+      <span className="text-sm font-medium text-[var(--foreground)]">
+        {temperature}°C
+      </span>
+    </div>
+  );
+}
+
 // Pomodoro Timer Component
 function PomodoroTimer() {
   const [timeLeft, setTimeLeft] = useState(25 * 60); // 25 minutes in seconds
@@ -324,8 +1120,8 @@ function PomodoroTimer() {
       {showPlayButton && (
         <button
           onClick={startNextTimer}
-          className="hidden md:flex md:absolute md:-right-12 md:top-1/2 md:-translate-y-1/2 w-8 h-8 rounded-full
-                     bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white
+          className="synapse-style hidden md:flex md:absolute md:-right-12 md:top-1/2 md:-translate-y-1/2 w-8 h-8 rounded-full
+                     text-white
                      flex items-center justify-center shadow-lg hover:shadow-xl
                      transition-all duration-200 hover:scale-110 animate-pulse"
           title={`Start ${isBreak ? 'Break' : 'Study'} Timer`}
@@ -490,7 +1286,8 @@ function FileUploadArea({
   onGenerate,
   buttonLabel,
   action,
-  status
+  status,
+  hasPremiumAccess = true
 }: { 
   uploadId: string; 
   message?: string; 
@@ -500,6 +1297,7 @@ function FileUploadArea({
   buttonLabel?: string;
   action?: string;
   status?: 'idle' | 'ready' | 'processing' | 'success';
+  hasPremiumAccess?: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -541,7 +1339,7 @@ function FileUploadArea({
         }`}
       >
         <div className="text-xs text-[var(--foreground)]/70 text-center">
-          {isDragging ? 'Drop files here' : (message || 'Upload files or drag and drop')}
+          {isDragging && hasPremiumAccess ? 'Drop files here' : (hasPremiumAccess ? (message || 'Upload files or drag and drop') : '')}
         </div>
         {files.length > 0 && (
           <div className="mt-2 text-xs text-[var(--foreground)]/60">
@@ -565,10 +1363,12 @@ function FileUploadArea({
       {files.length > 0 && (
         <button
           onClick={onGenerate}
-          className="w-full inline-flex items-center justify-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
-          style={{ color: 'white' }}
+          className="synapse-style w-full inline-flex items-center justify-center rounded-full px-4 py-1.5 text-sm font-medium !text-white  transition-opacity"
+          style={{ color: 'white', zIndex: 100, position: 'relative' }}
         >
-          {buttonLabel || 'Create'}
+          <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+            {buttonLabel || 'Create'}
+          </span>
         </button>
       )}
       {status === 'processing' && (
@@ -592,9 +1392,14 @@ function FileUploadArea({
   );
 }
 
-function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
+function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscreen?: boolean; hasPremiumAccess?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(fullscreen);
+  
+  // Don't render chat for free users
+  if (!hasPremiumAccess) {
+    return null;
+  }
   const [showFullChat, setShowFullChat] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -2660,10 +3465,10 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                           router.push(`/subjects/${slug}`);
                         }
                       }}
-                      className="mt-2 inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
-                      style={{ color: 'white' }}
+                      className="synapse-style mt-2 inline-flex items-center rounded-full px-4 py-1.5 text-sm font-medium !text-white  transition-opacity"
+                      style={{ color: 'white', zIndex: 100, position: 'relative' }}
                     >
-                      View Flashcards
+                      <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>View Flashcards</span>
                     </button>
                   </div>
                 </div>
@@ -2688,10 +3493,10 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                             <button
                               key={uiIdx}
                               onClick={() => handleButtonClick(ui.action, ui.params)}
-                              className="inline-flex items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 py-1.5 text-sm font-medium !text-white hover:opacity-95 transition-opacity"
-                              style={{ color: 'white' }}
+                              className="synapse-style inline-flex items-center rounded-full px-4 py-1.5 text-sm font-medium !text-white  transition-opacity"
+                              style={{ color: 'white', zIndex: 100, position: 'relative' }}
                             >
-                              {ui.label || 'Button'}
+                              <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>{ui.label || 'Button'}</span>
                             </button>
                           );
                         } else if (ui.type === 'file_upload') {
@@ -2708,6 +3513,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
                               buttonLabel={buttonLabel}
                               action={ui.action}
                               status={status}
+                              hasPremiumAccess={hasPremiumAccess}
                               onFilesChange={(newFiles) => handleFileUpload(ui.id, newFiles)}
                               onGenerate={() => handleButtonClick(ui.action, ui.params, ui.id)}
                             />
@@ -2752,9 +3558,10 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
           <button
             type="submit"
             disabled={!input.trim() || sending}
-            className="px-6 py-2 rounded-xl bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] text-white font-medium hover:opacity-95 disabled:opacity-50 transition-opacity"
+            className="synapse-style px-6 py-2 rounded-xl text-white font-medium  disabled:opacity-50 transition-opacity"
+            style={{ zIndex: 100, position: 'relative' }}
           >
-            Send
+            <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>Send</span>
           </button>
         </form>
       </div>
@@ -2932,7 +3739,7 @@ function ChatDropdown({ fullscreen = false }: { fullscreen?: boolean }) {
             {/* Header */}
             <div className="flex items-center justify-between px-6 border-b border-[var(--foreground)]/10" style={{ paddingTop: '0.5rem', paddingBottom: '0.5rem' }}>
               <div className="flex items-center gap-2">
-                <div className="h-6 w-6 rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]" />
+                <div className="synapse-style h-6 w-6 rounded-full" />
                 <div className="font-semibold text-[var(--foreground)]" style={{ fontSize: '1.05rem' }}>Chad</div>
               </div>
               <button
@@ -3124,7 +3931,13 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
+  const [username, setUsername] = useState<string>("");
+  const hasPremiumAccess =
+    subscriptionLevel === "Tester" ||
+    subscriptionLevel === "Paid" ||
+    subscriptionLevel === "mylittlepwettybebe";
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [promoCodeModalOpen, setPromoCodeModalOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -3147,6 +3960,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [savedDataLoading, setSavedDataLoading] = useState(false);
   const [savedDataError, setSavedDataError] = useState<string | null>(null);
   const [copiedSavedDataSlug, setCopiedSavedDataSlug] = useState<string | null>(null);
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
   const [expandedSurgeTopics, setExpandedSurgeTopics] = useState<Set<string>>(new Set());
   const [expandedSurgeQuestionTypes, setExpandedSurgeQuestionTypes] = useState<Set<string>>(new Set());
   const [expandedSurgeQuestions, setExpandedSurgeQuestions] = useState<Set<string>>(new Set());
@@ -3211,6 +4025,24 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       setSavedDataLoading(false);
     }
   };
+
+  // Allow other parts of the app (e.g. homepage) to open the pricing/settings modal
+  useEffect(() => {
+    const handleOpenSubscription = () => {
+      setSettingsOpen(true);
+    };
+    const handleOpenSubscriptionUpgrade = () => {
+      setSettingsOpen(true);
+      // Let SettingsModal know it should immediately show the upgrade / subscription flow
+      document.dispatchEvent(new CustomEvent("synapse:open-upgrade-modal"));
+    };
+    document.addEventListener("synapse:open-subscription", handleOpenSubscription as EventListener);
+    document.addEventListener("synapse:open-subscription-upgrade", handleOpenSubscriptionUpgrade as EventListener);
+    return () => {
+      document.removeEventListener("synapse:open-subscription", handleOpenSubscription as EventListener);
+      document.removeEventListener("synapse:open-subscription-upgrade", handleOpenSubscriptionUpgrade as EventListener);
+    };
+  }, []);
 
   const handleCopySavedData = async (slug: string, raw: string | null) => {
     if (!raw) {
@@ -3384,6 +4216,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         } else {
           setSubscriptionLevel("Free");
         }
+        if (me?.user?.username) {
+          setUsername(me.user.username);
+        }
       } catch {
         setIsAuthenticated(false);
         setSubscriptionLevel("Free");
@@ -3523,9 +4358,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               </button>
             </div>
 
-            {/* Center: SURGE text on surge page */}
-            {pathname?.includes('/surge') && (
-              <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2 items-center">
+            {/* Center: Clock and Temperature */}
+            <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2 items-center gap-4">
+              {/* Clock Component */}
+              <ClockDisplay />
+              {/* Temperature Component */}
+              <TemperatureDisplay />
+              {/* SURGE text on surge page */}
+              {pathname?.includes('/surge') && (
                 <h1 
                   className="text-3xl font-bold tracking-wider text-[var(--foreground)]/80" 
                   style={{ 
@@ -3536,8 +4376,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 >
                   SURGE
                 </h1>
-              </div>
-            )}
+              )}
+            </div>
 
             <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
               {!isMobile && (
@@ -3604,6 +4444,64 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    </button>
+                  )}
+                  {/* Feedback Button */}
+                  <button
+                    onClick={() => setFeedbackModalOpen(true)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.currentTarget.blur();
+                    }}
+                    className="unified-button relative inline-flex items-center justify-center px-1.5 py-1.5
+                               focus:outline-none focus:ring-0 focus-visible:outline-none
+                               transition-all duration-300 ease-out"
+                    style={{ 
+                      outline: 'none', 
+                      WebkitTapHighlightColor: 'transparent', 
+                      transform: 'none !important',
+                      borderRadius: '50%',
+                      margin: 0,
+                      display: 'flex',
+                      height: '32px',
+                      width: '32px',
+                      boxShadow: 'none',
+                    }}
+                    aria-label="Feedback"
+                    title="Leave Feedback"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-4l-4 4z" />
+                    </svg>
+                  </button>
+                  {/* Promo Code Management Button - Only for cwallerstedt */}
+                  {username === "cwallerstedt" && (
+                    <button
+                      onClick={() => setPromoCodeModalOpen(true)}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.blur();
+                      }}
+                      className="unified-button relative inline-flex items-center justify-center px-1.5 py-1.5
+                                 focus:outline-none focus:ring-0 focus-visible:outline-none
+                                 transition-all duration-300 ease-out"
+                      style={{ 
+                        outline: 'none', 
+                        WebkitTapHighlightColor: 'transparent', 
+                        transform: 'none !important',
+                        borderRadius: '50%',
+                        margin: 0,
+                        display: 'flex',
+                        height: '32px',
+                        width: '32px',
+                        boxShadow: 'none',
+                      }}
+                      aria-label="Manage Promo Codes"
+                      title="Manage Promo Codes"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                       </svg>
                     </button>
                   )}
@@ -3706,15 +4604,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                     </div>
 
                     <div className="border-t border-[var(--foreground)]/10 pt-3 space-y-2">
-                      <button
-                        onClick={() => {
-                          setMobileMenuOpen(false);
-                          document.dispatchEvent(new CustomEvent('synapse:open-chat'));
-                        }}
-                        className="btn-grey w-full rounded-lg px-4 py-3 text-left text-sm transition-colors"
-                      >
-                        Open Chat
-                      </button>
+                      {hasPremiumAccess && (
+                        <button
+                          onClick={() => {
+                            setMobileMenuOpen(false);
+                            document.dispatchEvent(new CustomEvent('synapse:open-chat'));
+                          }}
+                          className="btn-grey w-full rounded-lg px-4 py-3 text-left text-sm transition-colors"
+                        >
+                          Open Chat
+                        </button>
+                      )}
                       <button
                         onClick={() => {
                           setMobileMenuOpen(false);
@@ -3749,9 +4649,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </header>
         )}
         {/* Chat button positioned just below header */}
-        {authChecked && isAuthenticated && !isMobile && (
+        {authChecked && isAuthenticated && !isMobile && hasPremiumAccess && (
           <div className="fixed left-1/2 transform -translate-x-1/2 z-40" style={{ top: 'calc(3.5rem + max(3px, calc(env(safe-area-inset-top, 0px) / 2)) - 0.2rem)' }}>
-            <ChatDropdown />
+            <ChatDropdown hasPremiumAccess={hasPremiumAccess} />
           </div>
         )}
         <main className="flex-1">{children}</main>
@@ -3822,10 +4722,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                   }
                 }}
                 disabled={authLoading || !authUsername.trim() || authPassword.length < 6}
-                className="inline-flex h-9 items-center rounded-full bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-4 text-sm font-medium !text-white hover:opacity-95 disabled:opacity-60 disabled:!text-white"
-                style={{ color: 'white' }}
+                className="synapse-style inline-flex h-9 items-center rounded-full px-4 text-sm font-medium !text-white  disabled:opacity-60 disabled:!text-white"
+                style={{ color: 'white', zIndex: 100, position: 'relative' }}
               >
-                {authLoading ? (authMode === "login" ? "Signing in..." : "Creating...") : (authMode === "login" ? "Sign in" : "Sign up")}
+                <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                  {authLoading ? (authMode === "login" ? "Signing in..." : "Creating...") : (authMode === "login" ? "Sign in" : "Sign up")}
+                </span>
               </button>
             </div>
           </div>
@@ -3913,8 +4815,14 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         });
 
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6">
-            <div className="w-full max-w-2xl rounded-2xl border border-[var(--foreground)]/30 bg-[var(--background)]/95 p-6 shadow-2xl">
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6"
+            onClick={() => setSurgeLogModalOpen(false)}
+          >
+            <div 
+              className="w-full max-w-2xl rounded-2xl border border-[var(--foreground)]/30 bg-[var(--background)]/95 p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-lg font-semibold text-[var(--foreground)]">
@@ -4678,9 +5586,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center justify-end">
             <button
               onClick={() => setDevToolsModalOpen(false)}
-              className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium !text-white bg-gradient-to-r from-[#00E5FF] to-[#FF2D96]"
+              className="synapse-style inline-flex h-9 items-center rounded-full px-4 text-sm font-medium !text-white"
+              style={{ zIndex: 100, position: 'relative' }}
             >
-              Close
+              <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>Close</span>
             </button>
           </div>
         }
@@ -4791,6 +5700,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </Modal>
 
+      {/* Promo Code Management Modal */}
+      <PromoCodeModal
+        open={promoCodeModalOpen}
+        onClose={() => setPromoCodeModalOpen(false)}
+      />
+      {/* Feedback Modal */}
+      <FeedbackModal 
+        open={feedbackModalOpen}
+        onClose={() => setFeedbackModalOpen(false)}
+        subscriptionLevel={subscriptionLevel}
+        pathname={pathname || ""}
+      />
     </div>
     </>
   );

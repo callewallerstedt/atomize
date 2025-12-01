@@ -83,7 +83,7 @@ export default function TestPDFPage() {
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={testing}
-            className="rounded-lg bg-gradient-to-r from-[#00E5FF] to-[#FF2D96] px-6 py-3 text-white font-medium hover:opacity-95 disabled:opacity-50"
+            className="synapse-style rounded-lg px-6 py-3 text-white font-medium hover:opacity-95 disabled:opacity-50"
           >
             {testing ? "Testing..." : "Upload PDF to Test"}
           </button>
