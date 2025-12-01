@@ -19,59 +19,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Code is required" }, { status: 400 });
     }
 
-    // Handle special hardcoded "betatest" code
-    if (code === "BETATEST") {
-      // Check if user already has Tester subscription
-      const currentUser = await prisma.user.findUnique({ where: { id: user.id } });
-      if (currentUser?.subscriptionLevel === "Tester") {
-        return NextResponse.json({ ok: false, error: "You already have Tester subscription" }, { status: 400 });
-      }
-
-      // Update user to Tester
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          subscriptionLevel: "Tester",
-          promoCodeUsed: "BETATEST",
-          subscriptionStart: new Date(),
-          subscriptionEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-        },
-      });
-
-      return NextResponse.json({
-        ok: true,
-        subscriptionLevel: "Tester",
-        message: "Successfully upgraded to Tester tier!",
-      });
-    }
-
-    // Handle special hardcoded "mlpb" code
-    if (code === "MLPB") {
-      // Check if user already has mylittlepwettybebe subscription
-      const currentUser = await prisma.user.findUnique({ where: { id: user.id } });
-      if (currentUser?.subscriptionLevel === "mylittlepwettybebe") {
-        return NextResponse.json({ ok: false, error: "You already have mylittlepwettybebe subscription" }, { status: 400 });
-      }
-
-      // Update user to mylittlepwettybebe
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          subscriptionLevel: "mylittlepwettybebe",
-          promoCodeUsed: "MLPB",
-          subscriptionStart: new Date(),
-          subscriptionEnd: null, // No expiration
-        },
-      });
-
-      return NextResponse.json({
-        ok: true,
-        subscriptionLevel: "mylittlepwettybebe",
-        message: "Successfully upgraded to mylittlepwettybebe tier!",
-      });
-    }
-
-    // Find promo code in database
+    // Find promo code in database (no more hardcoded special cases - all codes must be in DB)
     const promoCode = await prisma.promoCode.findUnique({
       where: { code },
       include: { redemptions: true },

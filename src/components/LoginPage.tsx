@@ -16,6 +16,7 @@ export default function LoginPage({
 }: LoginPageProps = {}) {
   const [authMode, setAuthMode] = useState<"login" | "signup">(defaultMode);
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showCodeInput, setShowCodeInput] = useState(defaultShowCode);
@@ -72,12 +73,23 @@ export default function LoginPage({
         setLoading(false);
         return;
       }
+
+      // Validate email format if provided
+      if (authMode === "signup" && email.trim()) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email.trim())) {
+          setError("Please enter a valid email address");
+          setLoading(false);
+          return;
+        }
+      }
       
       const res = await fetch(authMode === "login" ? "/api/auth/login" : "/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           username: username.trim(), 
+          email: authMode === "signup" ? email.trim() : undefined,
           password,
           ...(authMode === "signup" && code.trim() ? { code: code.trim() } : {}),
         }),
@@ -349,6 +361,20 @@ export default function LoginPage({
             />
           </div>
 
+          {authMode === "signup" && (
+            <div>
+              <label className="mb-2 block text-sm text-[var(--foreground)]/80">Email (Optional)</label>
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                type="email"
+                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-3 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
+                placeholder="your.email@example.com"
+                autoComplete="email"
+              />
+            </div>
+          )}
+
           <div>
             <label className="mb-2 block text-sm text-[var(--foreground)]/80">Password</label>
             <input
@@ -424,6 +450,7 @@ export default function LoginPage({
                   onClick={() => {
                     setAuthMode("signup");
                     setError(null);
+                    setEmail("");
                     setConfirmPassword("");
                     setShowCodeInput(false);
                     setCode("");
@@ -441,6 +468,7 @@ export default function LoginPage({
                   onClick={() => {
                     setAuthMode("login");
                     setError(null);
+                    setEmail("");
                     setConfirmPassword("");
                     setShowCodeInput(false);
                     setCode("");

@@ -67,6 +67,54 @@ function applyTheme(t: Theme) {
   }
 }
 
+// Component to display time remaining until subscription expires
+function SubscriptionTimer({ subscriptionEnd }: { subscriptionEnd: Date | null }) {
+  const [timeRemaining, setTimeRemaining] = useState<string>("");
+
+  useEffect(() => {
+    if (!subscriptionEnd) {
+      setTimeRemaining("");
+      return;
+    }
+
+    const updateTimer = () => {
+      const now = new Date();
+      const end = new Date(subscriptionEnd);
+      const diff = end.getTime() - now.getTime();
+
+      if (diff <= 0) {
+        setTimeRemaining("Expired");
+        return;
+      }
+
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+      if (days > 0) {
+        setTimeRemaining(`${days} day${days !== 1 ? 's' : ''}, ${hours} hour${hours !== 1 ? 's' : ''}`);
+      } else if (hours > 0) {
+        setTimeRemaining(`${hours} hour${hours !== 1 ? 's' : ''}, ${minutes} minute${minutes !== 1 ? 's' : ''}`);
+      } else {
+        setTimeRemaining(`${minutes} minute${minutes !== 1 ? 's' : ''}`);
+      }
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 60000); // Update every minute
+
+    return () => clearInterval(interval);
+  }, [subscriptionEnd]);
+
+  if (!subscriptionEnd || !timeRemaining) return null;
+
+  return (
+    <p className="text-xs text-[var(--foreground)]/60 mt-1">
+      Expires in: <span className="font-medium text-[var(--accent-cyan)]">{timeRemaining}</span>
+    </p>
+  );
+}
+
 export default function SettingsModal({ 
   open, 
   onClose, 
@@ -87,6 +135,7 @@ export default function SettingsModal({
   const [currentThemeName, setCurrentThemeName] = useState<string>("dark");
   const [username, setUsername] = useState<string | null>(null);
   const [subscriptionLevel, setSubscriptionLevel] = useState<string>(subscriptionLevelProp);
+  const [subscriptionEnd, setSubscriptionEnd] = useState<Date | null>(null);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [showCodeInput, setShowCodeInput] = useState(false);
   const [code, setCode] = useState("");
@@ -167,6 +216,12 @@ export default function SettingsModal({
           if (data?.user?.subscriptionLevel && subscriptionLevelProp === "Free") {
             setSubscriptionLevel(data.user.subscriptionLevel);
           }
+          // Set subscription end date
+          if (data?.user?.subscriptionEnd) {
+            setSubscriptionEnd(new Date(data.user.subscriptionEnd));
+          } else {
+            setSubscriptionEnd(null);
+          }
           // Set preferred title from preferences
           const prefs = data?.user?.preferences;
           if (prefs && typeof prefs === "object" && prefs.preferredTitle) {
@@ -187,6 +242,7 @@ export default function SettingsModal({
     } else {
       setUsername(null);
       setSubscriptionLevel("Free");
+      setSubscriptionEnd(null);
       setPreferredTitle("");
       setCustomTitle("");
     }
@@ -274,9 +330,7 @@ export default function SettingsModal({
               <p className="text-xs text-[var(--foreground)]/60">
                 You have full access to all premium features
               </p>
-              <p className="text-xs text-[var(--foreground)]/50">
-                Your subscription will remain active until the end of the billing period
-              </p>
+              <SubscriptionTimer subscriptionEnd={subscriptionEnd} />
             </div>
           )}
           {subscriptionLevel === "Tester" && (
@@ -284,6 +338,7 @@ export default function SettingsModal({
               <p className="text-xs text-[var(--foreground)]/60">
                 You have full access to all features as a Tester
               </p>
+              <SubscriptionTimer subscriptionEnd={subscriptionEnd} />
             </div>
           )}
           {subscriptionLevel === "mylittlepwettybebe" && (
@@ -291,6 +346,7 @@ export default function SettingsModal({
               <p className="text-xs text-[var(--foreground)]/60">
                 You have full access to all features
               </p>
+              {subscriptionEnd && <SubscriptionTimer subscriptionEnd={subscriptionEnd} />}
             </div>
           )}
           {(subscriptionLevel === "Tester" || subscriptionLevel === "mylittlepwettybebe") && (

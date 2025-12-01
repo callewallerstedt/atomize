@@ -10,14 +10,32 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
     const username = String(body.username || "").trim();
+    const email = body.email ? String(body.email || "").trim() : null;
     const password = String(body.password || "");
     const code = String(body.code || "").trim().toUpperCase();
     if (!username || !password || password.length < 6) {
       return NextResponse.json({ ok: false, error: "Invalid input" }, { status: 400 });
     }
+    
+    // Validate email format if provided
+    if (email && email.length > 0) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return NextResponse.json({ ok: false, error: "Invalid email format" }, { status: 400 });
+      }
+    }
+    
     const exists = await prisma.user.findUnique({ where: { username } });
     if (exists) {
       return NextResponse.json({ ok: false, error: "Username already exists" }, { status: 400 });
+    }
+    
+    // Check if email is already taken (if provided)
+    if (email) {
+      const emailExists = await prisma.user.findUnique({ where: { email } });
+      if (emailExists) {
+        return NextResponse.json({ ok: false, error: "Email already in use" }, { status: 400 });
+      }
     }
     const hash = await bcrypt.hash(password, 10);
     
@@ -42,6 +60,7 @@ export async function POST(req: Request) {
     const user = await prisma.user.create({ 
       data: { 
         username, 
+        email: email || null,
         password: hash,
         subscriptionLevel,
         promoCodeUsed,
