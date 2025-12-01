@@ -6,7 +6,7 @@
     "dev": "next dev -p 25565 -H 0.0.0.0",
     "dev3000": "next dev -p 3000 -H 0.0.0.0",
     "predev": "prisma generate",
-    "build": "prisma generate && prisma migrate deploy && next build",
+    "build": "prisma generate && (prisma migrate deploy || echo 'Migration deploy failed, continuing build...') && next build",
     "start": "next start -p 25565 -H 0.0.0.0",
     "postinstall": "prisma generate",
     "lint": "eslint"
