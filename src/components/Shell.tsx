@@ -4632,7 +4632,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       {isLoading && (!authChecked || isAuthenticated) && <LoadingScreen onComplete={handleLoadingComplete} />}
     <div className="flex min-h-screen bg-[var(--background)] text-[var(--foreground)]" style={!isIOSStandalone && !isMobile ? { zoom: uiZoom } : undefined}>
       {/* Main content */}
-      <div className="flex min-h-screen w-full flex-col">
+      <div className="flex min-h-screen w-full flex-col relative">
+        {/* Overlay to hide content above header on iPad */}
+        {authChecked && isAuthenticated && (
+          <div 
+            className="fixed top-0 left-0 right-0 z-[60] pointer-events-none"
+            style={{ 
+              height: 'env(safe-area-inset-top, 0px)', 
+              backgroundColor: 'var(--background)',
+            }}
+          />
+        )}
         {authChecked && isAuthenticated && (
         <header className="sticky top-0 z-50" style={{ paddingTop: 'env(safe-area-inset-top, 0px)', backgroundColor: 'var(--background)', backdropFilter: 'blur(10px) saturate(180%)', WebkitBackdropFilter: 'blur(10px) saturate(180%)', isolation: 'isolate' }}>
           <nav className="relative flex h-14 items-center px-3 sm:px-4 gap-2">
