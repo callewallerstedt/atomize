@@ -3642,7 +3642,7 @@ function Home() {
               // Update lesson in real-time as it streams
               const updatedData = loadSubjectData(quickLearnSlug) as StoredSubjectData | null;
               const nodeContent = updatedData?.nodes?.[lessonTitle];
-              if (nodeContent && typeof nodeContent === 'object' && !Array.isArray(nodeContent) && nodeContent.lessons) {
+              if (nodeContent && typeof nodeContent === 'object' && !Array.isArray(nodeContent) && nodeContent.lessons && nodeContent.lessons[0]) {
                 nodeContent.lessons[0].body = accumulated;
                 await saveSubjectDataAsync(quickLearnSlug, updatedData);
                 
@@ -3690,7 +3690,7 @@ function Home() {
       // Final save with complete lesson and quiz
       const finalData = loadSubjectData(quickLearnSlug) as StoredSubjectData | null;
       const finalNodeContent = finalData?.nodes?.[lessonTitle];
-      if (finalNodeContent && typeof finalNodeContent === 'object' && !Array.isArray(finalNodeContent) && finalNodeContent.lessons) {
+      if (finalNodeContent && typeof finalNodeContent === 'object' && !Array.isArray(finalNodeContent) && finalNodeContent.lessons && finalNodeContent.lessons[0]) {
         finalNodeContent.lessons[0].body = accumulated;
         finalNodeContent.lessons[0].quiz = quiz;
         finalNodeContent.rawLessonJson = [JSON.stringify({ title: lessonTitle, body: accumulated, quiz })];
