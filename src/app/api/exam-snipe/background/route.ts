@@ -225,7 +225,7 @@ Ensure arrays contain meaningful content (no placeholders). Focus on efficiency:
             // Create initial course data
             const courseData = {
               subject: examData.courseName,
-              files: fileNames.map(name => ({ name, type: 'application/pdf' })),
+              files: fileNames.map((name: string) => ({ name, type: 'application/pdf' })),
               combinedText: courseContent,
               tree: null,
               topics: [],
