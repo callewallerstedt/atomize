@@ -387,26 +387,31 @@ async function matchExamSnipeToCourse(
         : [],
     };
 
-    // Build course summaries for AI
-    const courseSummaries = coursesWithData.map((course) => {
-      const data = course.data as any;
-      const topics = Array.isArray(data?.topics) 
-        ? data.topics.map((t: any) => typeof t === 'string' ? t : t.name || '').slice(0, 10).join(', ')
-        : '';
-      const subjectName = data?.subject || course.name || '';
-      const summary = data?.course_quick_summary || data?.course_context || '';
-      
-      return {
-        slug: course.slug,
-        name: course.name,
-        subjectName,
-        topics,
-        summary: summary.substring(0, 500), // Limit length
-      };
-    });
+    // Only try to match if we have courses to match against
+    let matchResult: { matchedSlug: string | null; confidence: string; reasoning: string } | null = null;
+    
+    if (coursesWithData.length > 0) {
+      // Build course summaries for AI
+      const courseSummaries = coursesWithData.map((course) => {
+        const data = course.data as any;
+        const topics = Array.isArray(data?.topics) 
+          ? data.topics.map((t: any) => typeof t === 'string' ? t : t.name || '').slice(0, 10).join(', ')
+          : '';
+        const subjectName = data?.subject || course.name || '';
+        const summary = data?.course_quick_summary || data?.course_context || '';
+        
+        return {
+          slug: course.slug,
+          name: course.name,
+          subjectName,
+          topics,
+          summary: summary.substring(0, 500), // Limit length
+        };
+      });
 
-    // Use AI to match
-    const completion = await openai.chat.completions.create({
+      try {
+        // Use AI to match
+        const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
         {
@@ -451,29 +456,29 @@ If no course is a good match (confidence would be "low"), return matchedSlug as 
       max_tokens: 500,
     });
 
-        const responseText = completion.choices[0]?.message?.content || '';
-        
-        try {
-          matchResult = JSON.parse(responseText);
-        } catch {
-          // Try to extract JSON from markdown
-          const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-          if (jsonMatch) {
-            matchResult = JSON.parse(jsonMatch[1]);
-          } else {
-            const objectMatch = responseText.match(/\{[\s\S]*\}/);
-            if (objectMatch) {
-              matchResult = JSON.parse(objectMatch[0]);
+          const responseText = completion.choices[0]?.message?.content || '';
+          
+          try {
+            matchResult = JSON.parse(responseText);
+          } catch {
+            // Try to extract JSON from markdown
+            const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+            if (jsonMatch) {
+              matchResult = JSON.parse(jsonMatch[1]);
             } else {
-              throw new Error('No valid JSON found in AI response');
+              const objectMatch = responseText.match(/\{[\s\S]*\}/);
+              if (objectMatch) {
+                matchResult = JSON.parse(objectMatch[0]);
+              } else {
+                throw new Error('No valid JSON found in AI response');
+              }
             }
           }
+        } catch (matchError) {
+          console.error("Error during AI matching, will create new course:", matchError);
+          matchResult = null;
         }
-      } catch (matchError) {
-        console.error("Error during AI matching, will create new course:", matchError);
-        matchResult = null;
       }
-    }
 
     // Only update if we have a high or medium confidence match
     if (matchResult && matchResult.matchedSlug && (matchResult.confidence === 'high' || matchResult.confidence === 'medium')) {
