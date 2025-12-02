@@ -78,8 +78,14 @@ export default function SubjectPage() {
   const [examSnipes, setExamSnipes] = useState<Array<{ id: string; courseName: string; slug: string; createdAt: string; fileNames: string[] }>>([]);
   const [loadingExamSnipes, setLoadingExamSnipes] = useState(false);
   const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [topicInfoOpen, setTopicInfoOpen] = useState<string | null>(null);
   const isSyncingExamSnipesRef = useRef(false);
+  
+  const hasPremiumAccess =
+    subscriptionLevel === "Tester" ||
+    subscriptionLevel === "Paid" ||
+    subscriptionLevel === "mylittlepwettybebe";
 
   function getRandomCardIndex(filteredFlashcards: typeof allFlashcards, currentIndex: number): number {
     if (filteredFlashcards.length <= 1) return currentIndex;
@@ -109,11 +115,12 @@ export default function SubjectPage() {
     };
   }, [slug]);
 
-  // Check subscription level
+  // Check subscription level and authentication
   useEffect(() => {
     fetch("/api/me", { credentials: "include" })
       .then((r) => r.json().catch(() => ({})))
       .then((data) => {
+        setIsAuthenticated(!!data?.user);
         if (data?.user?.subscriptionLevel) {
           setSubscriptionLevel(data.user.subscriptionLevel);
         }
@@ -869,82 +876,96 @@ export default function SubjectPage() {
               >
                 Flashcards
               </button>
-              <button
-                onClick={() => router.push(`/subjects/${slug}/practice`)}
-                className="w-full sm:w-auto inline-flex h-10 items-center justify-center rounded-full px-5 text-sm font-medium border border-[var(--foreground)]/25 bg-[var(--background)]/80 text-[var(--foreground)]/85 hover:bg-[var(--foreground)]/10 hover:border-[var(--foreground)]/40 transition-colors"
-              >
-                Practice
-              </button>
-              <button
-                onClick={() => router.push(`/subjects/${slug}/surge`)}
-                className="w-full sm:w-auto inline-flex h-10 items-center justify-center rounded-full px-5 text-sm font-medium border border-[var(--foreground)]/25 bg-[var(--background)]/80 text-[var(--foreground)]/85 hover:bg-[var(--foreground)]/10 hover:border-[var(--foreground)]/40 transition-colors"
-              >
-                Surge
-              </button>
+              {isAuthenticated && (
+                <>
+                  <button
+                    onClick={() => router.push(`/subjects/${slug}/practice`)}
+                    className="w-full sm:w-auto inline-flex h-10 items-center justify-center rounded-full px-5 text-sm font-medium border border-[var(--foreground)]/25 bg-[var(--background)]/80 text-[var(--foreground)]/85 hover:bg-[var(--foreground)]/10 hover:border-[var(--foreground)]/40 transition-colors"
+                  >
+                    Practice
+                  </button>
+                  <button
+                    onClick={() => router.push(`/subjects/${slug}/surge`)}
+                    className="w-full sm:w-auto inline-flex h-10 items-center justify-center rounded-full px-5 text-sm font-medium border border-[var(--foreground)]/25 bg-[var(--background)]/80 text-[var(--foreground)]/85 hover:bg-[var(--foreground)]/10 hover:border-[var(--foreground)]/40 transition-colors"
+                  >
+                    Surge
+                  </button>
+                </>
+              )}
             </div>
-              <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3 flex items-center justify-between">
               <div className="text-sm text-[var(--foreground)]">Topics</div>
               <div className="flex items-center gap-2">
-                <button
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--background)] text-[var(--foreground)] hover:bg-[var(--background)]/80 border border-[var(--foreground)]/15"
-                  onClick={() => { setNewTopicValue(""); setNewTopicOpen(true); }}
-                  aria-label="New topic"
-                >
-                  +
-                </button>
-                <button
-                  className="inline-flex h-8 items-center rounded-full px-3 text-xs font-medium text-white hover:opacity-95 synapse-style"
-                  style={{ color: "white" }}
-                  onClick={async () => {
-                    try {
-                      setLoading(true);
-                      const saved = loadSubjectData(slug) as StoredSubjectData | null;
-                      
-                      // Ensure we have fileIds or fallback to using files/combinedText
-                      const fileIds = saved?.course_file_ids || [];
-                      const contextText = [
-                        saved?.course_context || '', 
-                        saved?.combinedText || ''
-                      ].filter(Boolean).join('\n\n');
-                      
-                      console.log(`[extract-topics] Using ${fileIds.length} file IDs and ${contextText.length} chars of context`);
-                      
-                      const res = await fetch('/api/extract-by-ids', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          subject: subjectName || slug,
-                          fileIds: fileIds,
-                          contextText: contextText
-                        })
-                      });
-                      const json = await res.json().catch(() => ({}));
-                      try { console.log('Extract-by-ids debug:', { filesRead: json?.debug?.filesRead, combinedLength: json?.debug?.combinedLength, combinedPreview: (json?.combinedText || '').slice(0, 500) }); } catch {}
-                      if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
-                      const gotTopics: TopicMeta[] = json.data?.topics || [];
-                      setTopics(gotTopics);
-                      const nextTree = { subject: subjectName || slug, topics: gotTopics.map((t: any) => ({ name: t.name, subtopics: [] })) } as any;
-                      setTree(nextTree);
-                      if (saved) {
-                        saved.topics = gotTopics;
-                        saved.tree = nextTree;
-                        // Save detected course language if provided
-                        if (json.detected_language_code && json.detected_language_name) {
-                          saved.course_language_code = json.detected_language_code;
-                          saved.course_language_name = json.detected_language_name;
+                {isAuthenticated && (
+                  <>
+                    <button
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--background)] text-[var(--foreground)] hover:bg-[var(--background)]/80 border border-[var(--foreground)]/15"
+                      onClick={() => { setNewTopicValue(""); setNewTopicOpen(true); }}
+                      aria-label="New topic"
+                    >
+                      +
+                    </button>
+                    <button
+                      className="inline-flex h-8 items-center rounded-full px-3 text-xs font-medium text-white hover:opacity-95 synapse-style disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ color: "white" }}
+                      disabled={!hasPremiumAccess}
+                      title={!hasPremiumAccess ? "Requires Premium access" : "Extract topics from course files"}
+                      onClick={async () => {
+                        if (!hasPremiumAccess) {
+                          alert("This feature requires Premium access");
+                          return;
                         }
-                        saveSubjectData(slug, saved);
-                      }
-                    } catch (e: any) {
-                      setError(e?.message || 'Failed to generate topics');
-                    } finally {
-                      setLoading(false);
-                    }
-                  }}
-                >
-                  <span style={{ color: '#ffffff', position: 'relative', zIndex: 101, opacity: 1, textShadow: 'none' }}>
-                    Extract Topics
-                  </span>
-                </button>
+                        try {
+                          setLoading(true);
+                          const saved = loadSubjectData(slug) as StoredSubjectData | null;
+                          
+                          // Ensure we have fileIds or fallback to using files/combinedText
+                          const fileIds = saved?.course_file_ids || [];
+                          const contextText = [
+                            saved?.course_context || '', 
+                            saved?.combinedText || ''
+                          ].filter(Boolean).join('\n\n');
+                          
+                          console.log(`[extract-topics] Using ${fileIds.length} file IDs and ${contextText.length} chars of context`);
+                          
+                          const res = await fetch('/api/extract-by-ids', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              subject: subjectName || slug,
+                              fileIds: fileIds,
+                              contextText: contextText
+                            })
+                          });
+                          const json = await res.json().catch(() => ({}));
+                          try { console.log('Extract-by-ids debug:', { filesRead: json?.debug?.filesRead, combinedLength: json?.debug?.combinedLength, combinedPreview: (json?.combinedText || '').slice(0, 500) }); } catch {}
+                          if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
+                          const gotTopics: TopicMeta[] = json.data?.topics || [];
+                          setTopics(gotTopics);
+                          const nextTree = { subject: subjectName || slug, topics: gotTopics.map((t: any) => ({ name: t.name, subtopics: [] })) } as any;
+                          setTree(nextTree);
+                          if (saved) {
+                            saved.topics = gotTopics;
+                            saved.tree = nextTree;
+                            // Save detected course language if provided
+                            if (json.detected_language_code && json.detected_language_name) {
+                              saved.course_language_code = json.detected_language_code;
+                              saved.course_language_name = json.detected_language_name;
+                            }
+                            saveSubjectData(slug, saved);
+                          }
+                        } catch (e: any) {
+                          setError(e?.message || 'Failed to generate topics');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                    >
+                      <span style={{ color: '#ffffff', position: 'relative', zIndex: 101, opacity: 1, textShadow: 'none' }}>
+                        Extract Topics
+                      </span>
+                    </button>
+                  </>
+                )}
                 {subscriptionLevel === "Tester" && tree && tree.topics && tree.topics.length > 0 && (
                   <button
                     onClick={async () => {

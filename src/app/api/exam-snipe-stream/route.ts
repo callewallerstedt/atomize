@@ -1,9 +1,19 @@
 import { NextRequest } from 'next/server';
 import OpenAI from 'openai';
+import { requirePremiumAccess } from "@/lib/premium";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
 
 export async function POST(req: NextRequest) {
+  // Check premium access
+  const premiumCheck = await requirePremiumAccess();
+  if (!premiumCheck.ok) {
+    return new Response(JSON.stringify({ ok: false, error: premiumCheck.error }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   const encoder = new TextEncoder();
 
   console.log('=== EXAM SNIPE API CALLED ===');

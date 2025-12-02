@@ -89,7 +89,14 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
   const [isScrolling, setIsScrolling] = useState(false);
   const [cursorHidden, setCursorHidden] = useState(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const currentLesson = (content?.lessons?.[activeLessonIndex] ?? null) as TopicGeneratedLesson | null;
+  
+  const hasPremiumAccess =
+    subscriptionLevel === "Tester" ||
+    subscriptionLevel === "Paid" ||
+    subscriptionLevel === "mylittlepwettybebe";
   const lessonMeta = (content?.lessonsMeta?.[activeLessonIndex] ?? null) as any;
   const lessonTag = lessonMeta?.tag as string | undefined;
   const lessonDisplayType = lessonTag || lessonMeta?.type || "Lesson Outline";
@@ -369,7 +376,15 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
     // Then fetch from server if authenticated
     (async () => {
       try {
+        // Check subscription level
         const meRes = await fetch("/api/me", { credentials: "include" });
+        const meData = await meRes.json().catch(() => ({}));
+        setIsAuthenticated(!!meData?.user);
+        if (meData?.user?.subscriptionLevel) {
+          setSubscriptionLevel(meData.user.subscriptionLevel);
+        } else {
+          setSubscriptionLevel("Free");
+        }
         const meJson = await meRes.json().catch(() => ({}));
         if (meJson?.user) {
           const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, { credentials: "include" });
@@ -1444,7 +1459,8 @@ function toggleStar(flashcardId: string) {
               <div className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-5 text-[var(--foreground)] shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
               
               <div className="flex items-center gap-2 mb-4">
-                {/* Concise button */}
+                {/* Concise button - only show for premium users */}
+                {hasPremiumAccess && (
                 <button
                   onClick={async () => {
                     if (shorteningLesson || lessonLoading) return;
@@ -1503,8 +1519,11 @@ function toggleStar(flashcardId: string) {
                 >
                   <span className="text-lg font-bold leading-none text-[var(--foreground)]">-</span>
                 </button>
-                {/* Regenerate button */}
+                )}
+                {/* Regenerate button - only show for premium users */}
+                {hasPremiumAccess && (
                 <button
+                  disabled={lessonLoading}
                   onClick={async () => {
                       if (lessonLoading) return;
                       setLessonLoading(true);
@@ -1779,6 +1798,7 @@ function toggleStar(flashcardId: string) {
                       <path d="M4 4V9H4.58152M4.58152 9C5.47362 7.27477 7.06307 6 9 6C11.3869 6 13.6761 7.36491 14.9056 9.54555M4.58152 9H9M20 20V15H19.4185M19.4185 15C18.5264 16.7252 16.9369 18 15 18C12.6131 18 10.3239 16.6351 9.09443 14.4545M19.4185 15H15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                   </button>
+                )}
 
                   {/* Download raw response button */}
                   <button
@@ -1838,6 +1858,7 @@ function toggleStar(flashcardId: string) {
                   <>
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-sm text-[var(--foreground)]/70">{content.lessonsMeta?.[activeLessonIndex]?.title}</div>
+                      {isAuthenticated && (
                       <button
                         onClick={readLesson}
                         disabled={audioLoading}
@@ -1873,6 +1894,7 @@ function toggleStar(flashcardId: string) {
                           </svg>
                         )}
                       </button>
+                      )}
                     </div>
                     {lessonMetadata && (
                       <div className="mb-6 rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4 space-y-4">

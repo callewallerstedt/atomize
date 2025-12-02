@@ -8,8 +8,30 @@ export const runtime = "nodejs";
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ ok: true, subjects: [] });
-  const subjects = await prisma.subject.findMany({ where: { userId: user.id }, orderBy: { createdAt: "desc" } });
-  return NextResponse.json({ ok: true, subjects });
+  const subjects = await prisma.subject.findMany({ 
+    where: { userId: user.id }, 
+    orderBy: { createdAt: "desc" },
+  });
+  
+  // Get sharedByUsername from SubjectData for each subject
+  const subjectsWithSharedBy = await Promise.all(
+    subjects.map(async (s) => {
+      const subjectData = await prisma.subjectData.findUnique({
+        where: { userId_slug: { userId: user.id, slug: s.slug } },
+        select: { sharedByUsername: true },
+      });
+      return {
+        id: s.id,
+        name: s.name,
+        slug: s.slug,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+        sharedByUsername: subjectData?.sharedByUsername || null,
+      };
+    })
+  );
+  
+  return NextResponse.json({ ok: true, subjects: subjectsWithSharedBy });
 }
 
 export async function POST(req: Request) {

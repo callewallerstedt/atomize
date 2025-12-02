@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import type { LessonMetadata } from "@/types/lesson";
+import { requirePremiumAccess } from "@/lib/premium";
 
 type GeneratedLesson = {
   planId: string;
@@ -14,10 +15,12 @@ type GeneratedLesson = {
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    // Check premium access
+    const premiumCheck = await requirePremiumAccess();
+    if (!premiumCheck.ok) {
+      return NextResponse.json({ ok: false, error: premiumCheck.error }, { status: 403 });
     }
+    const user = premiumCheck.user;
 
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json({ ok: false, error: "Missing OPENAI_API_KEY" }, { status: 500 });

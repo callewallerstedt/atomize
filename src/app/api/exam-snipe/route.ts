@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { requirePremiumAccess } from "@/lib/premium";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
 
 export async function POST(req: NextRequest) {
   try {
+    // Check premium access
+    const premiumCheck = await requirePremiumAccess();
+    if (!premiumCheck.ok) {
+      return NextResponse.json({ ok: false, error: premiumCheck.error }, { status: 403 });
+    }
+
     const formData = await req.formData();
     const examFiles = formData.getAll('exams') as File[];
 

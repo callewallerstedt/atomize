@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { stripLessonMetadata } from "@/lib/lessonFormat";
+import { requirePremiumAccess } from "@/lib/premium";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +13,12 @@ type FlashcardResponse = {
 
 export async function POST(req: Request) {
   try {
+    // Check premium access
+    const premiumCheck = await requirePremiumAccess();
+    if (!premiumCheck.ok) {
+      return NextResponse.json({ ok: false, error: premiumCheck.error }, { status: 403 });
+    }
+
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
     }

@@ -649,11 +649,21 @@ html.light-mode div[data-chat-pill].chat-input-container,
 /* Synapse style - reusable liquid animated fill for buttons */
 .synapse-style {
   position: relative;
-  overflow: hidden;
+  overflow: hidden !important;
   isolation: isolate;
   /* Keep this safely below modal z-50 */
   z-index: 1;
   background: transparent !important;
+}
+
+/* Ensure buttons with synapse-style properly clip their content */
+button.synapse-style {
+  overflow: hidden !important;
+  /* Create a new stacking context to ensure proper clipping */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 .light-mode .synapse-style {
@@ -710,6 +720,8 @@ html.light-mode div[data-chat-pill].chat-input-container,
   z-index: 0;
   top: 0;
   left: 0;
+  will-change: transform;
+  transform-origin: center;
 }
 
 .synapse-style::before {

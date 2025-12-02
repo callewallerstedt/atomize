@@ -6,12 +6,13 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import GlowSpinner from "@/components/GlowSpinner";
 import CourseCreateModal from "@/components/CourseCreateModal";
 import LoginPage from "@/components/LoginPage";
+import Modal from "@/components/Modal";
 import { saveSubjectData, StoredSubjectData, loadSubjectData } from "@/utils/storage";
 import { changelog } from "../../CHANGELOG";
 import { LessonBody } from "@/components/LessonBody";
 import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
 
-type Subject = { name: string; slug: string };
+type Subject = { name: string; slug: string; sharedByUsername?: string | null };
 
 function ChangelogBox() {
   
@@ -376,6 +377,17 @@ function HomepageFileUploadArea({
   status?: 'idle' | 'ready' | 'processing' | 'success';
   hasPremiumAccess?: boolean;
 }) {
+  if (!hasPremiumAccess) {
+    return (
+      <div className="space-y-2">
+        <div className="rounded-lg border-2 border-dashed p-4 border-[var(--foreground)]/20 bg-[var(--background)]/40">
+          <div className="text-xs text-[var(--foreground)]/50 text-center">
+            ⚠️ This feature requires Premium access
+          </div>
+        </div>
+      </div>
+    );
+  }
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -401,11 +413,13 @@ function HomepageFileUploadArea({
   return (
     <div className="space-y-2">
       <div
-        onClick={() => fileInputRef.current?.click()}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        className={`rounded-lg border-2 border-dashed p-4 cursor-pointer transition-colors ${
+        onClick={() => hasPremiumAccess && fileInputRef.current?.click()}
+        onDragOver={hasPremiumAccess ? handleDragOver : undefined}
+        onDragLeave={hasPremiumAccess ? handleDragLeave : undefined}
+        onDrop={hasPremiumAccess ? handleDrop : undefined}
+        className={`rounded-lg border-2 border-dashed p-4 transition-colors ${
+          hasPremiumAccess ? 'cursor-pointer' : 'cursor-not-allowed'
+        } ${
           isDragging
             ? 'border-[var(--foreground)]/40'
             : 'border-[var(--foreground)]/20 hover:border-[var(--foreground)]/30'
@@ -416,7 +430,7 @@ function HomepageFileUploadArea({
             : 'color-mix(in srgb, var(--foreground) 8%, transparent)',
         }}
         onMouseEnter={(e) => {
-          if (!isDragging) {
+          if (!isDragging && hasPremiumAccess) {
             e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--foreground) 12%, transparent)';
           }
         }}
@@ -427,9 +441,12 @@ function HomepageFileUploadArea({
         }}
       >
         <div className="text-xs text-[var(--foreground)]/70 text-center">
-          {isDragging && hasPremiumAccess ? 'Drop files here' : (hasPremiumAccess ? (message || 'Upload files or drag and drop') : '')}
+          {!hasPremiumAccess 
+            ? '⚠️ This feature requires Premium access'
+            : (isDragging ? 'Drop files here' : (message || 'Upload files or drag and drop'))
+          }
         </div>
-        {files.length > 0 && (
+        {files.length > 0 && hasPremiumAccess && (
           <div className="mt-2 text-xs text-[var(--foreground)]/60">
             {files.length} file{files.length !== 1 ? 's' : ''} selected
           </div>
@@ -442,16 +459,18 @@ function HomepageFileUploadArea({
         className="hidden"
         accept=".pdf,.txt,.md,.docx,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         onChange={(e) => {
+          if (!hasPremiumAccess) return;
           const selectedFiles = Array.from(e.target.files || []);
           if (selectedFiles.length > 0) {
             onFilesChange(selectedFiles);
           }
         }}
+        disabled={!hasPremiumAccess}
       />
-      {files.length > 0 && (
+      {files.length > 0 && hasPremiumAccess && (
         <button
           onClick={onGenerate}
-          disabled={status === 'processing'}
+          disabled={status === 'processing' || !hasPremiumAccess}
           className="synapse-style w-full inline-flex items-center justify-center rounded-full px-4 py-1.5 text-sm font-medium !text-white transition-opacity disabled:opacity-50"
           style={{ color: 'white', zIndex: 100, position: 'relative' }}
         >
@@ -3147,6 +3166,10 @@ function Home() {
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
   
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string>("");
+  const [copiedToClipboard, setCopiedToClipboard] = useState(false);
+  
   const [subscriptionLevel, setSubscriptionLevel] = useState<string | null>(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
   const hasPremiumAccess =
@@ -3167,6 +3190,17 @@ function Home() {
           setSubscriptionLevel(data.user.subscriptionLevel);
         } else {
           setSubscriptionLevel("Free");
+        }
+        
+        // Handle redirect after login (e.g., from share page)
+        if (authenticated && typeof window !== "undefined") {
+          const urlParams = new URLSearchParams(window.location.search);
+          if (urlParams.get("redirect") === "share" && urlParams.get("shareId")) {
+            const shareId = urlParams.get("shareId");
+            // Redirect to share page to save
+            router.push(`/share/${shareId}`);
+            return;
+          }
         }
         
         // If authenticated, load subjects from server
@@ -4272,7 +4306,7 @@ function Home() {
           return (
           <div
             key={s.slug}
-            className={`course-box relative rounded-2xl border border-[var(--foreground)]/10 p-5 text-[var(--foreground)] transition-all duration-200 ${
+            className={`course-box relative rounded-2xl border border-[var(--foreground)]/10 p-5 text-[var(--foreground)] transition-all duration-200 flex flex-col ${
               !hasPremiumAccess
                 ? 'cursor-not-allowed opacity-40'
                 : preparingSlug === s.slug
@@ -4316,9 +4350,23 @@ function Home() {
                   }
             }
           >
-            <div className="relative">
+            <div className="relative flex flex-col h-full">
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold leading-snug truncate">{s.name}</div>
+                {(() => {
+                  // Use sharedByUsername from the subject data (not parsed from name)
+                  const sharedBy = (s as any).sharedByUsername;
+                  
+                  return (
+                    <div>
+                      <div className="text-sm font-semibold leading-snug truncate">{s.name}</div>
+                      {sharedBy && (
+                        <div className="text-xs text-[var(--foreground)]/50 mt-0.5 truncate">
+                          Shared by {sharedBy}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {(() => {
                   // Use examDateUpdateTrigger to force re-render when metadata changes
                   const _ = examDateUpdateTrigger;
@@ -4365,34 +4413,45 @@ function Home() {
                           </button>
                         )}
                       </div>
-                      <div className="mt-3 flex w-full items-center gap-3">
-                        <div className="text-xs text-[var(--foreground)]/20">
-                          {topicCount} topic{topicCount === 1 ? "" : "s"}
-                        </div>
-                        {/* Surge button inline with topic count / days left */}
+                    </>
+                  );
+                })()}
+              </div>
+              <div className="mt-auto pt-3 flex w-full items-center gap-3">
+                {(() => {
+                  const _ = examDateUpdateTrigger;
+                  const data = loadSubjectData(s.slug);
+                  const topicCount = data?.topics?.length || 0;
+                  return (
+                    <>
+                      <div className="text-xs text-[var(--foreground)]/20">
+                        {topicCount} topic{topicCount === 1 ? "" : "s"}
+                      </div>
+                      {/* Surge button at bottom right - only show for premium users */}
+                      {hasPremiumAccess && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (!hasPremiumAccess || preparingSlug === s.slug) return;
+                            if (preparingSlug === s.slug) return;
                             router.push(`/subjects/${s.slug}/surge`);
                           }}
                           onMouseEnter={(e) => {
                             e.stopPropagation();
-                            if (!hasPremiumAccess || preparingSlug === s.slug) return;
+                            if (preparingSlug === s.slug) return;
                             setSurgeButtonHovered(s.slug);
                           }}
                           onMouseLeave={(e) => {
                             e.stopPropagation();
                             setSurgeButtonHovered(null);
                           }}
-                          disabled={preparingSlug === s.slug || !hasPremiumAccess}
+                          disabled={preparingSlug === s.slug}
                           className={`ml-auto inline-flex h-7 items-center justify-center rounded-full px-3 text-[10px] font-medium whitespace-nowrap synapse-style ${
-                            !hasPremiumAccess || preparingSlug === s.slug
+                            preparingSlug === s.slug
                               ? 'opacity-40 cursor-not-allowed'
                               : 'cursor-pointer hover:scale-[1.03]'
                           }`}
                           aria-label="Start Surge"
-                          title={hasPremiumAccess ? "Start Synapse Surge" : "Surge is available on Premium"}
+                          title="Start Synapse Surge"
                         >
                           <span
                             style={{
@@ -4408,7 +4467,7 @@ function Home() {
                             Surge
                           </span>
                         </button>
-                      </div>
+                      )}
                     </>
                   );
                 })()}
@@ -4497,6 +4556,39 @@ function Home() {
                   className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
                 >
                   Info
+                </button>
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    setMenuOpenFor(null);
+                    try {
+                      const me = await fetch("/api/me", { credentials: "include" }).then(r => r.json().catch(() => ({})));
+                      if (!me?.user) {
+                        alert("Please log in to share courses");
+                        return;
+                      }
+                      const response = await fetch("/api/courses/share", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        credentials: "include",
+                        body: JSON.stringify({ slug: s.slug }),
+                      });
+                      const result = await response.json();
+                      if (result.ok && result.shareUrl) {
+                        setShareUrl(result.shareUrl);
+                        setShareModalOpen(true);
+                        setCopiedToClipboard(false);
+                      } else {
+                        alert("Failed to create share link: " + (result.error || "Unknown error"));
+                      }
+                    } catch (err) {
+                      console.error("Error sharing course:", err);
+                      alert("Failed to create share link");
+                    }
+                  }}
+                  className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
+                >
+                  Share
                 </button>
               </div>
             )}
@@ -4587,6 +4679,58 @@ function Home() {
           })();
         }}
       />
+
+      {/* Share Modal */}
+      <Modal
+        open={shareModalOpen}
+        onClose={() => {
+          setShareModalOpen(false);
+          setCopiedToClipboard(false);
+        }}
+        title="Share Course"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(shareUrl);
+                  setCopiedToClipboard(true);
+                  setTimeout(() => setCopiedToClipboard(false), 2000);
+                } catch (err) {
+                  console.error("Failed to copy:", err);
+                }
+              }}
+              className="px-4 py-2 rounded-lg bg-[var(--foreground)]/10 text-[var(--foreground)] hover:bg-[var(--foreground)]/20 transition-colors"
+            >
+              {copiedToClipboard ? "Copied!" : "Copy Link"}
+            </button>
+            <button
+              onClick={() => {
+                setShareModalOpen(false);
+                setCopiedToClipboard(false);
+              }}
+              className="px-4 py-2 rounded-lg border border-[var(--foreground)]/20 text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-[var(--foreground)]/70">
+            Share this link with others to let them save this course:
+          </p>
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-[var(--foreground)]/5 border border-[var(--foreground)]/10">
+            <input
+              type="text"
+              value={shareUrl}
+              readOnly
+              className="flex-1 bg-transparent text-sm text-[var(--foreground)] outline-none"
+              onClick={(e) => (e.target as HTMLInputElement).select()}
+            />
+          </div>
+        </div>
+      </Modal>
 
       {/* Quick Lesson Modal */}
       {quickLearnOpen && (

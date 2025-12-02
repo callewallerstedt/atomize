@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { requirePremiumAccess } from "@/lib/premium";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +10,12 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
 
 export async function POST(req: NextRequest) {
   try {
+    // Check premium access
+    const premiumCheck = await requirePremiumAccess();
+    if (!premiumCheck.ok) {
+      return NextResponse.json({ ok: false, error: premiumCheck.error }, { status: 403 });
+    }
+
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json({ ok: false, error: "Missing OPENAI_API_KEY" }, { status: 500 });
     }

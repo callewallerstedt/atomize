@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { requirePremiumAccess } from "@/lib/premium";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -142,6 +143,12 @@ function textToSimplePdf(text: string): Buffer {
 
 export async function POST(req: Request) {
   try {
+    // Check premium access
+    const premiumCheck = await requirePremiumAccess();
+    if (!premiumCheck.ok) {
+      return NextResponse.json({ ok: false, error: premiumCheck.error }, { status: 403 });
+    }
+
     const form = await req.formData();
     const files = form.getAll("files") as unknown as File[];
 

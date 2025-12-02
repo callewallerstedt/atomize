@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { stripLessonMetadata } from "@/lib/lessonFormat";
+import { requirePremiumAccess } from "@/lib/premium";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -8,6 +9,12 @@ const openai = new OpenAI({
 
 export async function POST(request: NextRequest) {
   try {
+    // Check premium access
+    const premiumCheck = await requirePremiumAccess();
+    if (!premiumCheck.ok) {
+      return NextResponse.json({ ok: false, error: premiumCheck.error }, { status: 403 });
+    }
+
     const { lessonTitle, lessonBody, subject, topic } = await request.json();
 
     if (!lessonBody || !lessonTitle) {

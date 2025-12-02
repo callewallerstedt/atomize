@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import OpenAI from 'openai';
+import { requirePremiumAccess } from "@/lib/premium";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
 
@@ -10,10 +11,12 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
-      return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+    // Check premium access
+    const premiumCheck = await requirePremiumAccess();
+    if (!premiumCheck.ok) {
+      return NextResponse.json({ ok: false, error: premiumCheck.error }, { status: 403 });
     }
+    const user = premiumCheck.user;
 
     const body = await req.json();
     const examsText = Array.isArray(body?.examsText) ? body.examsText : [];

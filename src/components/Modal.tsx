@@ -39,9 +39,9 @@ export default function Modal({
     : "w-full max-w-lg rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md p-5 text-[var(--foreground)] shadow-2xl flex flex-col";
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto" onClick={onClose}>
+    <div className="fixed inset-0 z-50" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60" />
-      <div className="relative z-10 flex min-h-full items-center justify-center p-4">
+      <div className="absolute inset-0 flex items-center justify-center p-4 overflow-y-auto">
         <div
           className={`${contentClass} max-h-[calc(100vh-4rem)] my-auto`}
           onClick={(e) => e.stopPropagation()}

@@ -1606,6 +1606,18 @@ function FileUploadArea({
     }
   };
   
+  if (!hasPremiumAccess) {
+    return (
+      <div className="space-y-2">
+        <div className="rounded-lg border-2 border-dashed p-4 border-[var(--foreground)]/20 bg-[var(--background)]/40">
+          <div className="text-xs text-[var(--foreground)]/50 text-center">
+            ⚠️ This feature requires Premium access
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-2">
       <div
@@ -1620,7 +1632,7 @@ function FileUploadArea({
         }`}
       >
         <div className="text-xs text-[var(--foreground)]/70 text-center">
-          {isDragging && hasPremiumAccess ? 'Drop files here' : (hasPremiumAccess ? (message || 'Upload files or drag and drop') : '')}
+          {isDragging ? 'Drop files here' : (message || 'Upload files or drag and drop')}
         </div>
         {files.length > 0 && (
           <div className="mt-2 text-xs text-[var(--foreground)]/60">
@@ -1635,16 +1647,19 @@ function FileUploadArea({
         className="hidden"
         accept=".pdf,.txt,.md,.docx,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         onChange={(e) => {
+          if (!hasPremiumAccess) return;
           const selectedFiles = Array.from(e.target.files || []);
           if (selectedFiles.length > 0) {
             onFilesChange(selectedFiles);
           }
         }}
+        disabled={!hasPremiumAccess}
       />
       {files.length > 0 && (
         <button
           onClick={onGenerate}
-          className="synapse-style w-full inline-flex items-center justify-center rounded-full px-4 py-1.5 text-sm font-medium !text-white  transition-opacity"
+          disabled={!hasPremiumAccess}
+          className="synapse-style w-full inline-flex items-center justify-center rounded-full px-4 py-1.5 text-sm font-medium !text-white transition-opacity disabled:opacity-50"
           style={{ color: 'white', zIndex: 100, position: 'relative' }}
         >
           <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>

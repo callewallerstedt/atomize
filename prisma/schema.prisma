@@ -36,6 +36,7 @@ model User {
   promoCodeRedemptions PromoCodeRedemption[]
   usageStats           UsageStats?
   feedback             Feedback[]
+  sharedCourses        SharedCourse[]
 }
 
 model Session {
@@ -64,6 +65,7 @@ model SubjectData {
   userId    String
   slug      String
   data      Json
+  sharedByUsername String? // Username of the latest user who shared this course
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -133,4 +135,18 @@ model Feedback {
 
   @@index([userId, createdAt])
   @@index([createdAt])
+}
+
+model SharedCourse {
+  id        String   @id @default(cuid())
+  shareId   String   @unique // Unique share identifier for URL
+  userId    String   // User who shared the course
+  courseSlug String  // Slug of the shared course
+  courseName String  // Name of the course
+  courseData Json    // Full course data (without surgeLog and practiceLogs)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([shareId])
+  @@index([userId, createdAt])
 }

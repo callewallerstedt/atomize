@@ -106,8 +106,18 @@ export default function LoginPage({
       const verifyData = await verifyRes.json().catch(() => ({}));
       
       if (verifyData?.user) {
-        // Success - do a full page reload to ensure everything is synced
-        window.location.href = "/";
+        // Check for redirect parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const redirect = urlParams.get("redirect");
+        const shareId = urlParams.get("shareId");
+        
+        if (redirect === "share" && shareId) {
+          // Redirect to share page with autoSave parameter
+          window.location.href = `/share/${shareId}?autoSave=true`;
+        } else {
+          // Success - do a full page reload to ensure everything is synced
+          window.location.href = "/";
+        }
       } else {
         throw new Error("Authentication verification failed");
       }
@@ -436,7 +446,7 @@ export default function LoginPage({
           <button
             type="submit"
             disabled={loading || !username.trim() || password.length < 6 || (authMode === "signup" && password !== confirmPassword)}
-            className="w-full inline-flex h-12 items-center justify-center rounded-full synapse-style px-6 text-sm font-medium !text-white hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed transition-opacity"
+            className="w-full inline-flex h-12 items-center justify-center rounded-full synapse-style px-6 text-sm font-medium text-white hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed transition-opacity"
           >
             {loading ? (authMode === "login" ? "Signing in..." : "Creating account...") : authMode === "login" ? "Sign in" : "Sign up"}
           </button>
