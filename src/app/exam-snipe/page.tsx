@@ -1045,7 +1045,7 @@ function ExamSnipeInner() {
                     const savePayload = {
                       courseName,
                       slug,
-                      subjectSlug: subjectSlugToSave,
+                      subjectSlug: subjectSlugToSave && subjectSlugToSave.trim() !== '' ? subjectSlugToSave : null,
                       fileNames,
                       results: result,
                     };

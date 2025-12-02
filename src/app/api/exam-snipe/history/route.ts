@@ -221,7 +221,8 @@ export async function POST(req: Request) {
       results: record.results,
     };
 
-    // If subjectSlug is not set, try to automatically match it to a course
+    // If subjectSlug is not set (null, undefined, or empty string), try to automatically match it to a course
+    // subjectSlugInput is already trimmed and converted to null if empty (line 139)
     if (!subjectSlugInput && results && typeof results === 'object') {
       // Run matching asynchronously (don't block the response)
       matchExamSnipeToCourse(user.id, slugInput, courseNameInput, results, fileNames).catch((err) => {
