@@ -1824,6 +1824,21 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
 
   useEffect(() => {
     const handleOpenChat = () => {
+      // Clear welcome messages when opening chat modal (not on homepage)
+      if (pathname !== '/') {
+        setMessages(prev => {
+          const filtered = prev.filter(msg => {
+            if (msg.role === 'assistant' && msg.content) {
+              const isWelcomeMessage = msg.content.includes('Welcome Back to Synapse') || 
+                                       msg.content.includes('Welcome to Synapse') ||
+                                       msg.content.match(/It's a \w+ (morning|afternoon|evening|night)/);
+              return !isWelcomeMessage;
+            }
+            return true;
+          });
+          return filtered;
+        });
+      }
       setOpen(true);
       requestAnimationFrame(() => {
         chatInputRef.current?.focus();
@@ -1834,6 +1849,21 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
       setOpen(prev => {
         const newState = !prev;
         if (newState) {
+          // Clear welcome messages when opening chat modal (not on homepage)
+          if (pathname !== '/') {
+            setMessages(prevMessages => {
+              const filtered = prevMessages.filter(msg => {
+                if (msg.role === 'assistant' && msg.content) {
+                  const isWelcomeMessage = msg.content.includes('Welcome Back to Synapse') || 
+                                           msg.content.includes('Welcome to Synapse') ||
+                                           msg.content.match(/It's a \w+ (morning|afternoon|evening|night)/);
+                  return !isWelcomeMessage;
+                }
+                return true;
+              });
+              return filtered;
+            });
+          }
           requestAnimationFrame(() => {
             chatInputRef.current?.focus();
           });
@@ -1846,16 +1876,15 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
       const customEvent = e as CustomEvent;
       const { welcomeMessage, welcomeName, userMessage } = customEvent.detail || {};
       
-      if (welcomeMessage && userMessage) {
-        // Set messages with welcome message and user message
+      if (userMessage) {
+        // Set messages with user message only (no welcome message)
         setMessages([
-          { role: 'assistant', content: welcomeMessage },
           { role: 'user', content: userMessage }
         ]);
         insertedWelcomeRef.current = false;
         setOpen(true);
         // Store for processing in next effect
-        pendingWelcomeMessageRef.current = { welcomeMessage, userMessage };
+        pendingWelcomeMessageRef.current = { welcomeMessage: '', userMessage };
       } else {
         setOpen(true);
       }
@@ -1948,18 +1977,32 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
     }
 
     if (messages.length > 0 && !sending && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content) {
-      const messagesKey = JSON.stringify(messages);
+      // Filter out welcome messages before saving
+      const filteredMessages = messages.filter(msg => {
+        if (msg.role === 'assistant' && msg.content) {
+          const isWelcomeMessage = msg.content.includes('Welcome Back to Synapse') || 
+                                   msg.content.includes('Welcome to Synapse') ||
+                                   msg.content.match(/It's a \w+ (morning|afternoon|evening|night)/);
+          return !isWelcomeMessage;
+        }
+        return true;
+      });
+      
+      // Don't save if all messages were filtered out (only welcome messages)
+      if (filteredMessages.length === 0) return;
+      
+      const messagesKey = JSON.stringify(filteredMessages);
       if (messagesKey === lastSavedRef.current) return;
       const now = Date.now();
       if (currentChatId) {
-        const updated = chatHistory.map(c => c.id === currentChatId ? { ...c, messages: [...messages], timestamp: now } : c);
+        const updated = chatHistory.map(c => c.id === currentChatId ? { ...c, messages: [...filteredMessages], timestamp: now } : c);
         setChatHistory(updated);
         lastSavedRef.current = messagesKey;
         try { localStorage.setItem('chatHistory', JSON.stringify(updated)); } catch {}
       } else {
-        const firstUserMessage = messages.find(m => m.role === 'user');
+        const firstUserMessage = filteredMessages.find(m => m.role === 'user');
         const title = firstUserMessage ? (firstUserMessage.content.slice(0, 50) + (firstUserMessage.content.length > 50 ? '...' : '')) : 'Conversation';
-        const newChat: ChatHistory = { id: now.toString(), title, messages: [...messages], timestamp: now };
+        const newChat: ChatHistory = { id: now.toString(), title, messages: [...filteredMessages], timestamp: now };
         const updated = [newChat, ...chatHistory].slice(0, 50);
         setChatHistory(updated);
         setCurrentChatId(newChat.id);
@@ -2086,8 +2129,19 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
 
   function loadChat(chat: ChatHistory) {
     isLoadingFromHistoryRef.current = true;
-     insertedWelcomeRef.current = false;
-    setMessages(chat.messages);
+    insertedWelcomeRef.current = false;
+    // Filter out welcome messages when loading chat history
+    const filteredMessages = chat.messages.filter(msg => {
+      if (msg.role === 'assistant' && msg.content) {
+        // Check if it's a welcome message pattern
+        const isWelcomeMessage = msg.content.includes('Welcome Back to Synapse') || 
+                                 msg.content.includes('Welcome to Synapse') ||
+                                 msg.content.match(/It's a \w+ (morning|afternoon|evening|night)/);
+        return !isWelcomeMessage;
+      }
+      return true;
+    });
+    setMessages(filteredMessages);
     setCurrentChatId(chat.id);
   }
 
@@ -3374,13 +3428,12 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
   // Handle pending welcome message
   useEffect(() => {
     if (pendingWelcomeMessageRef.current && open && !sending) {
-      const { welcomeMessage, userMessage } = pendingWelcomeMessageRef.current;
+      const { userMessage } = pendingWelcomeMessageRef.current;
       pendingWelcomeMessageRef.current = null;
       
-      // Send the message with existing messages
+      // Send the message without welcome message
       setTimeout(() => {
         sendMessageWithExistingMessages([
-          { role: 'assistant', content: welcomeMessage },
           { role: 'user', content: userMessage }
         ]);
       }, 100);

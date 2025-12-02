@@ -41,17 +41,11 @@ export default function QuickLearnPage() {
   }, []);
 
   async function handleGenerate() {
-    if (!quickLearnQuery.trim() || quickLearnLoading) return;
+    const trimmedQuery = quickLearnQuery?.trim();
+    if (!trimmedQuery || quickLearnLoading) return;
     try {
       setQuickLearnLoading(true);
-      const res = await fetch('/api/quick-learn-general', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: quickLearnQuery })
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
-
+      
       // Load/create quicklearn subject
       const quickLearnSlug = 'quicklearn';
       let data = loadSubjectData(quickLearnSlug) as StoredSubjectData | null;
@@ -68,23 +62,94 @@ export default function QuickLearnPage() {
       }
       if (!data.nodes) data.nodes = {} as any;
 
-      const lessonTitle: string = json.data?.title || quickLearnQuery;
+      const lessonTitle: string = trimmedQuery;
+      
+      // Use the same streaming endpoint as Surge and normal lessons
+      // For Quick Learn, only topic is required - endpoint handles the rest
+      const streamRes = await fetch('/api/node-lesson/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: 'Quick Learn',
+          topic: trimmedQuery,
+        })
+      });
+      
+      if (!streamRes.ok) {
+        const errorJson = await streamRes.json().catch(() => ({}));
+        throw new Error(errorJson?.error || `Server error (${streamRes.status})`);
+      }
+
+      const reader = streamRes.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let accumulated = "";
+
+      // Stream the lesson body
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6);
+          if (!payload) continue;
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed.type === "text") {
+              accumulated += parsed.content;
+            } else if (parsed.type === "error") {
+              throw new Error(parsed.error || "Streaming error");
+            } else if (parsed.type === "done") {
+              // Streaming complete
+            }
+          } catch (err) {
+            if (!(err instanceof SyntaxError)) {
+              throw err;
+            }
+          }
+        }
+      }
+
+      if (!accumulated.trim()) {
+        throw new Error("Lesson generation returned empty content");
+      }
+
+      // Generate quiz questions separately using the original endpoint
+      let quiz: any[] = [];
+      try {
+        const quizRes = await fetch('/api/quick-learn-general', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: trimmedQuery })
+        });
+        const quizJson = await quizRes.json().catch(() => ({}));
+        if (quizRes.ok && quizJson?.ok && Array.isArray(quizJson.data?.quiz)) {
+          quiz = quizJson.data.quiz.map((q: any) => ({
+            question: String(q.question || ""),
+            answer: q.answer ? String(q.answer) : undefined,
+          }));
+        }
+      } catch (quizErr) {
+        console.warn("Failed to generate quiz, continuing without quiz:", quizErr);
+      }
+
+      // Save the lesson
       data.nodes[lessonTitle] = {
-        overview: `Quick lesson on: ${quickLearnQuery}`,
+        overview: `Quick lesson on: ${trimmedQuery}`,
         symbols: [],
         lessonsMeta: [{ type: 'Quick Learn', title: lessonTitle }],
         lessons: [{
           title: lessonTitle,
-          body: json.data.body,
-          quiz: Array.isArray(json.data.quiz)
-            ? json.data.quiz.map((q: any) => ({
-                question: String(q.question || ""),
-                answer: q.answer ? String(q.answer) : undefined,
-              }))
-            : [],
-          metadata: json.data.metadata || null
+          body: accumulated,
+          quiz: quiz,
+          metadata: null
         }],
-        rawLessonJson: [json.raw || JSON.stringify(json.data)],
+        rawLessonJson: [JSON.stringify({ title: lessonTitle, body: accumulated, quiz })],
       } as any;
 
       await saveSubjectDataAsync(quickLearnSlug, data);

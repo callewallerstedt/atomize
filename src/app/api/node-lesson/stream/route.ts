@@ -27,11 +27,24 @@ export async function POST(req: Request) {
     const languageName = String(body.languageName || "");
     const mode = String(body.mode || "");
 
-    if (!topic || lessonsMeta.length === 0) {
-      return NextResponse.json({ ok: false, error: "Missing topic or lessonsMeta" }, { status: 400 });
+    // For Quick Learn, only topic is required
+    const isQuickLearn = subject === "Quick Learn" || subject === "quicklearn";
+    
+    if (!topic) {
+      return NextResponse.json({ ok: false, error: "Missing topic" }, { status: 400 });
     }
+    
+    // For non-Quick Learn lessons, require lessonsMeta
+    if (!isQuickLearn && lessonsMeta.length === 0) {
+      return NextResponse.json({ ok: false, error: "Missing lessonsMeta" }, { status: 400 });
+    }
+    
+    // For Quick Learn, create a default lessonsMeta if not provided
+    const effectiveLessonsMeta = isQuickLearn && lessonsMeta.length === 0 
+      ? [{ type: "Quick Learn", title: topic }]
+      : lessonsMeta;
 
-    const target = lessonsMeta[lessonIndex] || { type: "Full Lesson", title: `Lesson ${lessonIndex + 1}` };
+    const target = effectiveLessonsMeta[lessonIndex] || { type: "Full Lesson", title: `Lesson ${lessonIndex + 1}` };
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -89,7 +102,15 @@ export async function POST(req: Request) {
       mode === "simplify" ? "If mode is simplify, keep scope identical but rewrite explanations to be easier, without changing the quiz meaning." : ""
     ].filter(Boolean).join("\n");
 
-    const context = [
+    // For Quick Learn, use simpler context without course materials
+    const context = isQuickLearn ? [
+      "=".repeat(50),
+      `TOPIC TO TEACH: ${topic}`,
+      "=".repeat(50),
+      `This is a standalone Quick Learn lesson. Teach this topic comprehensively without requiring course context.`,
+      `Target lesson: ${target.type} — ${target.title}`,
+      languageName ? `Write the entire lesson in ${languageName}.` : ""
+    ].filter(Boolean).join("\n\n") : [
       "=".repeat(50),
       `TOPIC TO TEACH: ${topic}`,
       "=".repeat(50),

@@ -59,6 +59,8 @@ export default function SubjectPage() {
   const [quickLearnOpen, setQuickLearnOpen] = useState(false);
   const [quickLearnQuery, setQuickLearnQuery] = useState("");
   const [quickLearnLoading, setQuickLearnLoading] = useState(false);
+  // Track which topic row is hovered so the Generate AI button only shows for that topic
+  const [hoveredTopicName, setHoveredTopicName] = useState<string | null>(null);
   const [generatingBasics, setGeneratingBasics] = useState(false);
   const [reviewsDue, setReviewsDue] = useState<ReturnType<typeof getLessonsDueForReview>>([]);
   const [upcomingReviews, setUpcomingReviews] = useState<ReturnType<typeof getUpcomingReviews>>([]);
@@ -860,18 +862,24 @@ export default function SubjectPage() {
 
         {activeTab === 'tree' && (
           <div className="mt-4">
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
               <button
                 onClick={collectAllFlashcards}
-                className="w-full rounded-xl bg-gradient-to-r from-[var(--accent-cyan)]/10 to-[var(--accent-pink)]/10 hover:from-[var(--accent-cyan)]/20 hover:to-[var(--accent-pink)]/20 transition-all py-3 px-6 flex items-center justify-center text-base font-semibold text-[var(--foreground)]"
+                className="w-full sm:w-auto inline-flex h-10 items-center justify-center rounded-full px-5 text-sm font-medium border border-[var(--foreground)]/25 bg-[var(--background)]/80 text-[var(--foreground)]/85 hover:bg-[var(--foreground)]/10 hover:border-[var(--foreground)]/40 transition-colors"
               >
                 Flashcards
               </button>
               <button
                 onClick={() => router.push(`/subjects/${slug}/practice`)}
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 hover:bg-[var(--background)]/65 transition-all py-3 px-6 flex items-center justify-center text-base font-semibold text-[var(--foreground)]/85"
+                className="w-full sm:w-auto inline-flex h-10 items-center justify-center rounded-full px-5 text-sm font-medium border border-[var(--foreground)]/25 bg-[var(--background)]/80 text-[var(--foreground)]/85 hover:bg-[var(--foreground)]/10 hover:border-[var(--foreground)]/40 transition-colors"
               >
                 Practice
+              </button>
+              <button
+                onClick={() => router.push(`/subjects/${slug}/surge`)}
+                className="w-full sm:w-auto inline-flex h-10 items-center justify-center rounded-full px-5 text-sm font-medium border border-[var(--foreground)]/25 bg-[var(--background)]/80 text-[var(--foreground)]/85 hover:bg-[var(--foreground)]/10 hover:border-[var(--foreground)]/40 transition-colors"
+              >
+                Surge
               </button>
             </div>
               <div className="mb-3 flex items-center justify-between">
@@ -886,7 +894,7 @@ export default function SubjectPage() {
                 </button>
                 <button
                   className="inline-flex h-8 items-center rounded-full px-3 text-xs font-medium text-white hover:opacity-95 synapse-style"
-                  style={{ color: 'white' }}
+                  style={{ color: "white" }}
                   onClick={async () => {
                     try {
                       setLoading(true);
@@ -933,7 +941,9 @@ export default function SubjectPage() {
                     }
                   }}
                 >
-                  Extract Topics
+                  <span style={{ color: '#ffffff', position: 'relative', zIndex: 101, opacity: 1, textShadow: 'none' }}>
+                    Extract Topics
+                  </span>
                 </button>
                 {subscriptionLevel === "Tester" && tree && tree.topics && tree.topics.length > 0 && (
                   <button
@@ -1013,6 +1023,12 @@ export default function SubjectPage() {
                         // Use Next.js router for clean navigation
                         router.push(`/subjects/${slug}/node/${encodeURIComponent(name)}`);
                       }}
+                      onMouseEnter={() => {
+                        setHoveredTopicName(name);
+                      }}
+                      onMouseLeave={() => {
+                        setHoveredTopicName((current) => (current === name ? null : current));
+                      }}
                       onTouchStart={(e) => {
                         // Ensure touch events work on mobile/iPad
                         if ((e.target as HTMLElement).closest('button') || isGenerating) return;
@@ -1077,7 +1093,7 @@ export default function SubjectPage() {
                         )}
                       {!isGen && (
                         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                          {!isGenerating && (
+                          {!isGenerating && hoveredTopicName === name && (
                             <button
                               onClick={async (e) => {
                                 e.preventDefault();
@@ -1141,17 +1157,15 @@ export default function SubjectPage() {
                                   setNodeGenerating((m) => ({ ...m, [name]: false }));
                                 }
                               }}
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-full synapse-style text-[11px] text-white shadow cursor-pointer opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:shadow-lg hover:scale-110 transition-all duration-300"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-full shadow cursor-pointer hover:shadow-lg hover:scale-110 transition-all duration-300"
+                              style={{
+                                backgroundImage: 'var(--accent-grad)',
+                                backgroundSize: '200% 200%',
+                                animation: 'gradient-shift 4s ease-in-out infinite',
+                              }}
                               aria-label="Generate AI"
                               title="Generate AI"
-                            >
-                              <span style={{ color: '#ffffff', opacity: 1, textShadow: 'none' }}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M12 2v4M12 18v4M4 12H2M6 12H4M18 12h-2M20 12h-2M19.07 19.07l-1.41-1.41M19.07 4.93l-1.41 1.41M4.93 4.93l1.41 1.41M4.93 19.07l1.41-1.41" />
-                                  <circle cx="12" cy="12" r="3" />
-                                </svg>
-                              </span>
-                            </button>
+                            />
                           )}
                           {isGenerating && (
                           <span className="inline-flex items-center gap-2 rounded-full border border-[var(--foreground)]/20 bg-[var(--background)] px-2 py-0.5 text-[11px] text-[var(--foreground)]/70">
@@ -1598,7 +1612,11 @@ export default function SubjectPage() {
                 }}
                 className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-white synapse-style"
                 disabled={creatingTopic}
-              >{creatingTopic ? 'Adding…' : 'Add topic'}</button>
+              >
+                <span style={{ color: '#ffffff', position: 'relative', zIndex: 101, opacity: 1, textShadow: 'none' }}>
+                  {creatingTopic ? 'Adding…' : 'Add topic'}
+                </span>
+              </button>
             </div>
           }
         >

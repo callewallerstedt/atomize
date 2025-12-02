@@ -426,7 +426,88 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
         }
       } catch {}
     })();
-  }, [slug]);
+  }, [slug, title]);
+  
+  // Listen for streaming updates for Quick Learn lessons
+  useEffect(() => {
+    if (slug !== 'quicklearn') return;
+    
+    const handleStreaming = (e: CustomEvent) => {
+      if (e.detail?.slug === slug && e.detail?.topic === title) {
+        // Reload content to show streaming updates
+        const updatedData = loadSubjectData(slug);
+        if (updatedData?.nodes?.[title]) {
+          setSubjectData(updatedData);
+          const nodeContent = updatedData.nodes[title] as any;
+          if (nodeContent && typeof nodeContent === 'object') {
+            setContent({
+              overview: nodeContent.overview || "",
+              symbols: Array.isArray(nodeContent.symbols) ? nodeContent.symbols : [],
+              lessons: Array.isArray(nodeContent.lessons) ? nodeContent.lessons : [],
+              lessonsMeta: Array.isArray(nodeContent.lessonsMeta) ? nodeContent.lessonsMeta : [],
+            });
+            setLessonLoading(false);
+          }
+        }
+      }
+    };
+    
+    const handleComplete = (e: CustomEvent) => {
+      if (e.detail?.slug === slug && e.detail?.topic === title) {
+        // Final reload when complete
+        const finalData = loadSubjectData(slug);
+        if (finalData) {
+          setSubjectData(finalData);
+          const nodeContent = finalData.nodes?.[title] as any;
+          if (nodeContent && typeof nodeContent === 'object') {
+            setContent({
+              overview: nodeContent.overview || "",
+              symbols: Array.isArray(nodeContent.symbols) ? nodeContent.symbols : [],
+              lessons: Array.isArray(nodeContent.lessons) ? nodeContent.lessons : [],
+              lessonsMeta: Array.isArray(nodeContent.lessonsMeta) ? nodeContent.lessonsMeta : [],
+            });
+            setLessonLoading(false);
+          }
+        }
+      }
+    };
+    
+    window.addEventListener('synapse:lesson-streaming', handleStreaming as EventListener);
+    window.addEventListener('synapse:lesson-complete', handleComplete as EventListener);
+    
+    return () => {
+      window.removeEventListener('synapse:lesson-streaming', handleStreaming as EventListener);
+      window.removeEventListener('synapse:lesson-complete', handleComplete as EventListener);
+    };
+  }, [slug, title]);
+  
+  // Set content from subjectData
+  useEffect(() => {
+    if (!subjectData?.nodes?.[title]) {
+      setContent(null);
+      return;
+    }
+    
+    const nodeContent = subjectData.nodes[title] as any;
+    if (nodeContent && typeof nodeContent === 'object') {
+      const hasEmptyLesson = Array.isArray(nodeContent.lessons) && 
+        nodeContent.lessons.length > 0 && 
+        (!nodeContent.lessons[0]?.body || nodeContent.lessons[0].body.trim() === '');
+      
+      if (hasEmptyLesson) {
+        setLessonLoading(true);
+      }
+      
+      setContent({
+        overview: nodeContent.overview || "",
+        symbols: Array.isArray(nodeContent.symbols) ? nodeContent.symbols : [],
+        lessons: Array.isArray(nodeContent.lessons) ? nodeContent.lessons : [],
+        lessonsMeta: Array.isArray(nodeContent.lessonsMeta) ? nodeContent.lessonsMeta : [],
+      });
+    } else {
+      setContent(null);
+    }
+  }, [subjectData, title]);
   
   const courseTopics = useMemo(() => {
     const names: string[] = [];

@@ -3549,19 +3549,11 @@ function Home() {
   }, [setCourseMetaUpdateTrigger]);
 
   async function handleQuickLearn() {
+    const trimmedQuery = quickLearnQuery?.trim();
+    if (!trimmedQuery || quickLearnLoading) return;
+    
     try {
       setQuickLearnLoading(true);
-
-      const res = await fetch('/api/quick-learn-general', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: quickLearnQuery,
-        })
-      });
-
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
 
       // Load or create the quicklearn subject
       const quickLearnSlug = "quicklearn";
@@ -3584,34 +3576,129 @@ function Home() {
         quickLearnData.nodes = {};
       }
 
-      // Add the new quick learn lesson
-      const lessonTitle = json.data.title || quickLearnQuery;
+      const lessonTitle = trimmedQuery;
+
+      // Create placeholder lesson immediately so it shows up
       quickLearnData.nodes[lessonTitle] = {
-            overview: `Quick lesson on: ${quickLearnQuery}`,
-            symbols: [],
+        overview: `Quick lesson on: ${trimmedQuery}`,
+        symbols: [],
         lessonsMeta: [{ type: "Quick Lesson", title: lessonTitle }],
-            lessons: [{
+        lessons: [{
           title: lessonTitle,
-              body: json.data.body,
-              quiz: Array.isArray(json.data.quiz)
-                ? json.data.quiz.map((q: any) => ({
-                    question: String(q.question || ""),
-                    answer: q.answer ? String(q.answer) : undefined,
-                  }))
-                : [],
-              metadata: json.data.metadata || null
-            }],
-            rawLessonJson: [json.raw || JSON.stringify(json.data)]
+          body: "", // Empty initially, will be streamed
+          quiz: [],
+          metadata: null
+        }],
+        rawLessonJson: []
       };
 
-      // Save to server (await to ensure it's saved)
+      // Save placeholder immediately
       const { saveSubjectDataAsync } = await import("@/utils/storage");
       await saveSubjectDataAsync(quickLearnSlug, quickLearnData);
 
-      // Close modal and navigate to the lesson
+      // Close modal and navigate immediately
       setQuickLearnOpen(false);
-      router.replace('/');
+      setQuickLearnQuery("");
       router.push(`/subjects/${quickLearnSlug}/node/${encodeURIComponent(lessonTitle)}`);
+
+      // Start streaming in the background
+      const streamRes = await fetch('/api/node-lesson/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: 'Quick Learn',
+          topic: trimmedQuery,
+        })
+      });
+      
+      if (!streamRes.ok) {
+        const errorJson = await streamRes.json().catch(() => ({}));
+        throw new Error(errorJson?.error || `Server error (${streamRes.status})`);
+      }
+
+      const reader = streamRes.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let accumulated = "";
+
+      // Stream the lesson body and update as we go
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const payload = line.slice(6);
+          if (!payload) continue;
+          try {
+            const parsed = JSON.parse(payload);
+            if (parsed.type === "text") {
+              accumulated += parsed.content;
+              
+              // Update lesson in real-time as it streams
+              const updatedData = loadSubjectData(quickLearnSlug) as StoredSubjectData | null;
+              if (updatedData?.nodes?.[lessonTitle]) {
+                updatedData.nodes[lessonTitle].lessons[0].body = accumulated;
+                await saveSubjectDataAsync(quickLearnSlug, updatedData);
+                
+                // Dispatch event to update the lesson page
+                window.dispatchEvent(new CustomEvent('synapse:lesson-streaming', { 
+                  detail: { slug: quickLearnSlug, topic: lessonTitle, body: accumulated } 
+                }));
+              }
+            } else if (parsed.type === "error") {
+              throw new Error(parsed.error || "Streaming error");
+            } else if (parsed.type === "done") {
+              // Streaming complete
+            }
+          } catch (err) {
+            if (!(err instanceof SyntaxError)) {
+              throw err;
+            }
+          }
+        }
+      }
+
+      if (!accumulated.trim()) {
+        throw new Error("Lesson generation returned empty content");
+      }
+
+      // Generate quiz questions separately
+      let quiz: any[] = [];
+      try {
+        const quizRes = await fetch('/api/quick-learn-general', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: trimmedQuery })
+        });
+        const quizJson = await quizRes.json().catch(() => ({}));
+        if (quizRes.ok && quizJson?.ok && Array.isArray(quizJson.data?.quiz)) {
+          quiz = quizJson.data.quiz.map((q: any) => ({
+            question: String(q.question || ""),
+            answer: q.answer ? String(q.answer) : undefined,
+          }));
+        }
+      } catch (quizErr) {
+        console.warn("Failed to generate quiz, continuing without quiz:", quizErr);
+      }
+
+      // Final save with complete lesson and quiz
+      const finalData = loadSubjectData(quickLearnSlug) as StoredSubjectData | null;
+      if (finalData?.nodes?.[lessonTitle]) {
+        finalData.nodes[lessonTitle].lessons[0].body = accumulated;
+        finalData.nodes[lessonTitle].lessons[0].quiz = quiz;
+        finalData.nodes[lessonTitle].rawLessonJson = [JSON.stringify({ title: lessonTitle, body: accumulated, quiz })];
+        await saveSubjectDataAsync(quickLearnSlug, finalData);
+        
+        // Dispatch final update event
+        window.dispatchEvent(new CustomEvent('synapse:lesson-complete', { 
+          detail: { slug: quickLearnSlug, topic: lessonTitle } 
+        }));
+      }
     } catch (err: any) {
       alert(err?.message || "Failed to generate quick learn lesson");
     } finally {
@@ -4227,7 +4314,7 @@ function Home() {
                   }
             }
           >
-            <div className="flex items-start justify-between gap-3">
+            <div className="relative">
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold leading-snug truncate">{s.name}</div>
                 {(() => {
@@ -4276,16 +4363,55 @@ function Home() {
                           </button>
                         )}
                       </div>
-                      <div className="mt-3 flex items-center gap-3 flex-wrap">
+                      <div className="mt-3 flex w-full items-center gap-3">
                         <div className="text-xs text-[var(--foreground)]/20">
                           {topicCount} topic{topicCount === 1 ? "" : "s"}
                         </div>
+                        {/* Surge button inline with topic count / days left */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!hasPremiumAccess || preparingSlug === s.slug) return;
+                            router.push(`/subjects/${s.slug}/surge`);
+                          }}
+                          onMouseEnter={(e) => {
+                            e.stopPropagation();
+                            if (!hasPremiumAccess || preparingSlug === s.slug) return;
+                            setSurgeButtonHovered(s.slug);
+                          }}
+                          onMouseLeave={(e) => {
+                            e.stopPropagation();
+                            setSurgeButtonHovered(null);
+                          }}
+                          disabled={preparingSlug === s.slug || !hasPremiumAccess}
+                          className={`ml-auto inline-flex h-7 items-center justify-center rounded-full px-3 text-[10px] font-medium whitespace-nowrap synapse-style ${
+                            !hasPremiumAccess || preparingSlug === s.slug
+                              ? 'opacity-40 cursor-not-allowed'
+                              : 'cursor-pointer hover:scale-[1.03]'
+                          }`}
+                          aria-label="Start Surge"
+                          title={hasPremiumAccess ? "Start Synapse Surge" : "Surge is available on Premium"}
+                        >
+                          <span
+                            style={{
+                              color: '#ffffff',
+                              position: 'relative',
+                              zIndex: 101,
+                              opacity: 1,
+                              textShadow: 'none',
+                              letterSpacing: '0.08em',
+                              textTransform: 'uppercase',
+                            }}
+                          >
+                            Surge
+                          </span>
+                        </button>
                       </div>
                     </>
                   );
                 })()}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="absolute right-0 top-0 flex items-center gap-2">
                 <button
                   onClick={(e) => { e.stopPropagation(); setMenuOpenFor((cur) => (cur === s.slug ? null : s.slug)); }}
                   disabled={preparingSlug === s.slug}
@@ -4305,80 +4431,7 @@ function Home() {
                   </svg>
                 </button>
               </div>
-            </div>
-            
-            {/* Surge button - bottom right (always visible, disabled for non-premium tiers) */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (!hasPremiumAccess || preparingSlug === s.slug) return;
-                router.push(`/subjects/${s.slug}/surge`);
-              }}
-              onMouseEnter={(e) => {
-                e.stopPropagation();
-                if (!hasPremiumAccess || preparingSlug === s.slug) return;
-                setSurgeButtonHovered(s.slug);
-              }}
-              onMouseLeave={(e) => {
-                e.stopPropagation();
-                setSurgeButtonHovered(null);
-              }}
-              disabled={preparingSlug === s.slug || !hasPremiumAccess}
-              className={`absolute bottom-4 right-4 inline-flex items-center justify-center w-8 h-8 rounded-full transition-all z-20 ${
-                !hasPremiumAccess || preparingSlug === s.slug
-                  ? 'opacity-40 cursor-not-allowed'
-                  : 'cursor-pointer hover:bg-[var(--foreground)]/15'
-              }`}
-              style={{
-                background: preparingSlug === s.slug || !hasPremiumAccess
-                  ? 'rgba(229, 231, 235, 0.03)'
-                  : 'rgba(229, 231, 235, 0.08)',
-                boxShadow:
-                  !hasPremiumAccess || preparingSlug === s.slug
-                    ? undefined
-                    : surgeButtonHovered === s.slug
-                        ? '0 2px 8px rgba(0, 0, 0, 0.7), 0 0 10px rgba(0, 229, 255, 0.7), 0 0 20px rgba(0, 229, 255, 0.5), 0 0 30px rgba(255, 45, 150, 0.4), 0 0 40px rgba(255, 45, 150, 0.2)'
-                        : undefined,
-                border: 'none',
-                transition: 'box-shadow 0.3s ease, background 0.3s ease'
-              }}
-              aria-label="Start Surge"
-              title={hasPremiumAccess ? "Start Synapse Surge" : "Surge is available on Premium"}
-            >
-                {preparingSlug === s.slug ? (
-                  <svg 
-                    width="16" 
-                    height="16" 
-                    viewBox="0 0 24 24" 
-                    fill="none" 
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="text-[var(--foreground)]/30"
-                  >
-                    <g transform="translate(12 12) scale(0.8,1.1) translate(-12 -12)">
-                      <path 
-                        d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" 
-                        fill="currentColor"
-                      />
-                    </g>
-                  </svg>
-                ) : (
-                  <svg 
-                    width="16" 
-                    height="16" 
-                    viewBox="0 0 24 24" 
-                    fill="none" 
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <g transform="translate(12 12) scale(0.8,1.1) translate(-12 -12)">
-                      <path 
-                        d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" 
-                        fill="currentColor"
-                        className="text-[var(--foreground)]"
-                      />
-                    </g>
-                  </svg>
-                )}
-              </button>
+              </div>
             
             {preparingSlug === s.slug && (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--background)]/80 backdrop-blur-sm rounded-2xl z-10">
@@ -4477,6 +4530,42 @@ function Home() {
           >
             <span className="text-[var(--foreground)]/70">Drop files here to auto-create a course</span>
             <span className="text-xs text-[var(--foreground)]/50">We'll scan the files and name it for you</span>
+          </div>
+        )}
+        {/* Quick Learn lessons link - subtle */}
+        {hasPremiumAccess && (
+          <div
+            onClick={() => router.push('/quicklearn')}
+            className="relative rounded-xl border border-[var(--foreground)]/5 bg-[var(--background)]/30 p-4 text-[var(--foreground)]/70 transition-all duration-200 cursor-pointer hover:border-[var(--foreground)]/10 hover:bg-[var(--background)]/40 hover:text-[var(--foreground)]/90"
+            style={{ 
+              boxShadow: 'none',
+            }}
+            role="link"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                router.push('/quicklearn');
+              }
+            }}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]/50">
+                  <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                <span className="text-xs font-medium">Quick Learn</span>
+              </div>
+              <span className="text-[10px] text-[var(--foreground)]/40">
+                {(() => {
+                  const quickLearnData = loadSubjectData('quicklearn');
+                  const nodeCount = quickLearnData?.nodes ? Object.keys(quickLearnData.nodes).length : 0;
+                  return nodeCount > 0 ? `${nodeCount}` : '';
+                })()}
+              </span>
+            </div>
           </div>
         )}
         {subjects.length === 0 && null}

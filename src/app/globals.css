@@ -651,6 +651,7 @@ html.light-mode div[data-chat-pill].chat-input-container,
   position: relative;
   overflow: hidden;
   isolation: isolate;
+  /* Keep this safely below modal z-50 */
   z-index: 1;
   background: transparent !important;
 }
@@ -712,14 +713,30 @@ html.light-mode div[data-chat-pill].chat-input-container,
 }
 
 .synapse-style::before {
-  background: radial-gradient(circle, rgba(0, 229, 255, 1) 0%, rgba(0, 229, 255, 0.9) 30%, rgba(0, 229, 255, 0.3) 50%, transparent 65%);
+  /* Make cyan blob more vibrant with a stronger core and slower fade */
+  background: radial-gradient(
+    circle,
+    rgba(0, 229, 255, 1) 0%,
+    rgba(0, 229, 255, 1) 20%,
+    rgba(0, 229, 255, 0.9) 40%,
+    rgba(0, 229, 255, 0.5) 60%,
+    transparent 78%
+  );
   top: -75%;
   left: -75%;
   animation: blob-float-1 28s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 .synapse-style::after {
-  background: radial-gradient(circle, rgba(255, 45, 150, 1) 0%, rgba(255, 45, 150, 0.9) 30%, rgba(255, 45, 150, 0.3) 50%, transparent 65%);
+  /* Make pink blob more vibrant with a stronger core and slower fade */
+  background: radial-gradient(
+    circle,
+    rgba(255, 45, 150, 1) 0%,
+    rgba(255, 45, 150, 1) 20%,
+    rgba(255, 45, 150, 0.9) 40%,
+    rgba(255, 45, 150, 0.5) 60%,
+    transparent 78%
+  );
   bottom: -75%;
   right: -75%;
   animation: blob-float-2 34s cubic-bezier(0.4, 0, 0.6, 1) infinite;
@@ -733,7 +750,8 @@ html.light-mode div[data-chat-pill].chat-input-container,
   color: #ffffff !important;
   opacity: 1 !important;
   position: relative;
-  z-index: 100 !important;
+  /* Slightly above the animated blobs (z-0), but still below modals (z-50) */
+  z-index: 2 !important;
 }
 
 .synapse-style > *,
@@ -741,7 +759,7 @@ html.light-mode div[data-chat-pill].chat-input-container,
 .synapse-style > button,
 .synapse-style > div {
   position: relative;
-  z-index: 100 !important;
+  z-index: 2 !important;
   opacity: 1 !important;
   color: #ffffff !important;
   text-shadow: none !important;
@@ -764,7 +782,7 @@ html.light-mode div[data-chat-pill].chat-input-container,
   color: #ffffff !important;
   opacity: 1 !important;
   position: relative;
-  z-index: 100 !important;
+  z-index: 2 !important;
 }
 
 .light-mode .synapse-style > *,
