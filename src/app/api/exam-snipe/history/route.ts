@@ -497,7 +497,7 @@ If no course is a good match (confidence would be "low"), return matchedSlug as 
       }
     } else {
       // No good match found - create a new course
-      console.log(`No good match found for exam snipe ${examSnipeSlug} (confidence: ${matchResult.confidence || 'unknown'})`);
+      console.log(`No good match found for exam snipe ${examSnipeSlug} (confidence: ${matchResult?.confidence || 'unknown'})`);
       console.log(`Creating new course: ${examSnipeCourseName}`);
       
       try {
