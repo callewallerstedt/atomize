@@ -70,6 +70,65 @@ export async function PUT(req: Request) {
   }
 }
 
+export async function PATCH(req: Request) {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  try {
+    const body = await req.json().catch(() => ({}));
+    const oldSlug = String(body.oldSlug || "");
+    const newSlug = String(body.newSlug || "");
+    const name = String(body.name || "");
+    if (!oldSlug || !newSlug || !name) {
+      return NextResponse.json({ ok: false, error: "Missing fields" }, { status: 400 });
+    }
+    
+    // Check if old slug exists
+    const oldSubject = await prisma.subject.findUnique({
+      where: { userId_slug: { userId: user.id, slug: oldSlug } },
+    });
+    if (!oldSubject) {
+      return NextResponse.json({ ok: false, error: "Subject not found" }, { status: 404 });
+    }
+    
+    // Check if new slug already exists (and it's not the same as old slug)
+    if (oldSlug !== newSlug) {
+      const existing = await prisma.subject.findUnique({
+        where: { userId_slug: { userId: user.id, slug: newSlug } },
+      });
+      if (existing) {
+        return NextResponse.json({ ok: false, error: "New slug already exists" }, { status: 400 });
+      }
+    }
+    
+    // Update subject slug and name
+    await prisma.subject.update({
+      where: { userId_slug: { userId: user.id, slug: oldSlug } },
+      data: { slug: newSlug, name },
+    });
+    
+    // Update subjectData slug
+    const subjectData = await prisma.subjectData.findUnique({
+      where: { userId_slug: { userId: user.id, slug: oldSlug } },
+    });
+    if (subjectData) {
+      await prisma.subjectData.update({
+        where: { userId_slug: { userId: user.id, slug: oldSlug } },
+        data: { slug: newSlug },
+      });
+    }
+    
+    // Update examSnipeHistory subjectSlug references
+    await prisma.examSnipeHistory.updateMany({
+      where: { userId: user.id, subjectSlug: oldSlug },
+      data: { subjectSlug: newSlug },
+    });
+    
+    return NextResponse.json({ ok: true, newSlug });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message || "Failed to update subject slug" }, { status: 500 });
+  }
+}
+
 export async function DELETE(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });

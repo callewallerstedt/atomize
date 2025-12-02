@@ -3903,7 +3903,66 @@ function Home() {
             const renameJson = await renameRes.json().catch(() => ({}));
             if (renameJson?.ok && renameJson.name && renameJson.name !== effectiveName) {
               effectiveName = renameJson.name;
-              renameSubject(unique, effectiveName);
+              
+              // Generate new slug from the detected course name
+              const newSlugBase = effectiveName.toLowerCase().trim()
+                .replace(/[^a-z0-9\s-]/g, "")
+                .replace(/\s+/g, "-")
+                .replace(/-+/g, "-") || "course";
+              
+              // Check if we need to update the slug (only if it's a generic one)
+              // slugBase was calculated from the original effectiveName at line 3761
+              const isGenericSlug = unique === "subject" || unique === "course" || 
+                                   unique.startsWith("new-") || unique === "new-course" ||
+                                   (unique === slugBase && (slugBase === "subject" || slugBase === "course" || slugBase.startsWith("new-")));
+              
+              if (isGenericSlug && newSlugBase && newSlugBase !== "course" && newSlugBase !== "subject") {
+                // Generate unique slug from the new name
+                const list = readSubjects();
+                let newUnique = newSlugBase;
+                let n = 1;
+                const set = new Set(list.map((s) => s.slug).filter(s => s !== unique)); // Exclude current slug
+                while (set.has(newUnique)) {
+                  n++;
+                  newUnique = `${newSlugBase}-${n}`;
+                }
+                
+                // Update slug in localStorage
+                const updatedList = list.map((s) => 
+                  s.slug === unique ? { ...s, name: effectiveName, slug: newUnique } : s
+                );
+                localStorage.setItem("atomicSubjects", JSON.stringify(updatedList));
+                setSubjects(updatedList);
+                
+                // Update course data with new slug
+                const oldData = loadSubjectData(unique) as StoredSubjectData | null;
+                if (oldData) {
+                  oldData.subject = effectiveName;
+                  saveSubjectData(newUnique, oldData);
+                  // Remove old data
+                  localStorage.removeItem(`atomicSubjectData_${unique}`);
+                }
+                
+                // Update on server if logged in
+                try {
+                  const me = await fetch("/api/me").then(r => r.json().catch(() => ({})));
+                  if (me?.user) {
+                    // Update subject on server
+                    await fetch("/api/subjects", {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ oldSlug: unique, newSlug: newUnique, name: effectiveName }),
+                    }).catch(() => {});
+                  }
+                } catch {}
+                
+                // Update unique to the new slug
+                unique = newUnique;
+                console.log(`Updated course slug from ${unique} to ${newUnique} based on detected name: ${effectiveName}`);
+              } else {
+                // Just update the name, keep the slug
+                renameSubject(unique, effectiveName);
+              }
             }
           }
         }
