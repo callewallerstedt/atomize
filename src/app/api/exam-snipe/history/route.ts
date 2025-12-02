@@ -339,9 +339,10 @@ async function matchExamSnipeToCourse(
       select: { slug: true, name: true },
     });
 
+    // If no subjects exist, create a course directly without matching
     if (subjects.length === 0) {
-      console.log("No subjects found for user, skipping matching");
-      return;
+      console.log("No subjects found for user, creating new course directly");
+      // Fall through to course creation logic below
     }
 
     // Get course data for each subject
@@ -365,9 +366,10 @@ async function matchExamSnipeToCourse(
       }
     }
 
+    // If no courses with data exist, create a course directly without matching
     if (coursesWithData.length === 0) {
-      console.log("No courses with data found, skipping matching");
-      return;
+      console.log("No courses with data found, creating new course directly");
+      // Fall through to course creation logic below
     }
 
     // Extract exam snipe information
@@ -449,28 +451,32 @@ If no course is a good match (confidence would be "low"), return matchedSlug as 
       max_tokens: 500,
     });
 
-    const responseText = completion.choices[0]?.message?.content || '';
-    let matchResult: { matchedSlug: string | null; confidence: string; reasoning: string };
-    
-    try {
-      matchResult = JSON.parse(responseText);
-    } catch {
-      // Try to extract JSON from markdown
-      const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-      if (jsonMatch) {
-        matchResult = JSON.parse(jsonMatch[1]);
-      } else {
-        const objectMatch = responseText.match(/\{[\s\S]*\}/);
-        if (objectMatch) {
-          matchResult = JSON.parse(objectMatch[0]);
-        } else {
-          throw new Error('No valid JSON found in AI response');
+        const responseText = completion.choices[0]?.message?.content || '';
+        
+        try {
+          matchResult = JSON.parse(responseText);
+        } catch {
+          // Try to extract JSON from markdown
+          const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+          if (jsonMatch) {
+            matchResult = JSON.parse(jsonMatch[1]);
+          } else {
+            const objectMatch = responseText.match(/\{[\s\S]*\}/);
+            if (objectMatch) {
+              matchResult = JSON.parse(objectMatch[0]);
+            } else {
+              throw new Error('No valid JSON found in AI response');
+            }
+          }
         }
+      } catch (matchError) {
+        console.error("Error during AI matching, will create new course:", matchError);
+        matchResult = null;
       }
     }
 
     // Only update if we have a high or medium confidence match
-    if (matchResult.matchedSlug && (matchResult.confidence === 'high' || matchResult.confidence === 'medium')) {
+    if (matchResult && matchResult.matchedSlug && (matchResult.confidence === 'high' || matchResult.confidence === 'medium')) {
       console.log(`Matched exam snipe ${examSnipeSlug} to course ${matchResult.matchedSlug} (confidence: ${matchResult.confidence})`);
       console.log(`Reasoning: ${matchResult.reasoning}`);
       
