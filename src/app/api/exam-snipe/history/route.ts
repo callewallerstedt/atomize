@@ -224,10 +224,13 @@ export async function POST(req: Request) {
     // If subjectSlug is not set (null, undefined, or empty string), try to automatically match it to a course
     // subjectSlugInput is already trimmed and converted to null if empty (line 139)
     if (!subjectSlugInput && results && typeof results === 'object') {
+      console.log(`[EXAM SNIPE] No subjectSlug provided, triggering course matching/creation for: ${courseNameInput}`);
       // Run matching asynchronously (don't block the response)
       matchExamSnipeToCourse(user.id, slugInput, courseNameInput, results, fileNames).catch((err) => {
-        console.error("Error in automatic course matching:", err);
+        console.error("[EXAM SNIPE] Error in automatic course matching:", err);
       });
+    } else {
+      console.log(`[EXAM SNIPE] SubjectSlug provided: ${subjectSlugInput}, skipping course matching`);
     }
 
     return NextResponse.json({ ok: true, record: responseRecord });
@@ -332,7 +335,8 @@ async function matchExamSnipeToCourse(
   fileNames: string[]
 ): Promise<void> {
   try {
-    console.log("Starting automatic course matching for exam snipe:", examSnipeSlug);
+    console.log("[EXAM SNIPE] Starting automatic course matching for exam snipe:", examSnipeSlug);
+    console.log("[EXAM SNIPE] Course name:", examSnipeCourseName);
     
     // Get all subjects for the user
     const subjects = await prisma.subject.findMany({
@@ -367,31 +371,27 @@ async function matchExamSnipeToCourse(
       }
     }
 
-    // If no courses with data exist, create a course directly without matching
-    if (coursesWithData.length === 0) {
-      console.log("No courses with data found, creating new course directly");
-      // Fall through to course creation logic below
-    }
-
-    // Extract exam snipe information
-    const examSnipeInfo = {
-      courseName: examSnipeCourseName,
-      patternAnalysis: examSnipeResults.patternAnalysis || '',
-      concepts: Array.isArray(examSnipeResults.concepts) 
-        ? examSnipeResults.concepts.map((c: any) => ({
-            name: c.name || '',
-            description: c.description || '',
-          }))
-        : [],
-      commonQuestions: Array.isArray(examSnipeResults.commonQuestions)
-        ? examSnipeResults.commonQuestions.map((q: any) => q.question || '').slice(0, 5)
-        : [],
-    };
-
     // Only try to match if we have courses to match against
     let matchResult: { matchedSlug: string | null; confidence: string; reasoning: string } | null = null;
     
-    if (coursesWithData.length > 0) {
+    if (coursesWithData.length === 0) {
+      console.log("[EXAM SNIPE] No courses with data found, will create new course directly");
+      // Skip AI matching, matchResult stays null and will trigger course creation
+    } else {
+      // Extract exam snipe information
+      const examSnipeInfo = {
+        courseName: examSnipeCourseName,
+        patternAnalysis: examSnipeResults.patternAnalysis || '',
+        concepts: Array.isArray(examSnipeResults.concepts) 
+          ? examSnipeResults.concepts.map((c: any) => ({
+              name: c.name || '',
+              description: c.description || '',
+            }))
+          : [],
+        commonQuestions: Array.isArray(examSnipeResults.commonQuestions)
+          ? examSnipeResults.commonQuestions.map((q: any) => q.question || '').slice(0, 5)
+          : [],
+      };
       // Build course summaries for AI
       const courseSummaries = coursesWithData.map((course) => {
         const data = course.data as any;
