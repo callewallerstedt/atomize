@@ -1775,7 +1775,6 @@ function toggleStar(flashcardId: string) {
                         setLessonLoading(false);
                       }
                     }}
-                    disabled={lessonLoading}
                     onMouseDown={(e) => {
                       e.preventDefault();
                       e.currentTarget.blur();
