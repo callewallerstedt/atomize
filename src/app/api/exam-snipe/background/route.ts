@@ -157,7 +157,7 @@ Ensure arrays contain meaningful content (no placeholders). Focus on efficiency:
         };
 
         // Save to history directly using prisma
-        const examSlug = `exam-${subjectSlug}-${Date.now()}`;
+        const examSlug = `exam-${subjectSlug || 'unspecified'}-${Date.now()}`;
         await prisma.examSnipeHistory.create({
           data: {
             userId: user.id,
@@ -170,6 +170,89 @@ Ensure arrays contain meaningful content (no placeholders). Focus on efficiency:
         });
 
         console.log(`✓ Background exam snipe created and saved: ${examSlug}`);
+
+        // If no subjectSlug was provided, create a new course automatically
+        if (!subjectSlug && examData.courseName) {
+          try {
+            // Generate slug from course name
+            const slugBase = examData.courseName.toLowerCase().trim()
+              .replace(/[^a-z0-9\s-]/g, "")
+              .replace(/\s+/g, "-")
+              .replace(/-+/g, "-") || "course";
+            
+            // Check existing subjects to ensure unique slug
+            const existingSubjects = await prisma.subject.findMany({
+              where: { userId: user.id },
+              select: { slug: true },
+            });
+            const existingSlugs = new Set(existingSubjects.map(s => s.slug));
+            
+            let uniqueSlug = slugBase;
+            let n = 1;
+            while (existingSlugs.has(uniqueSlug)) {
+              n++;
+              uniqueSlug = `${slugBase}-${n}`;
+            }
+            
+            // Create the subject
+            const newSubject = await prisma.subject.create({
+              data: {
+                userId: user.id,
+                name: examData.courseName,
+                slug: uniqueSlug,
+              },
+            });
+            console.log(`Created new subject for exam snipe: ${newSubject.slug}`);
+            
+            // Build course content from exam snipe results
+            const courseContent = [
+              `Course: ${examData.courseName}`,
+              '',
+              'Exam Analysis Summary:',
+              examData.patternAnalysis || '',
+              '',
+              'Key Concepts:',
+              ...(Array.isArray(examData.concepts) 
+                ? examData.concepts.map((c: any) => `- ${c.name}: ${c.description || ''}`)
+                : []),
+              '',
+              'Common Exam Questions:',
+              ...(Array.isArray(examData.commonQuestions)
+                ? examData.commonQuestions.map((q: any) => `- ${q.question || ''}`)
+                : []),
+            ].join('\n');
+            
+            // Create initial course data
+            const courseData = {
+              subject: examData.courseName,
+              files: fileNames.map(name => ({ name, type: 'application/pdf' })),
+              combinedText: courseContent,
+              tree: null,
+              topics: [],
+              nodes: {},
+              progress: {},
+              course_context: examData.patternAnalysis || courseContent,
+              course_quick_summary: examData.patternAnalysis || '',
+            };
+            
+            // Save course data
+            await prisma.subjectData.upsert({
+              where: { userId_slug: { userId: user.id, slug: uniqueSlug } },
+              update: { data: courseData },
+              create: { userId: user.id, slug: uniqueSlug, data: courseData },
+            });
+            console.log(`Saved course data for ${uniqueSlug}`);
+            
+            // Link exam snipe to the new course
+            await prisma.examSnipeHistory.update({
+              where: { userId_slug: { userId: user.id, slug: examSlug } },
+              data: { subjectSlug: uniqueSlug },
+            });
+            console.log(`Successfully linked exam snipe ${examSlug} to new course ${uniqueSlug}`);
+          } catch (createError) {
+            console.error("Failed to create new course for exam snipe:", createError);
+          }
+        }
       } catch (err) {
         console.error('Background exam snipe processing error:', err);
       }
