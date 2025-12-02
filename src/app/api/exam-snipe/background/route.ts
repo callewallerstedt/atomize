@@ -174,7 +174,22 @@ Ensure arrays contain meaningful content (no placeholders). Focus on efficiency:
 
         console.log(`✓ Background exam snipe created and saved: ${examSlug}`);
 
-        // If no subjectSlug was provided, create a new course automatically
+        // If subjectSlug was provided, verify it exists and belongs to the user
+        if (subjectSlug) {
+          const subjectExists = await prisma.subject.findUnique({
+            where: { userId_slug: { userId: user.id, slug: subjectSlug } },
+            select: { id: true },
+          });
+          if (!subjectExists) {
+            console.warn(`[EXAM SNIPE BACKGROUND] Provided subjectSlug ${subjectSlug} does not exist, will create new course`);
+            // Fall through to create new course below
+          } else {
+            console.log(`[EXAM SNIPE BACKGROUND] SubjectSlug ${subjectSlug} exists, exam snipe ${examSlug} is correctly linked - NO matching needed`);
+            return; // Exit early - exam snipe is correctly linked, no need to create course or match
+          }
+        }
+
+        // If no subjectSlug was provided (or provided one doesn't exist), create a new course automatically
         if (!subjectSlug && examData.courseName) {
           try {
             // Generate slug from course name

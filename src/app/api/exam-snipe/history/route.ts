@@ -223,14 +223,32 @@ export async function POST(req: Request) {
 
     // If subjectSlug is not set (null, undefined, or empty string), try to automatically match it to a course
     // subjectSlugInput is already trimmed and converted to null if empty (line 139)
+    // IMPORTANT: Only match if subjectSlug is explicitly not provided - if it's provided, use it directly
     if (!subjectSlugInput && results && typeof results === 'object') {
       console.log(`[EXAM SNIPE] No subjectSlug provided, triggering course matching/creation for: ${courseNameInput}`);
       // Run matching asynchronously (don't block the response)
       matchExamSnipeToCourse(user.id, slugInput, courseNameInput, results, fileNames).catch((err) => {
         console.error("[EXAM SNIPE] Error in automatic course matching:", err);
       });
+    } else if (subjectSlugInput) {
+      console.log(`[EXAM SNIPE] SubjectSlug explicitly provided: ${subjectSlugInput}, using it directly - NO matching`);
+      // Verify the subjectSlug exists and belongs to the user
+      const subjectExists = await prisma.subject.findUnique({
+        where: { userId_slug: { userId: user.id, slug: subjectSlugInput } },
+        select: { id: true },
+      });
+      if (!subjectExists) {
+        console.warn(`[EXAM SNIPE] Provided subjectSlug ${subjectSlugInput} does not exist, will create new course`);
+        // If the provided slug doesn't exist, treat it as if no slug was provided
+        matchExamSnipeToCourse(user.id, slugInput, courseNameInput, results, fileNames).catch((err) => {
+          console.error("[EXAM SNIPE] Error in automatic course matching:", err);
+        });
+      } else {
+        // Subject exists, use it directly - no matching needed
+        console.log(`[EXAM SNIPE] SubjectSlug ${subjectSlugInput} exists, linking exam snipe directly`);
+      }
     } else {
-      console.log(`[EXAM SNIPE] SubjectSlug provided: ${subjectSlugInput}, skipping course matching`);
+      console.log(`[EXAM SNIPE] No subjectSlug and no results, skipping course matching`);
     }
 
     return NextResponse.json({ ok: true, record: responseRecord });
@@ -338,11 +356,36 @@ async function matchExamSnipeToCourse(
     console.log("[EXAM SNIPE] Starting automatic course matching for exam snipe:", examSnipeSlug);
     console.log("[EXAM SNIPE] Course name:", examSnipeCourseName);
     
-    // Get all subjects for the user
-    const subjects = await prisma.subject.findMany({
+    // First, check if this exam snipe already has a subjectSlug set (shouldn't happen, but safety check)
+    const existingExamSnipe = await prisma.examSnipeHistory.findUnique({
+      where: { userId_slug: { userId, slug: examSnipeSlug } },
+      select: { subjectSlug: true },
+    });
+    
+    if (existingExamSnipe?.subjectSlug) {
+      console.log(`[EXAM SNIPE] Exam snipe ${examSnipeSlug} already has subjectSlug ${existingExamSnipe.subjectSlug}, skipping matching`);
+      return;
+    }
+    
+    // Get all subjects for the user, excluding those that already have exam snipes linked
+    const subjectsWithExamSnipes = await prisma.examSnipeHistory.findMany({
+      where: { userId, subjectSlug: { not: null } },
+      select: { subjectSlug: true },
+      distinct: ['subjectSlug'],
+    });
+    const linkedSubjectSlugs = new Set(
+      subjectsWithExamSnipes
+        .map((e: any) => e.subjectSlug)
+        .filter((slug: any): slug is string => slug !== null && slug !== undefined)
+    );
+    
+    const allSubjects = await prisma.subject.findMany({
       where: { userId },
       select: { slug: true, name: true },
     });
+    
+    // Filter out subjects that already have exam snipes linked
+    const subjects = allSubjects.filter(s => !linkedSubjectSlugs.has(s.slug));
 
     // If no subjects exist, create a course directly without matching
     if (subjects.length === 0) {
@@ -434,10 +477,16 @@ ${idx + 1}. Course: "${c.name}" (slug: ${c.slug})
 `).join('\n')}
 
 Analyze the exam snipe content and match it to the most relevant course based on:
-1. Topic overlap (concepts, methods, techniques)
-2. Subject matter similarity
-3. Course name relevance
+1. Course name similarity (MOST IMPORTANT - must be EXACT or very clearly the same course)
+2. Topic overlap (concepts, methods, techniques)
+3. Subject matter similarity
 4. Content alignment
+
+CRITICAL RULES:
+- ONLY match if the course name is EXACTLY the same or very clearly the same course (e.g., "Signals & Systems" matches "Signals and Systems" but NOT "Control Systems")
+- DO NOT match if course names are different even if topics seem similar
+- DO NOT match if the course already has an exam snipe linked to it (these courses are excluded from the list)
+- Confidence must be "high" for a match - if you're unsure, return null
 
 Return ONLY a JSON object with this exact format:
 {
@@ -446,7 +495,7 @@ Return ONLY a JSON object with this exact format:
   "reasoning": "brief explanation of why this course matches"
 }
 
-If no course is a good match (confidence would be "low"), return matchedSlug as null.`
+If no course is a good match (confidence would be "low" or "medium"), return matchedSlug as null. ONLY return a match if confidence is "high" and course names are clearly the same.`
         },
         {
           role: 'user',
@@ -481,22 +530,44 @@ If no course is a good match (confidence would be "low"), return matchedSlug as 
         }
       }
 
-    // Only update if we have a high or medium confidence match
-    if (matchResult && matchResult.matchedSlug && (matchResult.confidence === 'high' || matchResult.confidence === 'medium')) {
-      console.log(`Matched exam snipe ${examSnipeSlug} to course ${matchResult.matchedSlug} (confidence: ${matchResult.confidence})`);
-      console.log(`Reasoning: ${matchResult.reasoning}`);
+    // Only update if we have a high confidence match (not medium - be more strict)
+    // Also check that the matched course doesn't already have a different exam snipe linked
+    if (matchResult && matchResult.matchedSlug && matchResult.confidence === 'high') {
+      // Check if the matched course already has an exam snipe linked to it
+      const existingExamSnipe = await prisma.examSnipeHistory.findFirst({
+        where: {
+          userId,
+          subjectSlug: matchResult.matchedSlug,
+          slug: { not: examSnipeSlug }, // Exclude the current exam snipe
+        },
+        select: { slug: true, courseName: true },
+      });
       
-      // Update the exam snipe record
-      try {
-        await prisma.examSnipeHistory.update({
-          where: { userId_slug: { userId, slug: examSnipeSlug } },
-          data: { subjectSlug: matchResult.matchedSlug },
-        });
-        console.log(`Successfully updated exam snipe ${examSnipeSlug} with subjectSlug: ${matchResult.matchedSlug}`);
-      } catch (updateError) {
-        console.error("Failed to update exam snipe with matched subjectSlug:", updateError);
+      if (existingExamSnipe) {
+        console.log(`[EXAM SNIPE] Course ${matchResult.matchedSlug} already has exam snipe ${existingExamSnipe.slug} linked. Skipping match to avoid conflicts.`);
+        // Don't match - create new course instead
+        matchResult = null;
+      } else {
+        console.log(`Matched exam snipe ${examSnipeSlug} to course ${matchResult.matchedSlug} (confidence: ${matchResult.confidence})`);
+        console.log(`Reasoning: ${matchResult.reasoning}`);
+        
+        // Update the exam snipe record
+        try {
+          await prisma.examSnipeHistory.update({
+            where: { userId_slug: { userId, slug: examSnipeSlug } },
+            data: { subjectSlug: matchResult.matchedSlug },
+          });
+          console.log(`Successfully updated exam snipe ${examSnipeSlug} with subjectSlug: ${matchResult.matchedSlug}`);
+          return; // Exit early - don't create a new course
+        } catch (updateError) {
+          console.error("Failed to update exam snipe with matched subjectSlug:", updateError);
+          // Fall through to create new course
+        }
       }
-    } else {
+    }
+    
+    // If no high confidence match or match failed, create a new course
+    if (!matchResult || !matchResult.matchedSlug || matchResult.confidence !== 'high') {
       // No good match found - create a new course
       console.log(`No good match found for exam snipe ${examSnipeSlug} (confidence: ${matchResult?.confidence || 'unknown'})`);
       console.log(`Creating new course: ${examSnipeCourseName}`);
