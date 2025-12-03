@@ -3185,13 +3185,13 @@ export default function SurgePage() {
                     if (!allSurgeLogs || allSurgeLogs.length === 0) {
                       // No surge log entries - show introduction aligned with homepage styling
                       return (
-                        <div className="rounded-[28px] border border-white/10 bg-[var(--background)] px-6 py-8 md:px-10 md:py-10">
+                        <div className="rounded-[28px] border border-[var(--foreground)]/12 bg-[var(--background)] px-6 py-8 md:px-10 md:py-10">
                           <div className="flex flex-col gap-6">
                             <div className="text-center space-y-2">
-                              <h2 className="text-2xl md:text-[32px] font-semibold leading-tight text-[var(--foreground)]/80">
+                              <h2 className="text-2xl md:text-[32px] font-semibold leading-tight text-[var(--foreground)]">
                                 Welcome to Surge
                               </h2>
-                              <p className="text-sm text-white/60 max-w-2xl mx-auto">
+                              <p className="text-sm text-[var(--foreground)]/70 max-w-2xl mx-auto">
                                 Let Chad take control of your learning, and just focus on understanding.
                               </p>
                             </div>
@@ -3232,12 +3232,12 @@ export default function SurgePage() {
                               ].map((item, idx) => (
                                 <div
                                   key={item.label}
-                                  className="flex-1 flex items-center gap-3 rounded-2xl border border-white/10 bg-[var(--background)]/80 px-5 py-4 text-white/75"
+                                  className="flex-1 flex items-center gap-3 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/80 px-5 py-4 text-[var(--foreground)]/80"
                                 >
-                                  <div className="text-white/50 flex-shrink-0">
+                                  <div className="text-[var(--foreground)]/60 flex-shrink-0">
                                     {item.icon}
                                   </div>
-                                  <div className="text-sm font-medium text-white">{item.label}</div>
+                                  <div className="text-sm font-medium text-[var(--foreground)]">{item.label}</div>
                                 </div>
                               ))}
                             </div>
@@ -3304,13 +3304,13 @@ export default function SurgePage() {
                     // If no topics found after processing, show welcome message
                     if (topicsToReview.length === 0) {
                       return (
-                        <div className="rounded-[28px] border border-white/10 bg-[var(--background)] px-6 py-8 md:px-10 md:py-10">
+                        <div className="rounded-[28px] border border-[var(--foreground)]/12 bg-[var(--background)] px-6 py-8 md:px-10 md:py-10">
                           <div className="flex flex-col gap-6">
                             <div className="text-center space-y-2">
-                              <h2 className="text-2xl md:text-[32px] font-semibold leading-tight text-[var(--foreground)]/80">
+                              <h2 className="text-2xl md:text-[32px] font-semibold leading-tight text-[var(--foreground)]">
                                 Welcome to Surge
                               </h2>
-                              <p className="text-sm text-white/60 max-w-2xl mx-auto">
+                              <p className="text-sm text-[var(--foreground)]/70 max-w-2xl mx-auto">
                                 Let Chad take control of your learning, and just focus on understanding.
                               </p>
                             </div>
@@ -3351,12 +3351,12 @@ export default function SurgePage() {
                               ].map((item, idx) => (
                                 <div
                                   key={item.label}
-                                  className="flex-1 flex items-center gap-3 rounded-2xl border border-white/10 bg-[var(--background)]/80 px-5 py-4 text-white/75"
+                                  className="flex-1 flex items-center gap-3 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/80 px-5 py-4 text-[var(--foreground)]/80"
                                 >
-                                  <div className="text-white/50 flex-shrink-0">
+                                  <div className="text-[var(--foreground)]/60 flex-shrink-0">
                                     {item.icon}
                                   </div>
-                                  <div className="text-sm font-medium text-white">{item.label}</div>
+                                  <div className="text-sm font-medium text-[var(--foreground)]">{item.label}</div>
                                 </div>
                               ))}
                             </div>
