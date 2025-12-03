@@ -505,14 +505,9 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
     
     const nodeContent = subjectData.nodes[title] as any;
     if (nodeContent && typeof nodeContent === 'object') {
-      const hasEmptyLesson = Array.isArray(nodeContent.lessons) && 
-        nodeContent.lessons.length > 0 && 
-        (!nodeContent.lessons[0]?.body || nodeContent.lessons[0].body.trim() === '');
-      
-      if (hasEmptyLesson) {
-        setLessonLoading(true);
-      }
-      
+      // Just hydrate content from storage. Do NOT auto-set lessonLoading here,
+      // so that ungenerated lessons (including Exam Snipe lessons) behave like
+      // normal lessons and wait for the user to press "Start".
       setContent({
         overview: nodeContent.overview || "",
         symbols: Array.isArray(nodeContent.symbols) ? nodeContent.symbols : [],
