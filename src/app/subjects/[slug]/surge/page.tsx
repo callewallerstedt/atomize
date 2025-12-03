@@ -253,6 +253,9 @@ function sanitizeJsonPayload(raw: string): string {
     let jsonStr = str.slice(firstBrace, lastBrace + 1);
     // Remove trailing commas before closing brackets/braces (common JSON parsing issue)
     jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1');
+    // Fix invalid single backslash escape sequences that break JSON.parse,
+    // e.g. "\_" or "\ " from markdown. Only keep valid JSON escapes.
+    jsonStr = jsonStr.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
     return jsonStr;
   }
   return str;
