@@ -809,7 +809,19 @@ function FeedbackModal({
   const [sending, setSending] = useState(false);
   const [allFeedback, setAllFeedback] = useState<any[]>([]);
   const [loadingFeedback, setLoadingFeedback] = useState(false);
+  const [showThankYou, setShowThankYou] = useState(false);
   const isTester = subscriptionLevel === "Tester" || subscriptionLevel === "mylittlepwettybebe";
+
+  // Auto-close thank you modal after 3 seconds
+  useEffect(() => {
+    if (showThankYou) {
+      const timer = setTimeout(() => {
+        setShowThankYou(false);
+        onClose(); // Also close the main feedback modal
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [showThankYou, onClose]);
 
   useEffect(() => {
     if (open && isTester) {
@@ -847,7 +859,7 @@ function FeedbackModal({
       const data = await res.json();
       if (data.ok) {
         setFeedback("");
-        alert("Thank you for your feedback!");
+        setShowThankYou(true);
         if (isTester) {
           // Reload feedback list
           const refreshRes = await fetch("/api/feedback");
@@ -1074,6 +1086,29 @@ function FeedbackModal({
           </div>
         )}
       </div>
+      {/* Thank You Confirmation Modal */}
+      <Modal
+        open={showThankYou}
+        onClose={() => setShowThankYou(false)}
+      >
+        <div className="flex flex-col items-center justify-center py-8 px-6 space-y-4">
+          <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
+            <svg 
+              className="w-10 h-10 text-green-500" 
+              fill="none" 
+              viewBox="0 0 24 24" 
+              stroke="currentColor" 
+              strokeWidth="3"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h3 className="text-xl font-semibold text-[var(--foreground)]">Thank you!</h3>
+          <p className="text-sm text-[var(--foreground)]/70 text-center">
+            Your feedback has been submitted successfully.
+          </p>
+        </div>
+      </Modal>
     </Modal>
   );
 }
