@@ -716,8 +716,10 @@ button.synapse-style {
   color: #ffffff !important;
 }
 
-.synapse-style::before,
-.synapse-style::after {
+/* Only apply the big liquid blobs to actual buttons so they’re always clipped
+   correctly by the button’s border-radius and overflow. */
+button.synapse-style::before,
+button.synapse-style::after {
   content: '';
   position: absolute;
   /* Match the button’s own border radius so blobs never “poke out” as squares */
@@ -732,7 +734,7 @@ button.synapse-style {
   transform-origin: center;
 }
 
-.synapse-style::before {
+button.synapse-style::before {
   /* Make cyan blob more vibrant with a stronger core and slower fade */
   background: radial-gradient(
     circle,
@@ -745,7 +747,7 @@ button.synapse-style {
   animation: blob-float-1 28s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-.synapse-style::after {
+button.synapse-style::after {
   /* Make pink blob more vibrant with a stronger core and slower fade */
   background: radial-gradient(
     circle,
