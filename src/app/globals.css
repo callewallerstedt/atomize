@@ -466,6 +466,15 @@ html.light-mode div[data-chat-pill].chat-input-container,
   background-color: rgba(255, 255, 255, 0.7) !important;
 }
 
+/* Login page text inputs - always slightly lighter than background */
+.login-input {
+  background-color: color-mix(in srgb, var(--foreground) 8%, transparent) !important;
+}
+
+.light-mode .login-input {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+}
+
 /* Paragraph simplification line with fade effect */
 .paragraph-line {
   background: linear-gradient(
@@ -711,15 +720,14 @@ button.synapse-style {
 .synapse-style::after {
   content: '';
   position: absolute;
-  width: 250%;
-  height: 250%;
-  border-radius: 50%;
+  /* Match the button’s own border radius so blobs never “poke out” as squares */
+  border-radius: inherit;
+  /* Slightly larger than the button to get the liquid feel, but still fully clipped */
+  inset: -40%;
   filter: blur(60px);
   opacity: 1;
   pointer-events: none;
   z-index: 0;
-  top: 0;
-  left: 0;
   will-change: transform;
   transform-origin: center;
 }
@@ -734,8 +742,6 @@ button.synapse-style {
     rgba(0, 229, 255, 0.5) 60%,
     transparent 78%
   );
-  top: -75%;
-  left: -75%;
   animation: blob-float-1 28s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
@@ -749,8 +755,6 @@ button.synapse-style {
     rgba(255, 45, 150, 0.5) 60%,
     transparent 78%
   );
-  bottom: -75%;
-  right: -75%;
   animation: blob-float-2 34s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 

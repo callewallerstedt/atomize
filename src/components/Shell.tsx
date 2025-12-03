@@ -5093,7 +5093,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           } catch {}
         }}
       >
-        <div className="space-y-6 pb-2">
+        {/* Extra vertical padding so the synapse-style button and its glow never touch the modal border */}
+        <div className="space-y-6 pt-1 pb-4">
           {/* Synapse Logo Header */}
           <div className="text-center pb-2">
             <h1 className="text-4xl font-semibold text-transparent bg-clip-text bg-gradient-to-r from-[var(--accent-cyan)] via-[var(--accent-pink)] to-[var(--accent-cyan)] bg-[length:200%_200%] animate-[gradient-shift_3s_ease-in-out_infinite] tracking-wider" style={{ fontFamily: 'var(--font-rajdhani), sans-serif' }}>
