@@ -1031,7 +1031,12 @@ function CourseExamSnipeInner() {
                                         event.stopPropagation();
                                         void triggerLessonGeneration();
                                       }}
-                                      className="inline-flex h-6 w-6 items-center justify-center rounded-full synapse-style text-[11px] text-white shadow cursor-pointer opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 hover:shadow-lg  transition-all duration-300 focus-visible:opacity-100 focus-visible:scale-100"
+                                      className="inline-flex h-6 w-6 items-center justify-center rounded-full shadow cursor-pointer hover:shadow-lg hover:scale-110 transition-all duration-300"
+                                      style={{
+                                        backgroundImage: 'var(--accent-grad)',
+                                        backgroundSize: '200% 200%',
+                                        animation: 'gradient-shift 4s ease-in-out infinite',
+                                      }}
                                       aria-label="Generate AI"
                                       title="Generate AI"
                                     />
