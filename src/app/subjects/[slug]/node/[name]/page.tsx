@@ -53,7 +53,6 @@ export default function NodePage({ lessonIndexFromUrl }: { lessonIndexFromUrl?: 
   const activeLessonIndex = lessonIndexFromUrl !== undefined ? lessonIndexFromUrl : currentLessonIndex;
   const [hoveredParagraph, setHoveredParagraph] = useState<string | null>(null);
   const [simplifyingParagraph, setSimplifyingParagraph] = useState<string | null>(null);
-  const [showHints, setShowHints] = useState<{ [key: string]: boolean }>({});
   const [showSolutions, setShowSolutions] = useState<{ [key: number]: boolean }>({});
   const [reviewedThisSession, setReviewedThisSession] = useState<Set<number>>(new Set());
   const [ratingMessage, setRatingMessage] = useState<string | null>(null);
@@ -2429,27 +2428,6 @@ function toggleStar(flashcardId: string) {
                                   </div>
                                 )}
 
-                                {!practiceResults[pi].correct && practiceResults[pi].hint && (
-                                  <div className="space-y-1">
-                                    <button
-                                      onClick={() =>
-                                        setShowHints((prev) => ({ ...prev, [`practice-${pi}`]: !prev[`practice-${pi}`] }))
-                                      }
-                                      className="text-sm text-[#2563EB] hover:text-[#1D4ED8] hover:underline transition-colors dark:text-[#60A5FA] dark:hover:text-[#93C5FD]"
-                                    >
-                                      {showHints[`practice-${pi}`] ? "▼ Hide hint" : "▶ Show hint"}
-                                    </button>
-                                    {showHints[`practice-${pi}`] && (
-                                      <div className="text-sm p-3 rounded-lg bg-blue-50 text-blue-900 border border-blue-200 dark:bg-[#1E3A5F]/30 dark:text-[#E0F2FE] dark:border-[#60A5FA]/20">
-                                        💡 <LessonBody
-                                          body={sanitizeLessonBody(
-                                            String(practiceResults[pi].hint || "")
-                                          )}
-                                        />
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
                               </div>
                             )}
                           </div>
