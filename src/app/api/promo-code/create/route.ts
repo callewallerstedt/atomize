@@ -24,8 +24,11 @@ export async function POST(req: Request) {
     const subscriptionLevel = String(body.subscriptionLevel || "Tester");
     const description = String(body.description || "").trim() || null;
     const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null; // When code itself expires
-    const validityDays = body.validityDays ? Number(body.validityDays) : null; // Days each user gets from redemption
-    const maxUses = body.maxUses ? Number(body.maxUses) : null;
+    // Handle validityDays: if empty string, null, undefined, or 0, set to null (unlimited)
+    const validityDays = body.validityDays && body.validityDays !== "" && Number(body.validityDays) > 0 
+      ? Number(body.validityDays) 
+      : null; // Days each user gets from redemption
+    const maxUses = body.maxUses && body.maxUses !== "" ? Number(body.maxUses) : null;
 
     if (!code) {
       return NextResponse.json({ ok: false, error: "Code is required" }, { status: 400 });

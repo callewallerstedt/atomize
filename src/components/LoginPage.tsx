@@ -364,7 +364,7 @@ export default function LoginPage({
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-3 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
+              className="login-input w-full rounded-xl border border-[var(--foreground)]/20 px-4 py-3 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
               placeholder="yourname"
               autoComplete="username"
               required
@@ -378,7 +378,7 @@ export default function LoginPage({
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 type="email"
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-3 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
+                className="login-input w-full rounded-xl border border-[var(--foreground)]/20 px-4 py-3 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
                 placeholder="your.email@example.com"
                 autoComplete="email"
               />
@@ -391,7 +391,7 @@ export default function LoginPage({
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               type="password"
-              className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-3 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
+              className="login-input w-full rounded-xl border border-[var(--foreground)]/20 px-4 py-3 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
               placeholder="At least 6 characters"
               autoComplete={authMode === "login" ? "current-password" : "new-password"}
               minLength={6}
@@ -406,7 +406,7 @@ export default function LoginPage({
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 type="password"
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-3 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
+                className="login-input w-full rounded-xl border border-[var(--foreground)]/20 px-4 py-3 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
                 placeholder="Re-enter your password"
                 autoComplete="new-password"
                 minLength={6}
@@ -437,7 +437,7 @@ export default function LoginPage({
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 type="text"
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-3 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
+                className="login-input w-full rounded-xl border border-[var(--foreground)]/20 px-4 py-3 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none"
                 placeholder="Enter your code"
               />
             </div>

@@ -71,10 +71,12 @@ function applyTheme(t: Theme) {
 // Component to display time remaining until subscription expires
 function SubscriptionTimer({ subscriptionEnd }: { subscriptionEnd: Date | null }) {
   const [timeRemaining, setTimeRemaining] = useState<string>("");
+  const [daysLeft, setDaysLeft] = useState<number | null>(null);
 
   useEffect(() => {
     if (!subscriptionEnd) {
-      setTimeRemaining("");
+      setTimeRemaining("Unlimited");
+      setDaysLeft(null);
       return;
     }
 
@@ -85,12 +87,15 @@ function SubscriptionTimer({ subscriptionEnd }: { subscriptionEnd: Date | null }
 
       if (diff <= 0) {
         setTimeRemaining("Expired");
+        setDaysLeft(0);
         return;
       }
 
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
       const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+      setDaysLeft(days);
 
       if (days > 0) {
         setTimeRemaining(`${days} day${days !== 1 ? 's' : ''}, ${hours} hour${hours !== 1 ? 's' : ''}`);
@@ -107,11 +112,25 @@ function SubscriptionTimer({ subscriptionEnd }: { subscriptionEnd: Date | null }
     return () => clearInterval(interval);
   }, [subscriptionEnd]);
 
-  if (!subscriptionEnd || !timeRemaining) return null;
+  // Always show something - either "Unlimited" or expiration info
+  if (!subscriptionEnd) {
+    return (
+      <p className="text-xs text-[var(--foreground)]/60 mt-1">
+        Status: <span className="font-medium text-[var(--accent-cyan)]">Unlimited</span>
+      </p>
+    );
+  }
 
+  if (!timeRemaining) return null;
+
+  // Show days left if more than 0 days, otherwise show the detailed time
   return (
     <p className="text-xs text-[var(--foreground)]/60 mt-1">
-      Expires in: <span className="font-medium text-[var(--accent-cyan)]">{timeRemaining}</span>
+      {daysLeft !== null && daysLeft > 0 ? (
+        <span>Expires in: <span className="font-medium text-[var(--accent-cyan)]">{daysLeft} day{daysLeft !== 1 ? 's' : ''}</span></span>
+      ) : (
+        <span>Expires in: <span className="font-medium text-[var(--accent-cyan)]">{timeRemaining}</span></span>
+      )}
     </p>
   );
 }
@@ -347,7 +366,7 @@ export default function SettingsModal({
               <p className="text-xs text-[var(--foreground)]/60">
                 You have full access to all features
               </p>
-              {subscriptionEnd && <SubscriptionTimer subscriptionEnd={subscriptionEnd} />}
+              <SubscriptionTimer subscriptionEnd={subscriptionEnd} />
             </div>
           )}
           {(subscriptionLevel === "Tester" || subscriptionLevel === "mylittlepwettybebe") && (

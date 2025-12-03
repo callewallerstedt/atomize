@@ -3170,6 +3170,10 @@ function Home() {
   const [shareUrl, setShareUrl] = useState<string>("");
   const [copiedToClipboard, setCopiedToClipboard] = useState(false);
   
+  const [examSnipeModalOpen, setExamSnipeModalOpen] = useState(false);
+  const [detectedExamFiles, setDetectedExamFiles] = useState<File[]>([]);
+  const [examSnipeCourseSlug, setExamSnipeCourseSlug] = useState<string | null>(null);
+  
   const [subscriptionLevel, setSubscriptionLevel] = useState<string | null>(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
   const hasPremiumAccess =
@@ -4076,70 +4080,28 @@ function Home() {
 
           if (examFiles.length === 0) {
             console.log('No exam files detected');
+            // Hide the spinner
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('synapse:no-exam-snipe', {
+                detail: { subjectSlug: unique, courseName: effectiveName }
+              }));
+            }
             return;
           }
 
-          console.log(`AI detected ${examFiles.length} exam file(s), creating exam snipe automatically...`);
-            
-          // Extract full text from exam files
-          const examTexts: { name: string; text: string }[] = [];
-          for (const file of examFiles) {
-            try {
-              const lower = file.name.toLowerCase();
-              let text = '';
-              
-              if (lower.endsWith('.pdf')) {
-                // For PDFs, use server-side extraction
-                const form = new FormData();
-                form.append('files', file);
-                const res = await fetch('/api/upload-course-files', { method: 'POST', body: form });
-                const json = await res.json().catch(() => ({}));
-                if (res.ok && json?.ok && Array.isArray(json.docs) && json.docs.length > 0) {
-                  text = json.docs[0].text || '';
-                }
-              } else if (lower.endsWith('.docx')) {
-                // For DOCX, also use server-side extraction
-                const form = new FormData();
-                form.append('files', file);
-                const res = await fetch('/api/upload-course-files', { method: 'POST', body: form });
-                const json = await res.json().catch(() => ({}));
-                if (res.ok && json?.ok && Array.isArray(json.docs) && json.docs.length > 0) {
-                  text = json.docs[0].text || '';
-                }
-              } else if (file.type.startsWith('text/') || lower.endsWith('.txt') || lower.endsWith('.md')) {
-                text = await file.text();
-              }
-              
-              if (text && text.trim().length > 100) {
-                examTexts.push({ name: file.name, text: text.trim() });
-              }
-            } catch (err) {
-              console.warn(`Failed to extract text from ${file.name}:`, err);
-            }
+          console.log(`AI detected ${examFiles.length} exam file(s), showing modal to user...`);
+          
+          // Show modal asking user if they want to run exam snipe
+          setDetectedExamFiles(examFiles);
+          setExamSnipeCourseSlug(unique);
+          setExamSnipeModalOpen(true);
+          
+          // Hide the checking spinner since we're showing modal instead
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('synapse:no-exam-snipe', {
+              detail: { subjectSlug: unique, courseName: effectiveName }
+            }));
           }
-
-            if (examTexts.length > 0) {
-              // Create exam snipe in background - will complete even if user navigates away
-              // Use background endpoint that processes server-side and saves automatically
-              fetch('/api/exam-snipe/background', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({
-                  examsText: examTexts,
-                  courseName: effectiveName,
-                  subjectSlug: unique,
-                  fileNames: examFiles.map(f => f.name),
-                }),
-                keepalive: true, // Keep request alive even if page unloads
-              }).then(res => {
-                if (res.ok) {
-                  console.log(`✓ Exam snipe processing started in background for course: ${unique}`);
-                }
-              }).catch(err => {
-                console.warn('Failed to start exam snipe processing:', err);
-              });
-            }
         } catch (err) {
           console.warn('Failed to auto-create exam snipe:', err);
           // Don't throw - this is a background process
@@ -4787,6 +4749,75 @@ function Home() {
               className="flex-1 bg-transparent text-sm text-[var(--foreground)] outline-none"
               onClick={(e) => (e.target as HTMLInputElement).select()}
             />
+          </div>
+        </div>
+      </Modal>
+      
+      {/* Exam Snipe Detection Modal */}
+      <Modal
+        open={examSnipeModalOpen}
+        onClose={() => {
+          setExamSnipeModalOpen(false);
+          setDetectedExamFiles([]);
+          setExamSnipeCourseSlug(null);
+        }}
+        title="Exam Files Detected"
+        footer={
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => {
+                setExamSnipeModalOpen(false);
+                setDetectedExamFiles([]);
+                setExamSnipeCourseSlug(null);
+              }}
+              className="synapse-style inline-flex h-10 items-center rounded-full px-6 text-sm font-medium disabled:opacity-60 transition-opacity"
+              style={{ 
+                background: 'rgba(128, 128, 128, 0.2)',
+                backgroundColor: 'rgba(128, 128, 128, 0.2)',
+                color: 'var(--foreground)',
+                zIndex: 100, 
+                position: 'relative' 
+              }}
+            >
+              <span style={{ color: 'var(--foreground)', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                No
+              </span>
+            </button>
+            <button
+              onClick={() => {
+                // Navigate to exam snipe page with the detected files
+                if (detectedExamFiles.length > 0) {
+                  (window as any).__pendingExamFiles = detectedExamFiles;
+                  router.push('/exam-snipe');
+                }
+                setExamSnipeModalOpen(false);
+                setDetectedExamFiles([]);
+                setExamSnipeCourseSlug(null);
+              }}
+              className="synapse-style inline-flex h-10 items-center rounded-full px-6 text-sm font-medium text-white disabled:opacity-60 transition-opacity"
+              style={{ color: 'white', zIndex: 100, position: 'relative' }}
+            >
+              <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                Yes
+              </span>
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-[var(--foreground)]">
+            I detected some past exams in the files. Do you want me to run an exam snipe?
+          </p>
+          <p className="text-sm text-[var(--foreground)]/70">
+            <span className="font-semibold">Recommended</span> - This will analyze the exams and create targeted study materials.
+          </p>
+          <div className="text-xs text-[var(--foreground)]/60">
+            <p className="mb-2">Detected {detectedExamFiles.length} exam file{detectedExamFiles.length !== 1 ? 's' : ''}:</p>
+            <ul className="list-disc list-inside space-y-1 ml-2">
+              {detectedExamFiles.map((file, index) => (
+                <li key={index}>{file.name}</li>
+              ))}
+            </ul>
           </div>
         </div>
       </Modal>

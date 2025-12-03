@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     const username = String(body.username || "").trim();
     const email = body.email ? String(body.email || "").trim() : null;
     const password = String(body.password || "");
-    const code = String(body.code || "").trim().toUpperCase();
+    const code = body.code ? String(body.code || "").trim().toUpperCase() : "";
     if (!username || !password || password.length < 6) {
       return NextResponse.json({ ok: false, error: "Invalid input" }, { status: 400 });
     }
@@ -39,41 +39,109 @@ export async function POST(req: Request) {
     }
     const hash = await bcrypt.hash(password, 10);
     
-    // Check for betatest code
+    // Check for promo code (either hardcoded legacy codes or database codes)
     let subscriptionLevel: "Free" | "Paid" | "Tester" | "mylittlepwettybebe" = "Free";
     let promoCodeUsed: string | null = null;
     let subscriptionStart: Date | null = null;
     let subscriptionEnd: Date | null = null;
     
-    if (code === "BETATEST") {
-      subscriptionLevel = "Tester";
-      promoCodeUsed = "BETATEST";
-      subscriptionStart = new Date();
-      subscriptionEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
-    } else if (code === "MLPB") {
-      subscriptionLevel = "mylittlepwettybebe";
-      promoCodeUsed = "MLPB";
-      subscriptionStart = new Date();
-      subscriptionEnd = null; // No expiration
+    if (code) {
+      // Check database FIRST - database codes take precedence over hardcoded legacy codes
+      const promoCode = await prisma.promoCode.findUnique({
+        where: { code },
+      });
+      
+      if (promoCode) {
+        // Check if expired
+        if (promoCode.expiresAt && promoCode.expiresAt < new Date()) {
+          return NextResponse.json({ ok: false, error: "This promo code has expired" }, { status: 400 });
+        }
+        
+        // Check max uses
+        if (promoCode.maxUses && promoCode.currentUses >= promoCode.maxUses) {
+          return NextResponse.json({ ok: false, error: "This promo code has reached its usage limit" }, { status: 400 });
+        }
+        
+        // Valid promo code - set subscription level
+        subscriptionLevel = promoCode.subscriptionLevel;
+        promoCodeUsed = code;
+        subscriptionStart = new Date();
+        
+        // Calculate subscription end date based on validityDays
+        // If validityDays is null or 0, subscriptionEnd remains null (unlimited)
+        if (promoCode.validityDays !== null && promoCode.validityDays !== undefined && promoCode.validityDays > 0) {
+          subscriptionEnd = new Date(Date.now() + promoCode.validityDays * 24 * 60 * 60 * 1000);
+        } else {
+          subscriptionEnd = null; // Explicitly set to null for unlimited subscriptions
+        }
+        
+        // Note: We'll create the redemption and update usage count after user creation
+      } else {
+        // Fall back to hardcoded legacy codes only if not found in database
+        if (code === "BETATEST") {
+          subscriptionLevel = "Tester";
+          promoCodeUsed = "BETATEST";
+          subscriptionStart = new Date();
+          subscriptionEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+        } else if (code === "MLPB") {
+          subscriptionLevel = "mylittlepwettybebe";
+          promoCodeUsed = "MLPB";
+          subscriptionStart = new Date();
+          subscriptionEnd = null; // No expiration
+        } else {
+          // Code not found in database and not a legacy code
+          return NextResponse.json({ ok: false, error: "Invalid promo code" }, { status: 400 });
+        }
+      }
     }
     
-    const user = await prisma.user.create({ 
-      data: { 
-        username, 
-        email: email || null,
-        password: hash,
-        subscriptionLevel,
-        promoCodeUsed,
-        subscriptionStart,
-        subscriptionEnd,
-        lastLoginAt: new Date(),
-      } 
+    // Create user and handle promo code redemption in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({ 
+        data: { 
+          username, 
+          email: email || null,
+          password: hash,
+          subscriptionLevel,
+          promoCodeUsed,
+          subscriptionStart,
+          subscriptionEnd,
+          lastLoginAt: new Date(),
+        } 
+      });
+      
+      // If a promo code was used from database (not a legacy hardcoded code), create redemption and update usage
+      if (code && promoCodeUsed) {
+        const promoCode = await tx.promoCode.findUnique({
+          where: { code },
+        });
+        
+        // Only create redemption if it's a database code (not legacy hardcoded)
+        if (promoCode && code !== "BETATEST" && code !== "MLPB") {
+          // Create redemption
+          await tx.promoCodeRedemption.create({
+            data: {
+              promoCodeId: promoCode.id,
+              userId: user.id,
+            },
+          });
+          
+          // Update promo code usage count
+          await tx.promoCode.update({
+            where: { id: promoCode.id },
+            data: { currentUses: { increment: 1 } },
+          });
+        }
+      }
+      
+      return user;
     });
-    await createSession(user.id);
+    
+    await createSession(result.id);
     return NextResponse.json({ 
       ok: true, 
-      user: { id: user.id, username: user.username },
-      subscriptionLevel: user.subscriptionLevel,
+      user: { id: result.id, username: result.username },
+      subscriptionLevel: result.subscriptionLevel,
     });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "Signup failed" }, { status: 500 });

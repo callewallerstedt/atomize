@@ -77,6 +77,7 @@ export default function SubjectPage() {
   const [daysLeft, setDaysLeft] = useState<number | null>(null); // Days until next exam
   const [examSnipes, setExamSnipes] = useState<Array<{ id: string; courseName: string; slug: string; createdAt: string; fileNames: string[] }>>([]);
   const [loadingExamSnipes, setLoadingExamSnipes] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true); // Initial page load state
   const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [topicInfoOpen, setTopicInfoOpen] = useState<string | null>(null);
@@ -95,6 +96,7 @@ export default function SubjectPage() {
     } while (newIndex === currentIndex && filteredFlashcards.length > 1);
     return newIndex;
   }
+
 
   // Listen for exam date updates to refresh UI
   useEffect(() => {
@@ -504,10 +506,13 @@ export default function SubjectPage() {
       setExamSnipes([]);
     } finally {
       setLoadingExamSnipes(false);
+      setPageLoading(false); // Mark page as loaded when exam snipes finish loading
     }
   }, [slug, syncExamSnipeLessonsToMainCourse]);
 
+
   useEffect(() => {
+    setPageLoading(true); // Start loading when slug changes
     const saved = refreshSubjectData();
     void loadExamSnipes();
 
@@ -525,13 +530,13 @@ export default function SubjectPage() {
 
   // Refresh exam snipes when page gains focus (in case user created one in another tab)
   useEffect(() => {
-    const handleFocus = () => {
+    const handleFocus = async () => {
       void loadExamSnipes();
     };
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [slug, subjectName]);
 
   useEffect(() => {
     const handleSubjectDataUpdated = (event: Event) => {
@@ -796,6 +801,15 @@ export default function SubjectPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // Show loading spinner while initial data is loading
+  if (pageLoading) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+        <GlowSpinner />
+      </div>
+    );
   }
 
   return (
@@ -1211,6 +1225,7 @@ export default function SubjectPage() {
             ) : (
               <div className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-6 text-center text-sm text-[var(--foreground)]/70">No topics yet.</div>
             )}
+
 
             {/* Topic Info Modal for Testers */}
             {subscriptionLevel === "Tester" && topicInfoOpen && (() => {

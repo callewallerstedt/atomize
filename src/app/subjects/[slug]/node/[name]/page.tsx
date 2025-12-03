@@ -305,11 +305,16 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
     setPracticeResults(null);
   }, [activeLessonIndex, currentLesson?.practiceProblems]);
 
-  // Hide hover effect and cursor on scroll
+  // Hide hover effect and cursor on scroll (but not during lesson generation)
   useEffect(() => {
     if (!content) return;
 
     function handleScroll() {
+      // Don't hide cursor if lesson is being generated/streamed
+      if (lessonLoading || shorteningLesson) {
+        return;
+      }
+
       // Clear hover effect immediately
       setHoverWordRects([]);
       setIsScrolling(true);
@@ -353,7 +358,7 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
         clearTimeout(scrollTimeoutRef.current);
       }
     };
-  }, [content]);
+  }, [content, lessonLoading, shorteningLesson]);
 
   useEffect(() => {
     return () => {
@@ -1663,6 +1668,28 @@ function toggleStar(flashcardId: string) {
                         const decoder = new TextDecoder();
                         let accumulated = "";
                         
+                        const updateStreamingLesson = (body: string) => {
+                          setContent((prevContent) => {
+                            if (!prevContent) return prevContent;
+                            const updateNext = preserveExamSnipeMeta({ ...(prevContent as TopicGeneratedContent) });
+                            updateNext.lessons = updateNext.lessons ? [...updateNext.lessons] : [];
+                            while (updateNext.lessons.length <= lessonIdx) {
+                              updateNext.lessons.push(null);
+                            }
+                            const existingLesson = updateNext.lessons[lessonIdx] || {};
+                            const existingFlashcards = (existingLesson as any)?.flashcards;
+                            updateNext.lessons[lessonIdx] = {
+                              ...(existingLesson as any),
+                              title: String(prevContent?.lessonsMeta?.[lessonIdx]?.title || title),
+                              body,
+                              quiz: [],
+                              metadata: null,
+                              ...(existingFlashcards ? { flashcards: existingFlashcards } : {}),
+                            };
+                            return updateNext;
+                          });
+                        };
+                        
                         while (true) {
                           const { value, done } = await reader.read();
                           if (done) break;
@@ -1678,83 +1705,14 @@ function toggleStar(flashcardId: string) {
                               const parsed = JSON.parse(payload);
                               if (parsed.type === "text") {
                                 accumulated += parsed.content;
-                                
-                                // Hide spinner once we start receiving content
                                 if (accumulated.trim().length > 0) {
-                                  setLessonLoading(false);
+                                  if (lessonLoading) {
+                                    setLessonLoading(false);
+                                  }
+                                  updateStreamingLesson(accumulated);
                                 }
-                                
-                                // Update lesson body in real-time during streaming
-                                // Use functional update to get latest content state
-                                setContent((prevContent) => {
-                                  if (!prevContent) return prevContent;
-                                  const updateNext = preserveExamSnipeMeta({ ...(prevContent as TopicGeneratedContent) });
-                                  updateNext.lessons = updateNext.lessons ? [...updateNext.lessons] : [];
-                                  while (updateNext.lessons.length <= lessonIdx) {
-                                    updateNext.lessons.push(null);
-                                  }
-                                  const existingLesson = updateNext.lessons[lessonIdx] || {};
-                                  updateNext.lessons[lessonIdx] = {
-                                    ...(existingLesson as any),
-                                    title: String(prevContent?.lessonsMeta?.[lessonIdx]?.title || `Lesson ${lessonIdx + 1}`),
-                                    body: accumulated,
-                                    quiz: [],
-                                    metadata: null
-                                  };
-                                  return updateNext;
-                                });
                               } else if (parsed.type === "error") {
-                                throw new Error(parsed.error || "Streaming error");
-                              } else if (parsed.type === "done") {
-                                // Stream complete - just use the accumulated content as the body
-                                const sanitizeString = (value: string): string =>
-                                  value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
-                                
-                                const bodyMarkdown = sanitizeString(accumulated);
-                                
-                                // Use functional update to get latest content state
-                                setContent((prevContent) => {
-                                  if (!prevContent) return prevContent;
-                                  const derivedTitle = String(prevContent?.lessonsMeta?.[lessonIdx]?.title || title);
-                                  const finalNext = preserveExamSnipeMeta({ ...(prevContent as TopicGeneratedContent) });
-                                  finalNext.lessons = finalNext.lessons ? [...finalNext.lessons] : [];
-                                  while (finalNext.lessons.length <= lessonIdx) {
-                                    finalNext.lessons.push(null);
-                                  }
-                                  const existingLesson = finalNext.lessons[lessonIdx] || {};
-                                  finalNext.lessons[lessonIdx] = {
-                                    ...(existingLesson as any),
-                                    title: derivedTitle,
-                                    body: bodyMarkdown,
-                                    quiz: [],
-                                    metadata: null,
-                                    // Clear old quiz data
-                                    userAnswers: undefined,
-                                    quizResults: undefined,
-                                    quizCompletedAt: undefined,
-                                  };
-                                  finalNext.rawLessonJson = Array.isArray(finalNext.rawLessonJson) ? [...finalNext.rawLessonJson] : [];
-                                  while (finalNext.rawLessonJson.length <= lessonIdx) {
-                                    finalNext.rawLessonJson.push(null);
-                                  }
-                                  finalNext.rawLessonJson[lessonIdx] = accumulated;
-                                  
-                                  // Save to storage
-                                  upsertNodeContentAsync(slug, title, finalNext as any).catch((e) => {
-                                    console.error("Failed to save regenerated lesson:", e);
-                                  });
-                                  
-                                  return finalNext;
-                                });
-                                
-                                // Reset quiz state for the regenerated lesson
-                                setUserAnswers({});
-                                setQuizResults(null);
-                                setPracticeAnswers({});
-                                setPracticeResults(null);
-                                
-                                // Generate practice problems after lesson is complete (async, don't block)
-                                generatePracticeProblemsForLesson(bodyMarkdown, lessonIdx);
+                                throw new Error(parsed.error || "Lesson streaming error");
                               }
                             } catch (err) {
                               if (!(err instanceof SyntaxError)) {
@@ -1763,6 +1721,58 @@ function toggleStar(flashcardId: string) {
                             }
                           }
                         }
+                        
+                        const sanitizeString = (value: string): string =>
+                          value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
+                        const lessonBody = sanitizeString(accumulated);
+                        if (!lessonBody.trim()) {
+                          throw new Error("Lesson generation returned empty content");
+                        }
+                        
+                        updateStreamingLesson(lessonBody);
+                        
+                        // Final save with all data
+                        setContent((prevContent) => {
+                          if (!prevContent) return prevContent;
+                          const finalNext = preserveExamSnipeMeta({ ...(prevContent as TopicGeneratedContent) });
+                          finalNext.lessons = finalNext.lessons ? [...finalNext.lessons] : [];
+                          while (finalNext.lessons.length <= lessonIdx) {
+                            finalNext.lessons.push(null);
+                          }
+                          const existingLesson = finalNext.lessons[lessonIdx] || {};
+                          finalNext.lessons[lessonIdx] = {
+                            ...(existingLesson as any),
+                            title: String(prevContent?.lessonsMeta?.[lessonIdx]?.title || title),
+                            body: lessonBody,
+                            quiz: [],
+                            metadata: null,
+                            // Clear old quiz data
+                            userAnswers: undefined,
+                            quizResults: undefined,
+                            quizCompletedAt: undefined,
+                          };
+                          finalNext.rawLessonJson = Array.isArray(finalNext.rawLessonJson) ? [...finalNext.rawLessonJson] : [];
+                          while (finalNext.rawLessonJson.length <= lessonIdx) {
+                            finalNext.rawLessonJson.push(null);
+                          }
+                          finalNext.rawLessonJson[lessonIdx] = accumulated;
+                          
+                          // Save to storage
+                          upsertNodeContentAsync(slug, title, finalNext as any).catch((e) => {
+                            console.error("Failed to save regenerated lesson:", e);
+                          });
+                          
+                          return finalNext;
+                        });
+                        
+                        // Reset quiz state for the regenerated lesson
+                        setUserAnswers({});
+                        setQuizResults(null);
+                        setPracticeAnswers({});
+                        setPracticeResults(null);
+                        
+                        // Generate practice problems after lesson is complete (async, don't block)
+                        generatePracticeProblemsForLesson(lessonBody, lessonIdx);
                       } catch (err: any) {
                         alert(err?.message || "Failed to regenerate lesson");
                       } finally {

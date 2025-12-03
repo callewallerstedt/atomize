@@ -151,6 +151,10 @@ function PromoCodeModal({
   const [editingCode, setEditingCode] = useState<any | null>(null);
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [userCodeInput, setUserCodeInput] = useState<{ [userId: string]: string }>({});
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<any | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deletingUser, setDeletingUser] = useState(false);
   const [formData, setFormData] = useState({
     code: "",
     description: "",
@@ -238,8 +242,10 @@ function PromoCodeModal({
           description: formData.description.trim() || null,
           subscriptionLevel: formData.subscriptionLevel,
           expiresAt: formData.expiresAt || null, // When code itself expires
-          validityDays: formData.validityDays ? Number(formData.validityDays) : null, // Days each user gets
-          maxUses: formData.maxUses ? Number(formData.maxUses) : null,
+          validityDays: formData.validityDays && formData.validityDays.trim() && Number(formData.validityDays) > 0 
+            ? Number(formData.validityDays) 
+            : null, // Days each user gets (null = unlimited)
+          maxUses: formData.maxUses && formData.maxUses.trim() ? Number(formData.maxUses) : null,
         }),
       });
 
@@ -270,8 +276,10 @@ function PromoCodeModal({
           description: formData.description.trim() || null,
           subscriptionLevel: formData.subscriptionLevel,
           expiresAt: formData.expiresAt || null, // When code itself expires
-          validityDays: formData.validityDays ? Number(formData.validityDays) : null, // Days each user gets
-          maxUses: formData.maxUses ? Number(formData.maxUses) : null,
+          validityDays: formData.validityDays && formData.validityDays.trim() && Number(formData.validityDays) > 0 
+            ? Number(formData.validityDays) 
+            : null, // Days each user gets (null = unlimited)
+          maxUses: formData.maxUses && formData.maxUses.trim() ? Number(formData.maxUses) : null,
         }),
       });
 
@@ -413,6 +421,41 @@ function PromoCodeModal({
     } catch (err) {
       console.error("Error updating user:", err);
       alert("Failed to update user");
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!userToDelete) return;
+    
+    // Verify confirmation text matches username
+    if (deleteConfirmText.trim() !== userToDelete.username) {
+      alert(`Confirmation text must match the username: ${userToDelete.username}`);
+      return;
+    }
+
+    setDeletingUser(true);
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ userId: userToDelete.id }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert(data.message || "User deleted successfully");
+        setDeleteConfirmOpen(false);
+        setUserToDelete(null);
+        setDeleteConfirmText("");
+        loadUsers(); // Refresh the list
+      } else {
+        alert(data.error || "Failed to delete user");
+      }
+    } catch (err) {
+      console.error('Error deleting user:', err);
+      alert("Failed to delete user");
+    } finally {
+      setDeletingUser(false);
     }
   };
 
@@ -592,14 +635,35 @@ function PromoCodeModal({
                           Uses: {code.currentUses || 0}
                           {code.maxUses ? ` / ${code.maxUses}` : " / Unlimited"}
                         </div>
-                        {code.validityDays && (
+                        {code.validityDays ? (
                           <div>
                             Validity: {code.validityDays} days per user
                           </div>
-                        )}
-                        {code.expiresAt && (
+                        ) : (
                           <div>
-                            Code expires: {new Date(code.expiresAt).toLocaleString()}
+                            Validity: <span className="text-[var(--accent-cyan)]">Unlimited</span> per user
+                          </div>
+                        )}
+                        {code.expiresAt ? (() => {
+                          const now = new Date();
+                          const expires = new Date(code.expiresAt);
+                          const diff = expires.getTime() - now.getTime();
+                          const daysLeft = Math.ceil(diff / (1000 * 60 * 60 * 24));
+                          if (daysLeft <= 0) {
+                            return (
+                              <div>
+                                Code expires: <span className="text-red-400">Expired</span>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div>
+                              Code expires: <span className="text-[var(--accent-cyan)]">{daysLeft} day{daysLeft !== 1 ? 's' : ''} left</span>
+                            </div>
+                          );
+                        })() : (
+                          <div>
+                            Code expires: <span className="text-[var(--accent-cyan)]">Never</span>
                           </div>
                         )}
                         <div>
@@ -780,6 +844,16 @@ function PromoCodeModal({
                           >
                             Edit
                           </button>
+                          <button
+                            onClick={() => {
+                              setUserToDelete(user);
+                              setDeleteConfirmText("");
+                              setDeleteConfirmOpen(true);
+                            }}
+                            className="px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/10 text-xs text-red-500 hover:bg-red-500/20 transition-colors"
+                          >
+                            Delete
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -790,6 +864,69 @@ function PromoCodeModal({
           </div>
         )}
       </div>
+      
+      {/* Delete User Confirmation Modal */}
+      <Modal
+        open={deleteConfirmOpen}
+        onClose={() => {
+          setDeleteConfirmOpen(false);
+          setUserToDelete(null);
+          setDeleteConfirmText("");
+        }}
+        title="⚠️ Delete User Account"
+        footer={
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => {
+                setDeleteConfirmOpen(false);
+                setUserToDelete(null);
+                setDeleteConfirmText("");
+              }}
+              className="px-4 py-2 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)] text-[var(--foreground)] hover:bg-[var(--foreground)]/5 transition-colors"
+              disabled={deletingUser}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDeleteUser}
+              disabled={deleteConfirmText.trim() !== userToDelete?.username || deletingUser}
+              className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {deletingUser ? "Deleting..." : "Delete Permanently"}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4">
+            <p className="text-sm font-semibold text-red-500 mb-2">⚠️ WARNING: This action cannot be undone!</p>
+            <p className="text-xs text-[var(--foreground)]/80">
+              This will permanently delete the user account <strong>{userToDelete?.username}</strong> and ALL associated data including:
+            </p>
+            <ul className="text-xs text-[var(--foreground)]/70 mt-2 ml-4 list-disc space-y-1">
+              <li>All courses and course data</li>
+              <li>All lessons and generated content</li>
+              <li>All exam snipes</li>
+              <li>All flashcards and progress</li>
+              <li>All shared courses</li>
+              <li>All subscription information</li>
+            </ul>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-[var(--foreground)] mb-2">
+              Type the username <strong>{userToDelete?.username}</strong> to confirm:
+            </label>
+            <input
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder={userToDelete?.username}
+              className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-2 text-sm text-[var(--foreground)] focus:border-red-500 focus:outline-none"
+              autoFocus
+            />
+          </div>
+        </div>
+      </Modal>
     </Modal>
   );
 }
@@ -798,30 +935,21 @@ function FeedbackModal({
   open, 
   onClose, 
   subscriptionLevel,
-  pathname 
+  pathname,
+  onFeedbackSent
 }: { 
   open: boolean; 
   onClose: () => void;
   subscriptionLevel: string;
   pathname: string;
+  onFeedbackSent: () => void;
 }) {
   const [feedback, setFeedback] = useState("");
   const [sending, setSending] = useState(false);
   const [allFeedback, setAllFeedback] = useState<any[]>([]);
   const [loadingFeedback, setLoadingFeedback] = useState(false);
-  const [showThankYou, setShowThankYou] = useState(false);
   const isTester = subscriptionLevel === "Tester" || subscriptionLevel === "mylittlepwettybebe";
 
-  // Auto-close thank you modal after 3 seconds
-  useEffect(() => {
-    if (showThankYou) {
-      const timer = setTimeout(() => {
-        setShowThankYou(false);
-        onClose(); // Also close the main feedback modal
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [showThankYou, onClose]);
 
   useEffect(() => {
     if (open && isTester) {
@@ -859,7 +987,8 @@ function FeedbackModal({
       const data = await res.json();
       if (data.ok) {
         setFeedback("");
-        setShowThankYou(true);
+        onClose(); // Close the feedback modal
+        onFeedbackSent(); // Trigger thank you modal in parent
         if (isTester) {
           // Reload feedback list
           const refreshRes = await fetch("/api/feedback");
@@ -1086,29 +1215,6 @@ function FeedbackModal({
           </div>
         )}
       </div>
-      {/* Thank You Confirmation Modal */}
-      <Modal
-        open={showThankYou}
-        onClose={() => setShowThankYou(false)}
-      >
-        <div className="flex flex-col items-center justify-center py-8 px-6 space-y-4">
-          <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
-            <svg 
-              className="w-10 h-10 text-green-500" 
-              fill="none" 
-              viewBox="0 0 24 24" 
-              stroke="currentColor" 
-              strokeWidth="3"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h3 className="text-xl font-semibold text-[var(--foreground)]">Thank you!</h3>
-          <p className="text-sm text-[var(--foreground)]/70 text-center">
-            Your feedback has been submitted successfully.
-          </p>
-        </div>
-      </Modal>
     </Modal>
   );
 }
@@ -4345,6 +4451,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const [savedDataError, setSavedDataError] = useState<string | null>(null);
   const [copiedSavedDataSlug, setCopiedSavedDataSlug] = useState<string | null>(null);
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+  const [showThankYou, setShowThankYou] = useState(false);
   const [disclaimerModalOpen, setDisclaimerModalOpen] = useState(false);
   const [headerVisible, setHeaderVisible] = useState(true);
   const [lastScrollY, setLastScrollY] = useState(0);
@@ -4412,6 +4519,16 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       setSavedDataLoading(false);
     }
   };
+
+  // Auto-close thank you modal after 2 seconds
+  useEffect(() => {
+    if (showThankYou) {
+      const timer = setTimeout(() => {
+        setShowThankYou(false);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [showThankYou]);
 
   // Check if user has seen the disclaimer on first visit
   useEffect(() => {
@@ -6246,7 +6363,31 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         onClose={() => setFeedbackModalOpen(false)}
         subscriptionLevel={subscriptionLevel}
         pathname={pathname || ""}
+        onFeedbackSent={() => setShowThankYou(true)}
       />
+      {/* Thank You Confirmation Modal */}
+      <Modal
+        open={showThankYou}
+        onClose={() => setShowThankYou(false)}
+      >
+        <div className="flex flex-col items-center justify-center py-8 px-6 space-y-4">
+          <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
+            <svg 
+              className="w-10 h-10 text-green-500" 
+              fill="none" 
+              viewBox="0 0 24 24" 
+              stroke="currentColor" 
+              strokeWidth="3"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h3 className="text-xl font-semibold text-[var(--foreground)]">Thank you!</h3>
+          <p className="text-sm text-[var(--foreground)]/70 text-center">
+            Your feedback has been submitted successfully.
+          </p>
+        </div>
+      </Modal>
     </div>
     </>
   );

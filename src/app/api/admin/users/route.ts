@@ -156,9 +156,12 @@ export async function POST(req: Request) {
     }
 
     // Calculate subscription end date based on validityDays
+    // If validityDays is null or 0, subscriptionEnd remains null (unlimited)
     let subscriptionEnd: Date | null = null;
-    if (promoCode.validityDays && promoCode.validityDays > 0) {
+    if (promoCode.validityDays !== null && promoCode.validityDays !== undefined && promoCode.validityDays > 0) {
       subscriptionEnd = new Date(Date.now() + promoCode.validityDays * 24 * 60 * 60 * 1000);
+    } else {
+      subscriptionEnd = null; // Explicitly set to null for unlimited subscriptions
     }
 
     // Create redemption and update user subscription
@@ -195,6 +198,61 @@ export async function POST(req: Request) {
     });
   } catch (err: any) {
     console.error("[admin/users] Error:", err);
+    return NextResponse.json(
+      { ok: false, error: err?.message || "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE - Delete user and all their data (admin only)
+export async function DELETE(req: Request) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    }
+
+    const currentUser = await prisma.user.findUnique({ where: { id: user.id } });
+    if (currentUser?.username !== "cwallerstedt") {
+      return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const userId = String(body.userId || "");
+
+    if (!userId) {
+      return NextResponse.json({ ok: false, error: "User ID is required" }, { status: 400 });
+    }
+
+    // Prevent deleting yourself
+    if (userId === user.id) {
+      return NextResponse.json({ ok: false, error: "You cannot delete your own account" }, { status: 400 });
+    }
+
+    // Get user info before deletion for logging
+    const userToDelete = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { username: true, email: true },
+    });
+
+    if (!userToDelete) {
+      return NextResponse.json({ ok: false, error: "User not found" }, { status: 404 });
+    }
+
+    // Delete user - cascade deletes will handle related data (subjects, subjectData, examSnipeHistory, etc.)
+    await prisma.user.delete({
+      where: { id: userId },
+    });
+
+    console.log(`[admin/users] Deleted user: ${userToDelete.username} (${userToDelete.email || 'no email'})`);
+
+    return NextResponse.json({
+      ok: true,
+      message: `User ${userToDelete.username} and all their data have been permanently deleted`,
+    });
+  } catch (err: any) {
+    console.error("[admin/users] Delete error:", err);
     return NextResponse.json(
       { ok: false, error: err?.message || "Internal server error" },
       { status: 500 }

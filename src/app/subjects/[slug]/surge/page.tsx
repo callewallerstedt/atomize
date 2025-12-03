@@ -2480,11 +2480,16 @@ export default function SurgePage() {
 
   // Removed keyboard navigation for lesson parts - lessons are now single continuous documents
 
-  // Hide hover effect and cursor on scroll
+  // Hide hover effect and cursor on scroll (but not during lesson/quiz generation)
   useEffect(() => {
     if (!showLessonCard && phase !== "learn") return;
 
     function handleScroll() {
+      // Don't hide cursor if content is being generated/streamed
+      if (sending || quizLoading) {
+        return;
+      }
+
       // Clear hover effect immediately
       setHoverWordRects([]);
       setIsScrolling(true);
@@ -2528,7 +2533,7 @@ export default function SurgePage() {
         clearTimeout(scrollTimeoutRef.current);
       }
     };
-  }, [showLessonCard, phase]);
+  }, [showLessonCard, phase, sending, quizLoading]);
 
   const handlePhaseTransition = () => {
     if (phase === "repeat") {

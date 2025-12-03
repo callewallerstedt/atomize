@@ -25,8 +25,11 @@ export async function PATCH(req: Request) {
     const subscriptionLevel = body.subscriptionLevel ? String(body.subscriptionLevel) : undefined;
     const description = body.description !== undefined ? (body.description ? String(body.description).trim() : null) : undefined;
     const expiresAt = body.expiresAt !== undefined ? (body.expiresAt ? new Date(body.expiresAt) : null) : undefined; // When code itself expires
-    const validityDays = body.validityDays !== undefined ? (body.validityDays ? Number(body.validityDays) : null) : undefined; // Days each user gets
-    const maxUses = body.maxUses !== undefined ? (body.maxUses ? Number(body.maxUses) : null) : undefined;
+    // Handle validityDays: if empty string, null, undefined, or 0, set to null (unlimited)
+    const validityDays = body.validityDays !== undefined 
+      ? (body.validityDays && body.validityDays !== "" && Number(body.validityDays) > 0 ? Number(body.validityDays) : null)
+      : undefined; // Days each user gets
+    const maxUses = body.maxUses !== undefined ? (body.maxUses && body.maxUses !== "" ? Number(body.maxUses) : null) : undefined;
 
     if (!id) {
       return NextResponse.json({ ok: false, error: "ID is required" }, { status: 400 });

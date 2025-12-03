@@ -71,9 +71,12 @@ export async function POST(req: Request) {
 
       // Calculate subscription end date based on validityDays
       // Each user gets validityDays from when they redeem (not from code creation)
+      // If validityDays is null or 0, subscriptionEnd remains null (unlimited)
       let subscriptionEnd: Date | null = null;
-      if (promoCode.validityDays && promoCode.validityDays > 0) {
+      if (promoCode.validityDays !== null && promoCode.validityDays !== undefined && promoCode.validityDays > 0) {
         subscriptionEnd = new Date(Date.now() + promoCode.validityDays * 24 * 60 * 60 * 1000);
+      } else {
+        subscriptionEnd = null; // Explicitly set to null for unlimited subscriptions
       }
 
       // Update user subscription
