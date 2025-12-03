@@ -360,39 +360,28 @@ function CourseExamSnipeInner() {
         const lessonGenerated = generatedLessonsByConcept?.[lessonPlanId] as GeneratedLesson | undefined;
         const existingLesson = existingLessons[idx] || {};
 
-        if (lessonGenerated) {
-          lessonsMeta.push({
-            type: "Exam Snipe",
-            title: String(lessonGenerated.title || lessonTitle),
-            planId: lessonPlanId,
-            tag: "Exam Snipe",
-          });
-          lessonsArray.push({
-            ...existingLesson,
-            title: String(lessonGenerated.title || lessonTitle),
-            body: String(lessonGenerated.body || ""),
-            origin: "exam-snipe",
-            quiz: (existingLesson as any)?.quiz?.length
-              ? (existingLesson as any).quiz
-              : Array.isArray(lessonGenerated.quiz)
-              ? lessonGenerated.quiz.map((q: any) => ({ question: String(q?.question || q || "") }))
-              : [],
-          });
-        } else {
-          lessonsMeta.push({
-            type: "Exam Snipe Outline",
-            title: lessonTitle,
-            planId: lessonPlanId,
-            tag: "Exam Snipe",
-          });
-          lessonsArray.push({
-            ...existingLesson,
-            title: lessonTitle,
-            body: typeof existingLesson.body === "string" ? existingLesson.body : "",
-            origin: "exam-snipe",
-            quiz: (existingLesson as any)?.quiz?.length ? (existingLesson as any).quiz : [],
-          });
-        }
+        // Always treat exam snipe lessons as *outlines* when syncing into a course.
+        // This lets the normal lesson page handle generation/streaming so the UX
+        // matches Surge/regular lessons (Start button, streaming content, etc).
+        lessonsMeta.push({
+          type: lessonGenerated ? "Exam Snipe" : "Exam Snipe Outline",
+          title: lessonGenerated ? String(lessonGenerated.title || lessonTitle) : lessonTitle,
+          planId: lessonPlanId,
+          tag: "Exam Snipe",
+        });
+
+        lessonsArray.push({
+          ...existingLesson,
+          title: lessonGenerated ? String(lessonGenerated.title || lessonTitle) : lessonTitle,
+          // If we already have a body stored for this lesson in the course, keep it.
+          // Otherwise leave it empty so the node page shows the Start button and
+          // uses the standard streaming generator.
+          body: typeof existingLesson.body === "string" ? existingLesson.body : "",
+          origin: "exam-snipe",
+          quiz: (existingLesson as any)?.quiz?.length
+            ? (existingLesson as any).quiz
+            : [],
+        });
       });
 
       return { lessonsMeta, lessonsArray };
@@ -483,7 +472,9 @@ function CourseExamSnipeInner() {
     } catch (err) {
       console.error("Failed to sync exam snipe lessons to course:", err);
     }
-    return { lessonSlug, topic, clickedLessonIndex };
+    // When opening a lesson from the course exam-snipe view, always navigate
+    // to the *main* course slug so the lesson behaves like any other course lesson.
+    return { lessonSlug: slug, topic, clickedLessonIndex };
   };
 
 
