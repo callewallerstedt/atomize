@@ -672,6 +672,8 @@ button.synapse-style {
   -webkit-backface-visibility: hidden;
   background: rgba(255, 255, 255, 0.08) !important; /* White background at 8% opacity in the background */
   border: none;
+  isolation: isolate;
+  /* Ensure Tailwind border-radius classes work - don't override them */
 }
 
 .light-mode button.synapse-style {
@@ -684,13 +686,45 @@ button.synapse-style::after {
   content: '';
   position: absolute;
   inset: 0;
+  /* Match the button's border-radius - explicitly inherit from parent button */
   border-radius: inherit;
+  -webkit-border-radius: inherit;
   pointer-events: none;
   z-index: 0;
   background-size: 180% 180%;
   filter: blur(22px);
+  -webkit-filter: blur(22px);
   opacity: 1;
   mix-blend-mode: screen;
+  /* Force hardware acceleration */
+  will-change: transform, background-position;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+
+/* Explicitly match common border-radius values for mobile compatibility */
+button.synapse-style.rounded-full::before,
+button.synapse-style.rounded-full::after {
+  border-radius: 9999px;
+  -webkit-border-radius: 9999px;
+}
+
+button.synapse-style.rounded-lg::before,
+button.synapse-style.rounded-lg::after {
+  border-radius: 0.5rem;
+  -webkit-border-radius: 0.5rem;
+}
+
+button.synapse-style.rounded-xl::before,
+button.synapse-style.rounded-xl::after {
+  border-radius: 0.75rem;
+  -webkit-border-radius: 0.75rem;
+}
+
+button.synapse-style.rounded-2xl::before,
+button.synapse-style.rounded-2xl::after {
+  border-radius: 1rem;
+  -webkit-border-radius: 1rem;
 }
 
 /* Scale blob size based on button height for better proportions */

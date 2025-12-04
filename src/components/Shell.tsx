@@ -5162,16 +5162,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               </div>
 
               <div ref={mobileMenuRef} className="relative md:hidden">
-                {/* Mobile menu button */}
+                {/* Mobile menu button - hamburger icon */}
                 <button
                   onClick={() => setMobileMenuOpen((open) => !open)}
-                  className="unified-button inline-flex items-center gap-1.5 px-4 py-2.5 text-sm transition-colors"
+                  className="unified-button inline-flex items-center justify-center px-3 py-2.5 rounded-lg text-sm transition-colors"
                   aria-expanded={mobileMenuOpen}
                   aria-haspopup="true"
+                  aria-label="Menu"
                 >
-                  Menu
-                  <svg className={`h-4 w-4 transition-transform ${mobileMenuOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  <svg className={`h-5 w-5 transition-transform ${mobileMenuOpen ? 'rotate-90' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
                   </svg>
                 </button>
 
@@ -5196,26 +5198,73 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                             setMobileMenuOpen(false);
                             document.dispatchEvent(new CustomEvent('synapse:open-chat'));
                           }}
-                          className="btn-grey w-full rounded-lg px-4 py-3 text-left text-sm transition-colors"
+                          className="w-full rounded-lg px-4 py-2.5 text-sm font-medium text-left transition-all duration-200 bg-[var(--foreground)]/8 hover:bg-[var(--foreground)]/12 border border-[var(--foreground)]/10 hover:border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)]"
                         >
                           Open Chat
                         </button>
                       )}
+                      {/* SurgeLog button - only for Tester subscription on surge page */}
+                      {subscriptionLevel === "Tester" && pathname?.includes('/surge') && (
+                        <button
+                          onClick={() => {
+                            setMobileMenuOpen(false);
+                            setSurgeLogModalOpen(true);
+                          }}
+                          className="w-full rounded-lg px-4 py-2.5 text-sm font-medium text-left transition-all duration-200 bg-[var(--foreground)]/8 hover:bg-[var(--foreground)]/12 border border-[var(--foreground)]/10 hover:border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)]"
+                        >
+                          Surge Log
+                        </button>
+                      )}
+                      {/* DevTools button - only for Tester subscription */}
+                      {subscriptionLevel === "Tester" && (
+                        <button
+                          onClick={() => {
+                            setMobileMenuOpen(false);
+                            setDevToolsModalOpen(true);
+                          }}
+                          className="w-full rounded-lg px-4 py-2.5 text-sm font-medium text-left transition-all duration-200 bg-[var(--foreground)]/8 hover:bg-[var(--foreground)]/12 border border-[var(--foreground)]/10 hover:border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)]"
+                        >
+                          DevTools
+                        </button>
+                      )}
+                      {/* Feedback Button */}
                       <button
                         onClick={() => {
                           setMobileMenuOpen(false);
-                          setInfoOpen(true);
+                          setFeedbackModalOpen(true);
                         }}
-                        className="btn-grey w-full rounded-lg px-4 py-3 text-left text-sm transition-colors"
+                        className="w-full rounded-lg px-4 py-2.5 text-sm font-medium text-left transition-all duration-200 bg-[var(--foreground)]/8 hover:bg-[var(--foreground)]/12 border border-[var(--foreground)]/10 hover:border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)]"
                       >
-                        App Info
+                        Leave Feedback
+                      </button>
+                      {/* Promo Code Management Button - Only for cwallerstedt */}
+                      {username === "cwallerstedt" && (
+                        <button
+                          onClick={() => {
+                            setMobileMenuOpen(false);
+                            setPromoCodeModalOpen(true);
+                          }}
+                          className="w-full rounded-lg px-4 py-2.5 text-sm font-medium text-left transition-all duration-200 bg-[var(--foreground)]/8 hover:bg-[var(--foreground)]/12 border border-[var(--foreground)]/10 hover:border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)]"
+                        >
+                          Founders Toolbox
+                        </button>
+                      )}
+                      {/* Fullscreen button */}
+                      <button
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          toggleFullscreen();
+                        }}
+                        className="w-full rounded-lg px-4 py-2.5 text-sm font-medium text-left transition-all duration-200 bg-[var(--foreground)]/8 hover:bg-[var(--foreground)]/12 border border-[var(--foreground)]/10 hover:border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)]"
+                      >
+                        {isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
                       </button>
                       <button
                         onClick={() => {
                           setMobileMenuOpen(false);
                           setSettingsOpen(true);
                         }}
-                        className="btn-grey w-full rounded-lg px-4 py-3 text-left text-sm transition-colors"
+                        className="w-full rounded-lg px-4 py-2.5 text-sm font-medium text-left transition-all duration-200 bg-[var(--foreground)]/8 hover:bg-[var(--foreground)]/12 border border-[var(--foreground)]/10 hover:border-[var(--foreground)]/20 text-[var(--foreground)]/80 hover:text-[var(--foreground)]"
                       >
                         Settings
                       </button>
