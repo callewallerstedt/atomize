@@ -69,14 +69,29 @@ export async function POST(req: Request) {
         data: { currentUses: { increment: 1 } },
       });
 
-      // Calculate subscription end date based on validityDays
-      // Each user gets validityDays from when they redeem (not from code creation)
-      // If validityDays is null or 0, subscriptionEnd remains null (unlimited)
+      // Calculate subscription end date
+      // User's subscription expires at the earlier of:
+      // 1. validityDays from redemption date (if set)
+      // 2. expiresAt (code expiration date, if set)
+      // If both are null, subscription is unlimited
       let subscriptionEnd: Date | null = null;
+      const now = new Date();
+      
+      // Calculate end date from validityDays
+      let validityEnd: Date | null = null;
       if (promoCode.validityDays !== null && promoCode.validityDays !== undefined && promoCode.validityDays > 0) {
-        subscriptionEnd = new Date(Date.now() + promoCode.validityDays * 24 * 60 * 60 * 1000);
+        validityEnd = new Date(now.getTime() + promoCode.validityDays * 24 * 60 * 60 * 1000);
+      }
+      
+      // Use the earlier of validityEnd or expiresAt, or null if both are null
+      if (validityEnd && promoCode.expiresAt) {
+        subscriptionEnd = validityEnd < promoCode.expiresAt ? validityEnd : promoCode.expiresAt;
+      } else if (validityEnd) {
+        subscriptionEnd = validityEnd;
+      } else if (promoCode.expiresAt) {
+        subscriptionEnd = promoCode.expiresAt;
       } else {
-        subscriptionEnd = null; // Explicitly set to null for unlimited subscriptions
+        subscriptionEnd = null; // Unlimited if both are null
       }
 
       // Update user subscription

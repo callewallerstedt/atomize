@@ -210,7 +210,17 @@ export function validateKatexBlocks(md: string): { ok: boolean; errors: string[]
 		if (!trimmed || /^#+\s/.test(trimmed) || /\n#+\s/.test(trimmed)) continue;
 		try {
 			const cleaned = cleanExpression(trimmed);
-			katex.renderToString(cleaned, { throwOnError: true, displayMode: false });
+			// Special-case align environments: KaTeX requires display mode for align/align*
+			// but authors (or the model) sometimes put them inside inline math by mistake.
+			// Instead of failing hard, validate them in displayMode so they can pass if valid.
+			const needsDisplay =
+				/\\begin\{align\*?\}/.test(cleaned) ||
+				/\\end\{align\*?\}/.test(cleaned);
+
+			katex.renderToString(cleaned, {
+				throwOnError: true,
+				displayMode: needsDisplay ? true : false,
+			});
 		} catch (e: any) {
 			errs.push(`Inline math error: ${String(e?.message || e)}`);
 		}

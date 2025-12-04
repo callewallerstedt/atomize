@@ -4686,6 +4686,23 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('scroll', handleScroll);
   }, [lastScrollY]);
 
+  // Hide header when onboarding is open
+  useEffect(() => {
+    const handleOnboardingOpen = () => {
+      setHeaderVisible(false);
+    };
+    const handleOnboardingClose = () => {
+      setHeaderVisible(true);
+    };
+    
+    window.addEventListener('synapse:onboarding-open', handleOnboardingOpen);
+    window.addEventListener('synapse:onboarding-close', handleOnboardingClose);
+    return () => {
+      window.removeEventListener('synapse:onboarding-open', handleOnboardingOpen);
+      window.removeEventListener('synapse:onboarding-close', handleOnboardingClose);
+    };
+  }, []);
+
   // Load surge log data when modal opens or refresh key changes
   useEffect(() => {
     if (!surgeLogModalOpen) {
@@ -6259,6 +6276,20 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 className="inline-flex items-center rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-white/30 hover:bg-white/5 transition-colors"
               >
                 Show Disclaimer Modal
+              </button>
+              <button
+                onClick={() => {
+                  // Clear onboarding completion and trigger onboarding
+                  window.dispatchEvent(new CustomEvent('synapse:onboarding-trigger'));
+                  setDevToolsModalOpen(false);
+                  // Navigate to homepage if not already there
+                  if (pathname !== '/') {
+                    router.push('/');
+                  }
+                }}
+                className="inline-flex items-center rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-white/30 hover:bg-white/5 transition-colors"
+              >
+                Show Onboarding
               </button>
             </div>
           </div>

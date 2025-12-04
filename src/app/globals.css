@@ -655,109 +655,76 @@ html.light-mode div[data-chat-pill].chat-input-container,
   }
 }
 
-/* Synapse style - reusable liquid animated fill for buttons */
+/* Synapse style - liquid overlay (no base fill, works on any background) */
 .synapse-style {
   position: relative;
   overflow: hidden !important;
   isolation: isolate;
-  /* Keep this safely below modal z-50 */
   z-index: 1;
-  background: transparent !important;
 }
 
-/* Ensure buttons with synapse-style properly clip their content */
 button.synapse-style {
+  position: relative;
   overflow: hidden !important;
-  /* Create a new stacking context to ensure proper clipping */
   transform: translateZ(0);
   -webkit-transform: translateZ(0);
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
+  background: rgba(255, 255, 255, 0.08) !important; /* White background at 8% opacity in the background */
+  border: none;
 }
 
-.light-mode .synapse-style {
+.light-mode button.synapse-style {
   background: transparent !important;
 }
 
-/* Ensure text is always visible - override any opacity on the button */
-.synapse-style,
-.synapse-style button,
-.synapse-style span,
-.synapse-style div {
-  color: #ffffff !important;
-}
-
-.synapse-style * {
-  opacity: 1 !important;
-  color: #ffffff !important;
-}
-
-.synapse-style:hover,
-.synapse-style:hover *,
-.synapse-style.hover\:opacity-95,
-.synapse-style.hover\:opacity-95 * {
-  opacity: 1 !important;
-  color: #ffffff !important;
-}
-
-/* Override Tailwind hover:opacity-95 for text content */
-.synapse-style:hover > *,
-.synapse-style:hover *,
-.synapse-style[class*="hover:opacity"] > *,
-.synapse-style[class*="hover:opacity"] * {
-  opacity: 1 !important;
-  color: #ffffff !important;
-}
-
-/* Force text to be visible even when button has opacity */
-.synapse-style[style*="opacity"] > *,
-.synapse-style[style*="opacity"] * {
-  opacity: 1 !important;
-  color: #ffffff !important;
-}
-
-/* Only apply the big liquid blobs to actual buttons so they’re always clipped
-   correctly by the button’s border-radius and overflow. */
+/* Two inner liquid layers, fully clipped by the button */
 button.synapse-style::before,
 button.synapse-style::after {
   content: '';
   position: absolute;
-  /* Match the button’s own border radius so blobs never “poke out” as squares */
+  inset: 0;
   border-radius: inherit;
-  /* Slightly larger than the button to get the liquid feel, but still fully clipped */
-  inset: -40%;
-  filter: blur(60px);
-  opacity: 1;
   pointer-events: none;
   z-index: 0;
-  will-change: transform;
-  transform-origin: center;
+  background-size: 180% 180%;
+  filter: blur(22px);
+  opacity: 0.9;
+  mix-blend-mode: screen;
 }
 
 button.synapse-style::before {
-  /* Make cyan blob more vibrant with a stronger core and slower fade */
-  background: radial-gradient(
-    circle,
-    rgba(0, 229, 255, 1) 0%,
-    rgba(0, 229, 255, 1) 20%,
-    rgba(0, 229, 255, 0.9) 40%,
-    rgba(0, 229, 255, 0.5) 60%,
-    transparent 78%
-  );
-  animation: blob-float-1 28s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  /* Cyan blob layer - full opacity vibrant color */
+  background-image: radial-gradient(circle at 0% 0%, rgba(0, 229, 255, 1), rgba(0, 229, 255, 0.9) 30%, rgba(0, 229, 255, 0.7) 50%, rgba(0, 229, 255, 0.4) 70%, rgba(0, 229, 255, 0.2) 85%, rgba(0, 229, 255, 0.1) 100%);
+  animation: synapse-liquid-cyan 14s ease-in-out infinite;
 }
 
 button.synapse-style::after {
-  /* Make pink blob more vibrant with a stronger core and slower fade */
-  background: radial-gradient(
-    circle,
-    rgba(255, 45, 150, 1) 0%,
-    rgba(255, 45, 150, 1) 20%,
-    rgba(255, 45, 150, 0.9) 40%,
-    rgba(255, 45, 150, 0.5) 60%,
-    transparent 78%
-  );
-  animation: blob-float-2 34s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  /* Pink blob layer - full opacity vibrant color */
+  background-image: radial-gradient(circle at 100% 100%, rgba(255, 45, 150, 1), rgba(255, 45, 150, 0.9) 30%, rgba(255, 45, 150, 0.7) 50%, rgba(255, 45, 150, 0.4) 70%, rgba(255, 45, 150, 0.2) 85%, rgba(255, 45, 150, 0.1) 100%);
+  animation: synapse-liquid-pink 16s ease-in-out infinite;
+}
+
+@keyframes synapse-liquid-cyan {
+  0%   { background-position: 0% 50%;   transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+  15%  { background-position: 35% 10%;  transform: translate3d(-16%, -10%, 0) scale(1.06) rotate(6deg); }
+  30%  { background-position: 80% 0%;   transform: translate3d(10%, -18%, 0) scale(1.12) rotate(-4deg); }
+  45%  { background-position: 100% 60%; transform: translate3d(18%, 8%, 0) scale(1.08) rotate(10deg); }
+  60%  { background-position: 55% 100%; transform: translate3d(-10%, 20%, 0) scale(1.14) rotate(-8deg); }
+  75%  { background-position: 5% 80%;   transform: translate3d(8%, 12%, 0) scale(1.09) rotate(4deg); }
+  90%  { background-position: 10% 30%;  transform: translate3d(-6%, -14%, 0) scale(1.05) rotate(-6deg); }
+  100% { background-position: 0% 50%;   transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+}
+
+@keyframes synapse-liquid-pink {
+  0%   { background-position: 100% 50%; transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+  15%  { background-position: 70% 100%; transform: translate3d(18%, 16%, 0) scale(1.1) rotate(-5deg); }
+  30%  { background-position: 10% 80%;  transform: translate3d(-20%, 8%, 0) scale(1.16) rotate(7deg); }
+  45%  { background-position: 0% 40%;   transform: translate3d(-8%, -18%, 0) scale(1.09) rotate(-9deg); }
+  60%  { background-position: 45% 0%;   transform: translate3d(16%, -20%, 0) scale(1.15) rotate(5deg); }
+  75%  { background-position: 95% 30%;  transform: translate3d(8%, 10%, 0) scale(1.08) rotate(-3deg); }
+  90%  { background-position: 80% 70%;  transform: translate3d(-10%, 18%, 0) scale(1.12) rotate(6deg); }
+  100% { background-position: 100% 50%; transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
 }
 
 .synapse-style,
@@ -1127,6 +1094,30 @@ input:focus, textarea:focus {
 }
 
 /* Removed global translateZ to avoid iOS input focus bugs */
+
+/* Mouse glow animation for onboarding */
+@keyframes mouseGlow {
+  0% {
+    opacity: 0.5;
+    background: radial-gradient(circle, rgba(0, 229, 255, 0.5) 0%, rgba(255, 45, 150, 0.3) 50%, transparent 70%);
+  }
+  25% {
+    opacity: 0.7;
+    background: radial-gradient(circle, rgba(0, 229, 255, 0.4) 0%, rgba(255, 45, 150, 0.4) 50%, transparent 70%);
+  }
+  50% {
+    opacity: 0.6;
+    background: radial-gradient(circle, rgba(255, 45, 150, 0.5) 0%, rgba(0, 229, 255, 0.3) 50%, transparent 70%);
+  }
+  75% {
+    opacity: 0.7;
+    background: radial-gradient(circle, rgba(255, 45, 150, 0.4) 0%, rgba(0, 229, 255, 0.4) 50%, transparent 70%);
+  }
+  100% {
+    opacity: 0.5;
+    background: radial-gradient(circle, rgba(0, 229, 255, 0.5) 0%, rgba(255, 45, 150, 0.3) 50%, transparent 70%);
+  }
+}
 
 /* Remove restrictive global touch/selection rules on body (iOS focus fix) */
 

@@ -9,6 +9,7 @@ export default function Modal({
   children,
   footer,
   headerRight,
+  className,
 }: {
   open: boolean;
   title?: string;
@@ -16,6 +17,7 @@ export default function Modal({
   children: React.ReactNode;
   footer?: React.ReactNode;
   headerRight?: React.ReactNode;
+  className?: string;
 }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -34,9 +36,10 @@ export default function Modal({
     (((window.navigator as any).standalone === true) ||
       window.matchMedia("(display-mode: standalone)").matches);
 
-  const contentClass = isIOSStandalone
+  const baseContentClass = isIOSStandalone
     ? "w-full max-w-lg rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)] p-5 text-[var(--foreground)] shadow-2xl flex flex-col"
     : "w-full max-w-lg rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md p-5 text-[var(--foreground)] shadow-2xl flex flex-col";
+  const contentClass = className ? `${baseContentClass} ${className}` : baseContentClass;
 
   return (
     <div className="fixed inset-0 z-50" onClick={onClose}>

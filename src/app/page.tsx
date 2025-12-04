@@ -7,6 +7,7 @@ import GlowSpinner from "@/components/GlowSpinner";
 import CourseCreateModal from "@/components/CourseCreateModal";
 import LoginPage from "@/components/LoginPage";
 import Modal from "@/components/Modal";
+import OnboardingModal from "@/components/OnboardingModal";
 import { saveSubjectData, StoredSubjectData, loadSubjectData } from "@/utils/storage";
 import { changelog } from "../../CHANGELOG";
 import { LessonBody } from "@/components/LessonBody";
@@ -864,6 +865,23 @@ Surge is for those who want to minimize friction and get results fast. I will pr
             let name = "";
             let streamingPromise: Promise<void> | null = null;
 
+            let lastUpdateTime = 0;
+            const updateThrottle = 16; // ~60fps (16ms)
+            
+            const updateWelcomeText = (text: string) => {
+              const now = Date.now();
+              if (now - lastUpdateTime >= updateThrottle) {
+                lastUpdateTime = now;
+                setWelcomeText(text);
+                setHomepageMessages((prev) => {
+                  if (prev.length === 0 || prev[0].role !== 'assistant') {
+                    return [{ role: 'assistant', content: text }];
+                  }
+                  return [{ ...prev[0], content: text }, ...prev.slice(1)];
+                });
+              }
+            };
+
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
@@ -880,70 +898,33 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     setAiName(obj.content);
                   } else if (obj.type === "text" && obj.content) {
                     fullText += obj.content;
-                    // Update welcome text as it streams
+                    // Throttled update to prevent stuttering
+                    updateWelcomeText(fullText);
+                  } else if (obj.type === "done") {
+                    // Ensure final update happens
                     setWelcomeText(fullText);
-                    // Add or update welcome message in messages list immediately
+                    setIsStreaming(false);
                     setHomepageMessages((prev) => {
                       if (prev.length === 0 || prev[0].role !== 'assistant') {
                         return [{ role: 'assistant', content: fullText }];
                       }
                       return [{ ...prev[0], content: fullText }, ...prev.slice(1)];
                     });
-                  } else if (obj.type === "done") {
-                    // If streaming hasn't started yet, show immediately
-                    if (!streamingPromise) {
-                      setWelcomeText(fullText);
-                      setIsStreaming(false);
-                      // Add welcome message to messages list
-                      setHomepageMessages((prev) => {
-                        if (prev.length === 0 || prev[0].role !== 'assistant') {
-                          return [{ role: 'assistant', content: fullText }];
-                        }
-                        return [{ ...prev[0], content: fullText }, ...prev.slice(1)];
-                      });
-                    }
                   }
                 } catch {}
               });
             }
 
-            // If we collected all text before starting to stream, check if we should stream or show immediately
+            // Final update if we have text
             if (fullText.length > 0) {
-              // If text is very short or already complete, show immediately and add to messages
-              if (fullText.length <= 20) {
-                setWelcomeText(fullText);
-                setIsStreaming(false);
-                // Add welcome message to messages list immediately
-                setHomepageMessages((prev) => {
-                  if (prev.length === 0 || prev[0].role !== 'assistant') {
-                    return [{ role: 'assistant', content: fullText }];
-                  }
-                  return [{ ...prev[0], content: fullText }, ...prev.slice(1)];
-                });
-              } else {
-                // Stream character by character with faster delay
-                const streamDelay = 10; // Faster: 10ms instead of 30ms
-                // Add welcome message to messages list immediately when streaming starts
-                setHomepageMessages((prev) => {
-                  if (prev.length === 0 || prev[0].role !== 'assistant') {
-                    return [{ role: 'assistant', content: '' }];
-                  }
-                  return prev;
-                });
-                for (let i = 0; i < fullText.length; i++) {
-                  await new Promise(resolve => setTimeout(resolve, streamDelay));
-                  const currentText = fullText.slice(0, i + 1);
-                  setWelcomeText(currentText);
-                  // Update the message in the list
-                  setHomepageMessages((prev) => {
-                    if (prev.length === 0 || prev[0].role !== 'assistant') {
-                      return [{ role: 'assistant', content: currentText }];
-                    }
-                    return [{ ...prev[0], content: currentText }, ...prev.slice(1)];
-                  });
+              setWelcomeText(fullText);
+              setIsStreaming(false);
+              setHomepageMessages((prev) => {
+                if (prev.length === 0 || prev[0].role !== 'assistant') {
+                  return [{ role: 'assistant', content: fullText }];
                 }
-                setIsStreaming(false);
-              }
+                return [{ ...prev[0], content: fullText }, ...prev.slice(1)];
+              });
             } else {
               setIsStreaming(false);
             }
@@ -3176,10 +3157,22 @@ function Home() {
   
   const [subscriptionLevel, setSubscriptionLevel] = useState<string | null>(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const hasPremiumAccess =
     subscriptionLevel === "Tester" ||
     subscriptionLevel === "Paid" ||
     subscriptionLevel === "mylittlepwettybebe";
+
+  // Listen for onboarding trigger event from DevTools
+  useEffect(() => {
+    const handleOnboardingTrigger = () => {
+      setOnboardingOpen(true);
+    };
+    window.addEventListener('synapse:onboarding-trigger', handleOnboardingTrigger);
+    return () => {
+      window.removeEventListener('synapse:onboarding-trigger', handleOnboardingTrigger);
+    };
+  }, []);
 
   // Check authentication, subscription and sync subjects from server
   useEffect(() => {
@@ -3194,6 +3187,18 @@ function Home() {
           setSubscriptionLevel(data.user.subscriptionLevel);
         } else {
           setSubscriptionLevel("Free");
+        }
+        
+        // Check if user needs onboarding (first time ever)
+        if (authenticated && data?.user) {
+          const preferences = (data.user.preferences as any) || {};
+          const onboardingCompleted = preferences?.onboardingCompleted === true;
+          
+          // Show onboarding if they haven't completed it yet
+          // For new users, this will be false/null. For existing users who haven't seen it, also show it.
+          if (!onboardingCompleted) {
+            setOnboardingOpen(true);
+          }
         }
         
         // Handle redirect after login (e.g., from share page)
@@ -4280,16 +4285,43 @@ function Home() {
   }
 
   return (
-    <div 
-      className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] px-6 pt-10 pb-4 relative"
-      style={{
-        backgroundImage: 'url(/spinner.png)',
-        backgroundSize: '800px 800px',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        backgroundAttachment: 'fixed',
-      }}
-    >
+    <>
+      <OnboardingModal
+        open={onboardingOpen}
+        onComplete={async (userType) => {
+          try {
+            const res = await fetch("/api/user/onboarding", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ userType }),
+            });
+            const data = await res.json();
+            if (data.ok) {
+              setOnboardingOpen(false);
+            } else {
+              console.error("Failed to save onboarding:", data.error);
+              // Still close the modal even if save fails
+              setOnboardingOpen(false);
+            }
+          } catch (err) {
+            console.error("Error saving onboarding:", err);
+            // Still close the modal even if save fails
+            setOnboardingOpen(false);
+          }
+        }}
+      />
+      <div 
+        className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)] px-6 pt-10 pb-4 relative"
+        style={{
+          ...(onboardingOpen ? { display: 'none' } : {}),
+          backgroundImage: 'url(/spinner.png)',
+          backgroundSize: '800px 800px',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          backgroundAttachment: 'fixed',
+        }}
+      >
       {/* Background overlay to make content readable */}
       <div 
         className="absolute inset-0 pointer-events-none"
@@ -5333,6 +5365,7 @@ function Home() {
         );
       })()}
       </div>
-    </div>
+      </div>
+    </>
   );
 }

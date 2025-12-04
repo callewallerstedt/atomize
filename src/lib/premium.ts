@@ -1,4 +1,5 @@
 import { getCurrentUser } from "./auth";
+import { prisma } from "./db";
 
 export function hasPremiumAccess(subscriptionLevel: string | null | undefined): boolean {
   return (
@@ -16,6 +17,17 @@ export async function requirePremiumAccess(): Promise<{ ok: boolean; error?: str
   if (!hasPremiumAccess(user.subscriptionLevel)) {
     return { ok: false, error: "This feature requires Premium access." };
   }
+  
+  // Check if subscription has expired
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { subscriptionEnd: true },
+  });
+  
+  if (dbUser?.subscriptionEnd && dbUser.subscriptionEnd < new Date()) {
+    return { ok: false, error: "Your subscription has expired. Please renew to continue using premium features." };
+  }
+  
   return { ok: true, user };
 }
 

@@ -886,7 +886,7 @@ export default function SubjectPage() {
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
               <button
                 onClick={collectAllFlashcards}
-                className="w-full sm:w-auto inline-flex h-10 items-center justify-center rounded-full px-5 text-sm font-medium border border-[var(--foreground)]/25 bg-[var(--background)]/80 text-[var(--foreground)]/85 hover:bg-[var(--foreground)]/10 hover:border-[var(--foreground)]/40 transition-colors"
+                className="pill-button w-full sm:w-auto inline-flex h-9 items-center justify-center rounded-full px-4 text-xs font-medium border border-[var(--foreground)]/10 text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors"
               >
                 Flashcards
               </button>
@@ -894,13 +894,13 @@ export default function SubjectPage() {
                 <>
                   <button
                     onClick={() => router.push(`/subjects/${slug}/practice`)}
-                    className="w-full sm:w-auto inline-flex h-10 items-center justify-center rounded-full px-5 text-sm font-medium border border-[var(--foreground)]/25 bg-[var(--background)]/80 text-[var(--foreground)]/85 hover:bg-[var(--foreground)]/10 hover:border-[var(--foreground)]/40 transition-colors"
+                    className="pill-button w-full sm:w-auto inline-flex h-9 items-center justify-center rounded-full px-4 text-xs font-medium border border-[var(--foreground)]/10 text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors"
                   >
                     Practice
                   </button>
                   <button
                     onClick={() => router.push(`/subjects/${slug}/surge`)}
-                    className="w-full sm:w-auto inline-flex h-10 items-center justify-center rounded-full px-5 text-sm font-medium border border-[var(--foreground)]/25 bg-[var(--background)]/80 text-[var(--foreground)]/85 hover:bg-[var(--foreground)]/10 hover:border-[var(--foreground)]/40 transition-colors"
+                    className="pill-button w-full sm:w-auto inline-flex h-9 items-center justify-center rounded-full px-4 text-xs font-medium border border-[var(--foreground)]/10 text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors"
                   >
                     Surge
                   </button>
@@ -913,7 +913,7 @@ export default function SubjectPage() {
                 {isAuthenticated && (
                   <>
                     <button
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--background)] text-[var(--foreground)] hover:bg-[var(--background)]/80 border border-[var(--foreground)]/15"
+                      className="pill-button inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--foreground)]/10 text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors"
                       onClick={() => { setNewTopicValue(""); setNewTopicOpen(true); }}
                       aria-label="New topic"
                     >
@@ -1289,7 +1289,7 @@ export default function SubjectPage() {
                     return (
                       <div
                         key={examSnipe.id}
-                        className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 cursor-pointer hover:border-[var(--foreground)]/30 transition-colors"
+                        className="pill-button rounded-2xl border border-[var(--foreground)]/10 text-[var(--foreground)]/80 cursor-pointer p-4 hover:text-[var(--foreground)] transition-colors"
                         role="link"
                         tabIndex={0}
                         onClick={() => router.push(`/subjects/${slug}/examsnipe?examSnipeSlug=${encodeURIComponent(examSnipe.slug)}`)}
