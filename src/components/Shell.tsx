@@ -598,7 +598,7 @@ function PromoCodeModal({
               disabled={!formData.code.trim()}
               className="synapse-style px-4 py-2 rounded-full text-sm font-medium !text-white transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <span style={{ color: '#ffffff', opacity: 1, textShadow: 'none' }}>
+              <span style={{ color: '#ffffff', position: 'relative', zIndex: 101, opacity: 1, textShadow: 'none' }}>
                 {editingCode ? "Update" : "Create"}
               </span>
             </button>
@@ -758,7 +758,7 @@ function PromoCodeModal({
                     onClick={handleUpdateUser}
                     className="synapse-style px-4 py-2 rounded-full text-sm font-medium !text-white transition-opacity"
                   >
-                    <span style={{ color: '#ffffff', opacity: 1, textShadow: 'none' }}>
+                    <span style={{ color: '#ffffff', position: 'relative', zIndex: 101, opacity: 1, textShadow: 'none' }}>
                       Update User
                     </span>
                   </button>
@@ -830,7 +830,7 @@ function PromoCodeModal({
                                 onClick={() => handleRedeemCodeForUser(user.id, userCodeInput[user.id] || "")}
                                 className="synapse-style px-3 py-1.5 rounded-lg text-xs font-medium !text-white"
                               >
-                                <span style={{ color: '#ffffff', opacity: 1, textShadow: 'none' }}>
+                                <span style={{ color: '#ffffff', position: 'relative', zIndex: 101, opacity: 1, textShadow: 'none' }}>
                                   Redeem
                                 </span>
                               </button>

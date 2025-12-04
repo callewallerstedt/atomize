@@ -61,7 +61,7 @@ export default function OnboardingModal({
 
   return (
     <div 
-      className="fixed inset-0 z-[9999] flex items-center justify-center overflow-y-auto relative"
+      className="fixed inset-0 z-[9999] overflow-y-auto overscroll-contain"
       style={{
         backgroundColor: 'var(--background)',
         backgroundImage: 'url(/spinner.png)',
@@ -71,9 +71,9 @@ export default function OnboardingModal({
         backgroundAttachment: 'fixed',
       }}
     >
-      {/* Overlay to reduce spinner opacity to 20% */}
+      {/* Overlay to reduce spinner opacity to 20% - fixed to viewport */}
       <div 
-        className="absolute inset-0 pointer-events-none"
+        className="fixed inset-0 pointer-events-none"
         style={{
           backgroundColor: 'var(--background)',
           opacity: 0.8,
@@ -100,7 +100,9 @@ export default function OnboardingModal({
         }}
       />
 
-      <div className="relative z-10 w-full max-w-4xl px-6 py-12 md:py-16" style={{ position: 'relative', zIndex: 10 }}>
+      <div className="relative z-10 w-full max-w-4xl mx-auto px-6">
+        <div className="w-full flex items-center justify-center" style={{ minHeight: '100vh', paddingTop: '3rem', paddingBottom: '3rem' }}>
+          <div className="w-full">
         {step === "select" && (
           <div className="space-y-12">
             <div className="text-center space-y-4">
@@ -307,6 +309,8 @@ export default function OnboardingModal({
             </div>
           </div>
         )}
+          </div>
+        </div>
       </div>
     </div>
   );

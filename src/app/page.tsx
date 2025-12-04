@@ -4498,11 +4498,12 @@ function Home() {
                             setSurgeButtonHovered(null);
                           }}
                           disabled={preparingSlug === s.slug}
-                          className={`ml-auto inline-flex h-7 items-center justify-center rounded-full px-3 text-[10px] font-medium whitespace-nowrap synapse-style ${
+                          className={`ml-auto inline-flex h-7 items-center justify-center rounded-full px-3 text-[10px] font-medium whitespace-nowrap synapse-style !text-white ${
                             preparingSlug === s.slug
                               ? 'opacity-40 cursor-not-allowed'
                               : 'cursor-pointer hover:scale-[1.03]'
                           }`}
+                          style={{ zIndex: 100, position: 'relative' }}
                           aria-label="Start Surge"
                           title="Start Synapse Surge"
                         >
