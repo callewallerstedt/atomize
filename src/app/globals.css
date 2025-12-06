@@ -236,6 +236,7 @@ input, textarea, [contenteditable] {
   max-width: 100%;
   overflow: visible;
 }
+
 .lesson-content .katex-display > .katex {
   display: inline-block;
   max-width: 100%;
@@ -329,12 +330,12 @@ select {
 }
 
 .light-mode .unified-button {
-  background-color: rgba(255, 255, 255, 0.6) !important;
+  background-color: rgba(250, 250, 250, 0.8) !important;
   color: rgba(0, 0, 0, 0.7) !important;
 }
 
 .light-mode .unified-button:hover:not(:disabled) {
-  background-color: rgba(255, 255, 255, 0.8) !important;
+  background-color: rgba(252, 252, 252, 0.9) !important;
   color: rgba(0, 0, 0, 0.9) !important;
 }
 
@@ -360,7 +361,7 @@ select {
 }
 
 .light-mode .btn-grey {
-  background-color: rgba(255, 255, 255, 0.6) !important;
+  background-color: rgba(250, 250, 250, 0.8) !important;
   color: rgba(0, 0, 0, 0.7) !important;
   border-color: rgba(0, 0, 0, 0.1) !important;
 }
@@ -371,7 +372,7 @@ select {
 }
 
 .light-mode .btn-grey:hover:not(:disabled) {
-  background-color: rgba(255, 255, 255, 0.8) !important;
+  background-color: rgba(252, 252, 252, 0.9) !important;
   color: rgba(0, 0, 0, 0.9) !important;
 }
 
@@ -392,11 +393,11 @@ html.light-mode h1[class*="text-[var(--foreground)]/80"] {
 }
 
 .light-mode .chat-bubble-assistant {
-  background-color: rgba(255, 255, 255, 0.6) !important;
+  background-color: rgba(250, 250, 250, 0.8) !important;
 }
 
 .light-mode .chat-bubble-user {
-  background-color: rgba(255, 255, 255, 0.7) !important;
+  background-color: rgba(252, 252, 252, 0.9) !important;
 }
 
 /* Chat input boxes, course boxes, drop files area - light mode */
@@ -404,15 +405,25 @@ html.light-mode h1[class*="text-[var(--foreground)]/80"] {
   background-color: color-mix(in srgb, var(--foreground) 8%, transparent) !important;
 }
 
+/* Hover effect for quiz options - only when not showing results and not selected - same as course-box */
+.chat-input-container:not(.quiz-option-selected):not(.quiz-option-result):hover {
+  background-color: color-mix(in srgb, var(--foreground) 12%, transparent) !important;
+}
+
+html.light-mode .chat-input-container:not(.quiz-option-selected):not(.quiz-option-result):hover,
+.light-mode .chat-input-container:not(.quiz-option-selected):not(.quiz-option-result):hover {
+  background-color: rgba(252, 252, 252, 0.9) !important;
+}
+
 html.light-mode .chat-input-container,
 .light-mode .chat-input-container {
-  background-color: rgba(255, 255, 255, 0.6) !important;
+  background-color: rgba(250, 250, 250, 0.8) !important;
 }
 
 /* Ensure the background is visible even with inline styles */
 html.light-mode div.chat-input-container[style],
 .light-mode div.chat-input-container[style] {
-  background-color: rgba(255, 255, 255, 0.6) !important;
+  background-color: rgba(250, 250, 250, 0.8) !important;
 }
 
 /* Quick typing popup - use lighter button style but more opaque */
@@ -422,7 +433,7 @@ div[data-chat-pill].chat-input-container {
 
 html.light-mode div[data-chat-pill].chat-input-container,
 .light-mode div[data-chat-pill].chat-input-container {
-  background-color: rgba(255, 255, 255, 0.9) !important;
+  background-color: rgba(253, 253, 253, 0.95) !important;
 }
 
 .course-box {
@@ -430,7 +441,7 @@ html.light-mode div[data-chat-pill].chat-input-container,
 }
 
 .light-mode .course-box {
-  background-color: rgba(255, 255, 255, 0.6) !important;
+  background-color: rgba(250, 250, 250, 0.8) !important;
 }
 
 .course-box:hover {
@@ -439,7 +450,7 @@ html.light-mode div[data-chat-pill].chat-input-container,
 
 .light-mode .course-box:hover,
 .light-mode .course-box.hover {
-  background-color: rgba(255, 255, 255, 0.7) !important;
+  background-color: rgba(252, 252, 252, 0.9) !important;
 }
 
 .drop-files-area {
@@ -447,7 +458,7 @@ html.light-mode div[data-chat-pill].chat-input-container,
 }
 
 .light-mode .drop-files-area {
-  background-color: rgba(255, 255, 255, 0.6) !important;
+  background-color: rgba(250, 250, 250, 0.8) !important;
 }
 
 .drop-files-area:hover {
@@ -455,7 +466,7 @@ html.light-mode div[data-chat-pill].chat-input-container,
 }
 
 .light-mode .drop-files-area:hover {
-  background-color: rgba(255, 255, 255, 0.7) !important;
+  background-color: rgba(252, 252, 252, 0.9) !important;
 }
 
 .drop-files-area.dragging {
@@ -463,7 +474,7 @@ html.light-mode div[data-chat-pill].chat-input-container,
 }
 
 .light-mode .drop-files-area.dragging {
-  background-color: rgba(255, 255, 255, 0.7) !important;
+  background-color: rgba(252, 252, 252, 0.9) !important;
 }
 
 /* Login page text inputs - always slightly lighter than background */
@@ -472,7 +483,7 @@ html.light-mode div[data-chat-pill].chat-input-container,
 }
 
 .light-mode .login-input {
-  background-color: rgba(255, 255, 255, 0.9) !important;
+  background-color: rgba(253, 253, 253, 0.95) !important;
 }
 
 /* Paragraph simplification line with fade effect */
@@ -488,7 +499,7 @@ html.light-mode div[data-chat-pill].chat-input-container,
 
 /* Light mode styles */
 .light-mode {
-  --background: #F8FAFC;
+  --background: #F5F5F5;
   --foreground: #1E293B;
   --accent-cyan: #00E5FF;
   --accent-pink: #EC4899;
@@ -615,7 +626,7 @@ html.light-mode div[data-chat-pill].chat-input-container,
 
 /* Chat input containers in light mode */
 .light-mode [style*="backgroundColor: 'color-mix(in srgb, var(--foreground) 8%, transparent)'"] {
-  background-color: rgba(255, 255, 255, 0.6) !important;
+  background-color: rgba(250, 250, 250, 0.8) !important;
 }
 
 .light-mode textarea[class*="bg-transparent"],
@@ -1282,7 +1293,7 @@ button[class*="px-3"][class*="py-1"][class*="rounded-full"]:not([class*="bg-grad
 
 .light-mode .pill-button,
 .light-mode button[class*="px-3"][class*="py-1"][class*="rounded-full"]:not([class*="bg-gradient"]) {
-  background-color: rgba(255, 255, 255, 0.6) !important;
+  background-color: rgba(250, 250, 250, 0.8) !important;
 }
 
 .pill-button:hover:not(:disabled),
@@ -1292,7 +1303,7 @@ button[class*="px-3"][class*="py-1"][class*="rounded-full"]:not([class*="bg-grad
 
 .light-mode .pill-button:hover:not(:disabled),
 .light-mode button[class*="px-3"][class*="py-1"][class*="rounded-full"]:not([class*="bg-gradient"]):hover:not(:disabled) {
-  background-color: rgba(255, 255, 255, 0.8) !important;
+  background-color: rgba(252, 252, 252, 0.9) !important;
 }
 
 /* Ensure pill button shadows are never clipped */
@@ -1360,13 +1371,13 @@ button[class*="px-3"][class*="py-1"][class*="rounded-full"]:not([class*="bg-grad
 }
 
 .light-mode .date-button-default {
-  background-color: rgba(255, 255, 255, 0.6);
+  background-color: rgba(250, 250, 250, 0.8);
   border-color: rgba(0, 0, 0, 0.1);
   color: rgba(0, 0, 0, 0.7);
 }
 
 .light-mode .date-button-default:hover {
-  background-color: rgba(255, 255, 255, 0.7);
+  background-color: rgba(252, 252, 252, 0.9);
   color: rgba(0, 0, 0, 0.9);
 }
 
@@ -1376,13 +1387,13 @@ button[class*="px-3"][class*="py-1"][class*="rounded-full"]:not([class*="bg-grad
 }
 
 .light-mode .date-button {
-  background-color: rgba(255, 255, 255, 0.6) !important;
+  background-color: rgba(250, 250, 250, 0.8) !important;
   color: rgba(0, 0, 0, 0.7) !important;
   border-color: rgba(0, 0, 0, 0.2) !important;
 }
 
 .light-mode .date-button:hover {
-  background-color: rgba(255, 255, 255, 0.7) !important;
+  background-color: rgba(252, 252, 252, 0.9) !important;
   border-color: rgba(0, 0, 0, 0.3) !important;
 }
 

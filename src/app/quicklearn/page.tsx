@@ -196,13 +196,15 @@ export default function QuickLearnPage() {
           )}
           <div className="mb-3 text-sm font-medium">Create a quick lesson</div>
           <div className="flex gap-3">
-            <input
-              type="text"
-              value={quickLearnQuery}
-              onChange={(e) => setQuickLearnQuery((e.target as HTMLInputElement).value)}
-              placeholder="Enter a topic to learn..."
-              className="flex-1 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-3 py-2 text-[var(--foreground)] placeholder:text-[var(--foreground)]/40 focus:outline-none focus:ring-0 focus:border-[var(--foreground)]/40"
-            />
+            <div className="flex-1 chat-input-container rounded-lg border border-[var(--foreground)]/10 px-3 py-2">
+              <input
+                type="text"
+                value={quickLearnQuery}
+                onChange={(e) => setQuickLearnQuery((e.target as HTMLInputElement).value)}
+                placeholder="Enter a topic to learn..."
+                className="w-full bg-transparent border-none outline-none text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none"
+              />
+            </div>
             <button
               onClick={handleGenerate}
               disabled={!quickLearnQuery.trim() || quickLearnLoading}

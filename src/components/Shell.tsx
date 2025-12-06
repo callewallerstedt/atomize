@@ -1021,14 +1021,16 @@ function FeedbackModal({
               <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-2">
                 Your feedback
               </label>
-              <textarea
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-                placeholder="Tell us what you think, report bugs, or suggest features..."
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none"
-                rows={6}
-                disabled={sending}
-              />
+              <div className="w-full chat-input-container rounded-xl border border-[var(--foreground)]/20 px-3 py-2">
+                <textarea
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  placeholder="Tell us what you think, report bugs, or suggest features..."
+                  className="w-full bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none resize-none"
+                  rows={6}
+                  disabled={sending}
+                />
+              </div>
             </div>
             <div className="flex justify-end gap-2 px-2 md:px-4 pb-2">
               <button
@@ -1056,14 +1058,16 @@ function FeedbackModal({
               <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-2">
                 Submit new feedback
               </label>
-              <textarea
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-                placeholder="Tell us what you think, report bugs, or suggest features..."
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none"
-                rows={4}
-                disabled={sending}
-              />
+              <div className="w-full chat-input-container rounded-xl border border-[var(--foreground)]/20 px-3 py-2">
+                <textarea
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  placeholder="Tell us what you think, report bugs, or suggest features..."
+                  className="w-full bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none resize-none"
+                  rows={4}
+                  disabled={sending}
+                />
+              </div>
             </div>
             <div className="flex justify-end gap-2 px-2 md:px-4 pb-2">
               <button

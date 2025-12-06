@@ -330,6 +330,7 @@ type HomepageMessage = {
   attachments?: ChatAttachment[];
   uiElements?: UIElement[];
   tutorial?: boolean;
+  isLoading?: boolean; // True when message is being generated (show spinner)
 };
 
 type ScriptStep = {
@@ -806,11 +807,12 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     if (hasStreamed.current || typeof window === "undefined") return;
     hasStreamed.current = true;
 
+    // Set streaming immediately so spinner shows right away
+    setIsStreaming(true);
+    setWelcomeText("");
+
     // Wait for page to be visible before starting
     const startStreaming = () => {
-      setIsStreaming(true);
-      setWelcomeText("");
-
       const generateWelcome = async () => {
         try {
           // Fetch user info including lastLoginAt and preferredTitle
@@ -863,7 +865,10 @@ Surge is for those who want to minimize friction and get results fast. I will pr
           if (reader) {
             let fullText = "";
             let name = "";
-            let streamingPromise: Promise<void> | null = null;
+            
+            // Add message placeholder immediately with same format to prevent size changes
+            setHomepageMessages([{ role: 'assistant', content: '' }]);
+            setAiName(""); // Will be set when name arrives
 
             let lastUpdateTime = 0;
             const updateThrottle = 16; // ~60fps (16ms)
@@ -2162,11 +2167,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       let accumulatedContent = '';
       
       if (reader) {
-        // Add assistant message placeholder
-        setHomepageMessages(prev => {
-          const newMessages = [...prev, { role: 'assistant' as const, content: '', uiElements: [] }];
-          return newMessages;
-        });
+        // Message with spinner already added above, no need to add again
 
         while (true) {
           const { done, value } = await reader.read();
@@ -2216,7 +2217,8 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     copy[copy.length - 1] = { 
                       role: 'assistant', 
                       content: '', 
-                      uiElements: [] 
+                      uiElements: [],
+                      isLoading: false
                     };
                   }
                   return copy;
@@ -2226,7 +2228,12 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                 setHomepageMessages(prev => {
                   const copy = [...prev];
                   if (copy.length > 0) {
-                    copy[copy.length - 1] = { role: 'assistant', content: cleanedContent, uiElements };
+                    copy[copy.length - 1] = { 
+                      role: 'assistant', 
+                      content: cleanedContent, 
+                      uiElements,
+                      isLoading: false
+                    };
                   }
                   return copy;
                 });
@@ -2236,7 +2243,12 @@ Surge is for those who want to minimize friction and get results fast. I will pr
               setHomepageMessages(prev => {
                 const copy = [...prev];
                 if (copy.length > 0) {
-                  copy[copy.length - 1] = { role: 'assistant', content: cleanedContent, uiElements };
+                  copy[copy.length - 1] = { 
+                    role: 'assistant', 
+                    content: cleanedContent, 
+                    uiElements,
+                    isLoading: false
+                  };
                 }
                 return copy;
               });
@@ -2272,16 +2284,21 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     setHomepageMessages(prev => {
                       const copy = [...prev];
                       if (copy.length > 0) {
-                        copy[copy.length - 1] = { role: 'assistant', content: '', uiElements: [] };
+                        copy[copy.length - 1] = { role: 'assistant', content: '', uiElements: [], isLoading: false };
                       }
                       return copy;
                     });
                 } else if (!isCreatingCourse) {
-                  // Update message content during streaming
+                  // Update message content during streaming - remove loading state when content starts
                   setHomepageMessages(prev => {
                     const copy = [...prev];
                     if (copy.length > 0) {
-                      copy[copy.length - 1] = { role: 'assistant', content: cleanedContent, uiElements };
+                      copy[copy.length - 1] = { 
+                        role: 'assistant', 
+                        content: cleanedContent, 
+                        uiElements,
+                        isLoading: false // Remove loading state when content arrives
+                      };
                     }
                     return copy;
                   });
@@ -2292,7 +2309,24 @@ Surge is for those who want to minimize friction and get results fast. I will pr
         }
       }
     } catch (e: any) {
-      setHomepageMessages(prev => [...prev, { role: 'assistant', content: 'Error: ' + (e?.message || 'Failed to send. Please try again.') }]);
+      // Update the loading message to show error instead
+      setHomepageMessages(prev => {
+        const copy = [...prev];
+        if (copy.length > 0 && copy[copy.length - 1]?.isLoading) {
+          copy[copy.length - 1] = { 
+            role: 'assistant', 
+            content: 'Error: ' + (e?.message || 'Failed to send. Please try again.'),
+            isLoading: false
+          };
+        } else {
+          copy.push({ 
+            role: 'assistant', 
+            content: 'Error: ' + (e?.message || 'Failed to send. Please try again.'),
+            isLoading: false
+          });
+        }
+        return copy;
+      });
     } finally {
       setHomepageSending(false);
       setShowThinking(false);
@@ -2747,6 +2781,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     );
   }
 
+
   return (
     <div className="mx-auto mb-6 w-full max-w-3xl" style={{ overflowY: 'visible' }}>
       {(aiName || homepageMessages.length > 0) && (
@@ -2768,16 +2803,14 @@ Surge is for those who want to minimize friction and get results fast. I will pr
           )}
         </div>
       )}
-      {homepageMessages.length === 0 ? (
+      {homepageMessages.length === 0 && !isStreaming && welcomeText ? (
         <>
           <div 
-            className="chat-bubble-assistant inline-block px-3 py-1.5 rounded-full border border-[var(--foreground)]/10"
+            className="chat-bubble-assistant max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10"
+            style={{ minHeight: '40px' }}
           >
             <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
               {renderTextWithSynapse(welcomeText)}
-              {isStreaming && (
-                <span className="inline-block w-2 h-2 bg-[var(--foreground)]/60 rounded-full animate-pulse ml-1 align-middle"></span>
-              )}
             </div>
           </div>
           {!hasPremiumAccess && (
@@ -2948,10 +2981,18 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     className="chat-bubble-assistant max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10"
                   >
                     <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
-                      {isCreatingCourse && i === homepageMessages.length - 1 ? (
+                      {m.isLoading ? (
+                        <div className="flex items-center justify-center py-2">
+                          <GlowSpinner size={24} inline ariaLabel="Generating response" idSuffix={`home-msg-${i}`} style={{ margin: 0 }} />
+                        </div>
+                      ) : isCreatingCourse && i === homepageMessages.length - 1 ? (
                         <div className="flex items-center gap-2">
                           <span className="inline-block w-2 h-2 bg-white/60 rounded-full animate-pulse"></span>
                           Creating course...
+                        </div>
+                      ) : m.content === '' && isStreaming && i === 0 ? (
+                        <div className="flex items-center gap-2">
+                          <span className="inline-block w-2 h-2 bg-[var(--foreground)]/60 rounded-full animate-pulse"></span>
                         </div>
                       ) : isWelcomeMessage ? (
                         renderTextWithSynapse(m.content)
@@ -3005,16 +3046,6 @@ Surge is for those who want to minimize friction and get results fast. I will pr
               </div>
             );
           })}
-          {showThinking && !isCreatingCourse && (
-            <div className="flex justify-start">
-              <div className="chat-bubble-assistant inline-block px-3 py-1.5 rounded-full border border-[var(--foreground)]/10">
-                <div className="text-sm text-[var(--foreground)]/90 leading-relaxed flex items-center gap-2">
-                  <span className="inline-block w-2 h-2 bg-[var(--foreground)]/60 rounded-full animate-pulse"></span>
-                  Thinking...
-                </div>
-              </div>
-            </div>
-          )}
           <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%', overflowY: 'visible' }}>
             {ChatInputArea()}
             {(voiceError || isRecording || isTranscribing) && (
@@ -4274,11 +4305,11 @@ function Home() {
     }
   };
 
-  // Show login page if not authenticated
   // Don't show spinner while checking auth - let Shell's LoadingScreen handle it
   if (checkingAuth) {
-    return null; // Return null to let Shell render and show LoadingScreen
+    return null;
   }
+  
 
   if (!isAuthenticated) {
     return <LoginPage />;
@@ -4680,11 +4711,15 @@ function Home() {
             <span className="text-xs text-[var(--foreground)]/50">We'll scan the files and name it for you</span>
           </div>
         )}
-        {/* Quick Learn lessons link - subtle */}
-        {hasPremiumAccess && (
+        {subjects.length === 0 && null}
+      </div>
+      
+      {/* Quick Learn button - under subjects container */}
+      {hasPremiumAccess && (
+        <div className="mx-auto mt-6 w-full max-w-5xl">
           <div
             onClick={() => router.push('/quicklearn')}
-            className="relative rounded-xl border border-[var(--foreground)]/5 bg-[var(--background)]/30 p-4 text-[var(--foreground)]/70 transition-all duration-200 cursor-pointer hover:border-[var(--foreground)]/10 hover:bg-[var(--background)]/40 hover:text-[var(--foreground)]/90"
+            className="rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/40 p-3 text-[var(--foreground)]/70 transition-all duration-200 cursor-pointer hover:border-[var(--foreground)]/20 hover:bg-[var(--background)]/50 hover:text-[var(--foreground)]/80"
             style={{ 
               boxShadow: 'none',
             }}
@@ -4715,9 +4750,8 @@ function Home() {
               </span>
             </div>
           </div>
-        )}
-        {subjects.length === 0 && null}
-      </div>
+        </div>
+      )}
           </>
         )}
 
@@ -4874,29 +4908,31 @@ function Home() {
             <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Quick Lesson</h3>
             <div className="mb-4">
               <label className="mb-2 block text-xs text-[var(--foreground)]/70">What do you want to learn?</label>
-              <textarea
-                value={quickLearnQuery}
-                onChange={(e) => { if (!e.target) return; setQuickLearnQuery(e.target.value); }}
-                onTouchStart={(e) => {
-                  // Ensure focus works on iOS PWA
-                  e.currentTarget.focus();
-                }}
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--foreground)]/40 focus:outline-none resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
-                placeholder="e.g. How does machine learning work? Or paste a question from your textbook..."
-                rows={4}
-                tabIndex={0}
-                inputMode="text"
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                style={{
-                  WebkitUserSelect: 'text',
-                  WebkitTouchCallout: 'none',
-                  WebkitAppearance: 'none',
-                  touchAction: 'manipulation'
-                }}
-              />
+              <div className="w-full chat-input-container rounded-xl border border-[var(--foreground)]/10 px-3 py-2">
+                <textarea
+                  value={quickLearnQuery}
+                  onChange={(e) => { if (!e.target) return; setQuickLearnQuery(e.target.value); }}
+                  onTouchStart={(e) => {
+                    // Ensure focus works on iOS PWA
+                    e.currentTarget.focus();
+                  }}
+                  className="w-full bg-transparent border-none outline-none text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+                  placeholder="e.g. How does machine learning work? Or paste a question from your textbook..."
+                  rows={4}
+                  tabIndex={0}
+                  inputMode="text"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  style={{
+                    WebkitUserSelect: 'text',
+                    WebkitTouchCallout: 'none',
+                    WebkitAppearance: 'none',
+                    touchAction: 'manipulation'
+                  }}
+                />
+              </div>
             </div>
             <div className="flex justify-end gap-3">
               <button

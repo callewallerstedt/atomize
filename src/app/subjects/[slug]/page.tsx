@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { LessonBody } from "@/components/LessonBody";
 import { FlashcardContent } from "@/components/FlashcardContent";
 import { sanitizeLessonBody, sanitizeFlashcardContent } from "@/lib/sanitizeLesson";
@@ -81,6 +82,11 @@ export default function SubjectPage() {
   const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [topicInfoOpen, setTopicInfoOpen] = useState<string | null>(null);
+  const [lessonMenuOpen, setLessonMenuOpen] = useState<string | null>(null);
+  const [renamingLesson, setRenamingLesson] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState<string>("");
+  const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
+  const menuButtonRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
   const isSyncingExamSnipesRef = useRef(false);
   
   const hasPremiumAccess =
@@ -208,6 +214,43 @@ export default function SubjectPage() {
       }
     }
   }, [showOnlyStarred, starredFlashcards, allFlashcards, allFlashcardsModalOpen, currentFlashcardIndex]);
+
+  // Close lesson menu when clicking outside and update position on scroll/resize
+  useEffect(() => {
+    if (!lessonMenuOpen) return;
+    
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // Check if click is outside the menu and not on a menu button
+      if (!target.closest('[data-menu-dropdown]') && !target.closest('[data-menu-button]')) {
+        setLessonMenuOpen(null);
+        setMenuPosition(null);
+      }
+    };
+    
+    const updateMenuPosition = () => {
+      if (lessonMenuOpen && menuButtonRefs.current[lessonMenuOpen]) {
+        const button = menuButtonRefs.current[lessonMenuOpen];
+        if (button) {
+          const rect = button.getBoundingClientRect();
+          setMenuPosition({
+            top: rect.bottom + 8,
+            right: window.innerWidth - rect.right,
+          });
+        }
+      }
+    };
+    
+    document.addEventListener('click', handleClickOutside);
+    window.addEventListener('scroll', updateMenuPosition, true);
+    window.addEventListener('resize', updateMenuPosition);
+    
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+      window.removeEventListener('scroll', updateMenuPosition, true);
+      window.removeEventListener('resize', updateMenuPosition);
+    };
+  }, [lessonMenuOpen]);
 
   const refreshSubjectData = useCallback(() => {
     const saved = loadSubjectData(slug);
@@ -685,6 +728,77 @@ export default function SubjectPage() {
     }
   }
 
+  async function handleRenameLesson() {
+    if (!renamingLesson || !renameValue.trim() || renameValue.trim() === renamingLesson) {
+      return;
+    }
+    const newName = renameValue.trim();
+    try {
+      const data = loadSubjectData(slug) as StoredSubjectData | null;
+      if (!data) {
+        alert("Failed to load subject data");
+        return;
+      }
+      
+      // Check if new name already exists
+      const nameExists = (data.topics || []).some((t: any) => t.name === newName) ||
+                         (data.tree?.topics || []).some((t: any) => t.name === newName);
+      if (nameExists) {
+        alert(`A lesson with the name "${newName}" already exists. Please choose a different name.`);
+        return;
+      }
+
+      // Update topics array
+      if (data.topics) {
+        data.topics = data.topics.map((t: any) => 
+          t.name === renamingLesson ? { ...t, name: newName } : t
+        );
+      }
+      
+      // Update tree.topics
+      if (data.tree?.topics) {
+        data.tree.topics = data.tree.topics.map((t: any) => 
+          t.name === renamingLesson ? { ...t, name: newName } : t
+        );
+      }
+      
+      // Update node data if it exists (rename the key)
+      if (data.nodes && data.nodes[renamingLesson]) {
+        const nodeData = data.nodes[renamingLesson];
+        delete data.nodes[renamingLesson];
+        data.nodes[newName] = nodeData;
+      }
+      
+      // Save updated data
+      await saveSubjectDataAsync(slug, data);
+      
+      // Update local state
+      setTopics(data.topics || []);
+      setTree(data.tree || { subject: data.subject || slug, topics: [] });
+      setNodes({ ...data.nodes || {} });
+      
+      // Sync to server if authenticated
+      try {
+        const me = await fetch("/api/me", { credentials: "include" }).then(r => r.json().catch(() => ({})));
+        if (me?.user) {
+          await fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ data }),
+          }).catch(() => {});
+        }
+      } catch {}
+      
+      // Close modal
+      setRenamingLesson(null);
+      setRenameValue("");
+    } catch (err: any) {
+      console.error('Failed to rename lesson:', err);
+      alert(err?.message || "Failed to rename lesson");
+    }
+  }
+
   async function handleQuickLearn() {
     try {
       setQuickLearnLoading(true);
@@ -1126,6 +1240,132 @@ export default function SubjectPage() {
                             Done
                           </span>
                         )}
+                        {/* 3-dot menu button - only visible on hover */}
+                        <div className="relative lesson-menu-container">
+                          <button
+                            ref={(el) => {
+                              menuButtonRefs.current[name] = el;
+                            }}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (lessonMenuOpen === name) {
+                                // Closing the menu
+                                setLessonMenuOpen(null);
+                                setMenuPosition(null);
+                              } else {
+                                // Opening the menu
+                                const button = e.currentTarget;
+                                const rect = button.getBoundingClientRect();
+                                setMenuPosition({
+                                  top: rect.bottom + 8,
+                                  right: window.innerWidth - rect.right,
+                                });
+                                setLessonMenuOpen(name);
+                              }
+                            }}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[var(--foreground)]/60 hover:text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-all opacity-0 group-hover:opacity-100"
+                            title="Lesson options"
+                            data-menu-button
+                          >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <circle cx="5" cy="12" r="2" fill="currentColor" />
+                              <circle cx="12" cy="12" r="2" fill="currentColor" />
+                              <circle cx="19" cy="12" r="2" fill="currentColor" />
+                            </svg>
+                          </button>
+                          {/* Dropdown menu - rendered via portal */}
+                          {lessonMenuOpen === name && menuPosition && typeof window !== 'undefined' && createPortal(
+                            <div 
+                              data-menu-dropdown
+                              className="fixed z-[9999] w-40 rounded-xl border border-white/10 bg-[var(--background)]/95 backdrop-blur-md shadow-lg p-2 space-y-2"
+                              style={{
+                                top: `${menuPosition.top}px`,
+                                right: `${menuPosition.right}px`,
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                onClick={async (e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setLessonMenuOpen(null);
+                                  setMenuPosition(null);
+                                  setRenamingLesson(name);
+                                  setRenameValue(name);
+                                }}
+                                className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
+                              >
+                                Rename
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setLessonMenuOpen(null);
+                                  setMenuPosition(null);
+                                  setTopicInfoOpen(name);
+                                }}
+                                className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
+                              >
+                                Info
+                              </button>
+                              <button
+                                onClick={async (e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setLessonMenuOpen(null);
+                                  setMenuPosition(null);
+                                  if (!window.confirm(`Are you sure you want to delete "${name}"? This will remove the lesson and all its content. This action cannot be undone.`)) {
+                                    return;
+                                  }
+                                  try {
+                                    const data = loadSubjectData(slug) as StoredSubjectData | null;
+                                    if (data) {
+                                      // Remove from topics array
+                                      if (data.topics) {
+                                        data.topics = data.topics.filter((t: any) => t.name !== name);
+                                      }
+                                      // Remove from tree.topics
+                                      if (data.tree?.topics) {
+                                        data.tree.topics = data.tree.topics.filter((t: any) => t.name !== name);
+                                      }
+                                      // Remove node data (lessons)
+                                      if (data.nodes) {
+                                        delete data.nodes[name];
+                                      }
+                                      // Save updated data
+                                      await saveSubjectDataAsync(slug, data);
+                                      // Update local state
+                                      setTopics(data.topics || []);
+                                      setTree(data.tree || { subject: data.subject || slug, topics: [] });
+                                      setNodes({ ...data.nodes || {} });
+                                      // Sync to server if authenticated
+                                      try {
+                                        const me = await fetch("/api/me", { credentials: "include" }).then(r => r.json().catch(() => ({})));
+                                        if (me?.user) {
+                                          await fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            credentials: 'include',
+                                            body: JSON.stringify({ data }),
+                                          }).catch(() => {});
+                                        }
+                                      } catch {}
+                                    }
+                                  } catch (err: any) {
+                                    console.error('Failed to delete lesson:', err);
+                                    alert(err?.message || "Failed to delete lesson");
+                                  }
+                                }}
+                                className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[#FFC0DA] hover:bg-[#FF2D96]/20 transition-colors"
+                              >
+                                Delete
+                              </button>
+                            </div>,
+                            document.body
+                          )}
+                        </div>
                       {!isGen && (
                         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                           {!isGenerating && hoveredTopicName === name && (
@@ -1279,6 +1519,63 @@ export default function SubjectPage() {
                 </div>
               );
             })()}
+
+            {/* Rename Lesson Modal */}
+            {renamingLesson && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setRenamingLesson(null)}>
+                <div className="w-full max-w-md rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/95 backdrop-blur-sm p-6" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-[var(--foreground)]">Rename Lesson</h3>
+                    <button
+                      onClick={() => setRenamingLesson(null)}
+                      className="text-[var(--foreground)]/70 hover:text-[var(--foreground)] text-xl"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-[var(--foreground)]/70 mb-2">
+                        Lesson Name
+                      </label>
+                      <input
+                        type="text"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleRenameLesson();
+                          } else if (e.key === 'Escape') {
+                            setRenamingLesson(null);
+                          }
+                        }}
+                        className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none focus:ring-2 focus:ring-[var(--accent-cyan)]/50"
+                        placeholder="Enter new lesson name"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-6 flex justify-end gap-2">
+                    <button
+                      onClick={() => setRenamingLesson(null)}
+                      className="rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/60 px-4 py-2 text-sm text-[var(--foreground)]/80 hover:bg-[var(--background)]/75"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleRenameLesson}
+                      disabled={!renameValue.trim() || renameValue.trim() === renamingLesson}
+                      className="rounded-lg border border-[var(--accent-cyan)]/40 bg-[var(--accent-cyan)]/10 px-4 py-2 text-sm text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             
             {/* Exam Snipes Section - shown under topics in tree view */}
             {examSnipes.length > 0 && (
@@ -1662,7 +1959,7 @@ export default function SubjectPage() {
               value={newTopicValue}
               onChange={(e) => { if (!e.target) return; setNewTopicValue(e.target.value); }}
               className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none"
-              placeholder="e.g. Linear Algebra basics or ‘What is eigenvalue?’"
+              placeholder="Enter topic name or question"
             />
           </div>
         </Modal>
@@ -1678,23 +1975,25 @@ export default function SubjectPage() {
             <h3 className="text-lg font-semibold text-[var(--foreground)]">Quick Learn</h3>
             <div>
               <label className="mb-2 block text-xs text-[var(--foreground)]/70">What do you want to learn?</label>
-              <textarea
-                value={quickLearnQuery}
-                onChange={(e) => { if (!e.target) return; setQuickLearnQuery(e.target.value); }}
-                onTouchStart={(e) => {
-                  // Ensure focus works on iOS PWA
-                  e.currentTarget.focus();
-                }}
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--accent-cyan)] focus:outline-none resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
-                placeholder="e.g. How does binary search work? Or paste a question from your course materials..."
-                rows={4}
-                tabIndex={0}
-                style={{
-                  WebkitUserSelect: 'text',
-                  WebkitTouchCallout: 'none',
-                  WebkitAppearance: 'none'
-                }}
-              />
+              <div className="w-full chat-input-container rounded-xl border border-[var(--foreground)]/10 px-3 py-2">
+                <textarea
+                  value={quickLearnQuery}
+                  onChange={(e) => { if (!e.target) return; setQuickLearnQuery(e.target.value); }}
+                  onTouchStart={(e) => {
+                    // Ensure focus works on iOS PWA
+                    e.currentTarget.focus();
+                  }}
+                  className="w-full bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+                  placeholder="e.g. How does binary search work? Or paste a question from your course materials..."
+                  rows={4}
+                  tabIndex={0}
+                  style={{
+                    WebkitUserSelect: 'text',
+                    WebkitTouchCallout: 'none',
+                    WebkitAppearance: 'none'
+                  }}
+                />
+              </div>
             </div>
             <div className="flex justify-end gap-3">
               <button

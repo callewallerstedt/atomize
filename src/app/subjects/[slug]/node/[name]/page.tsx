@@ -63,8 +63,21 @@ export default function NodePage({ lessonIndexFromUrl }: { lessonIndexFromUrl?: 
   }, [activeLessonIndex]);
   const [paragraphGroups, setParagraphGroups] = useState<{ [key: string]: string[] }>({});
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [audioLoading, setAudioLoading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioQueueRef = useRef<Array<{ url: string; sectionIndex: number; text: string } | null>>([]);
+  const currentSectionIndexRef = useRef<number>(-1);
+  const [currentSectionIndex, setCurrentSectionIndex] = useState<number>(-1);
+  const [ttsSections, setTtsSections] = useState<Array<{ text: string; heading?: string; startIndex: number; endIndex: number }>>([]);
+  const [currentSentenceIndex, setCurrentSentenceIndex] = useState<number>(-1);
+  const currentSectionSentencesRef = useRef<string[]>([]);
+  const audioStartTimeRef = useRef<number>(0);
+  const [selectedVoice, setSelectedVoice] = useState<string>("nova");
+  const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
+  const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewCacheRef = useRef<Map<string, string>>(new Map()); // Cache of preview audio URLs
   const [larsOpen, setLarsOpen] = useState(false);
   const [practiceOpen, setPracticeOpen] = useState(false);
 const [flashcardOptionsOpen, setFlashcardOptionsOpen] = useState(false);
@@ -237,59 +250,522 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
       const saved = localStorage.getItem(`starredFlashcards:${slug}`);
       if (saved) setStarredFlashcards(new Set(JSON.parse(saved)));
     } catch {}
+    
+    // Load saved voice preference
+    try {
+      const savedVoice = localStorage.getItem('tts-voice');
+      if (savedVoice && ["alloy", "echo", "fable", "onyx", "nova", "shimmer"].includes(savedVoice)) {
+        setSelectedVoice(savedVoice);
+      }
+    } catch {}
   }, [slug]);
 
+  // Auto-scroll to current section when TTS is playing
+  useEffect(() => {
+    if (currentSectionIndex < 0 || !isPlaying || ttsSections.length === 0) return;
+
+    const currentSection = ttsSections[currentSectionIndex];
+    if (!currentSection?.heading) return;
+
+    // Find the heading element in the DOM
+    const headingText = currentSection.heading.trim();
+    const lessonContent = document.querySelector('.lesson-content');
+    if (!lessonContent) return;
+
+    // Find all h1 and h2 elements
+    const headings = lessonContent.querySelectorAll('h1, h2');
+    let targetHeading: HTMLElement | null = null;
+
+    // Try to find exact match first
+    for (const heading of Array.from(headings)) {
+      const text = heading.textContent?.trim() || '';
+      if (text === headingText) {
+        targetHeading = heading as HTMLElement;
+        break;
+      }
+    }
+
+    // If no exact match, try partial match
+    if (!targetHeading) {
+      for (const heading of Array.from(headings)) {
+        const text = heading.textContent?.trim() || '';
+        if (text.includes(headingText) || headingText.includes(text)) {
+          targetHeading = heading as HTMLElement;
+          break;
+        }
+      }
+    }
+
+    if (targetHeading) {
+      // Scroll to the heading with smooth behavior
+      // Account for floating controls at bottom (about 80px)
+      const offset = 100;
+      const elementPosition = targetHeading.getBoundingClientRect().top + window.pageYOffset;
+      const offsetPosition = elementPosition - offset;
+
+      window.scrollTo({
+        top: offsetPosition,
+        behavior: 'smooth'
+      });
+    }
+  }, [currentSectionIndex, isPlaying, ttsSections]);
+
+  // Function to split markdown content by h1/h2 headings
+  function splitByHeadings(markdown: string): Array<{ text: string; heading?: string; startIndex: number; endIndex: number }> {
+    const sections: Array<{ text: string; heading?: string; startIndex: number; endIndex: number }> = [];
+    
+    // Match h1 (# Heading) or h2 (## Heading) headings
+    const headingRegex = /^(#{1,2})\s+(.+)$/gm;
+    const matches: Array<{ index: number; level: number; text: string }> = [];
+    let match;
+    
+    while ((match = headingRegex.exec(markdown)) !== null) {
+      matches.push({
+        index: match.index,
+        level: match[1].length,
+        text: match[2].trim(),
+      });
+    }
+    
+    // If no headings found, return the whole text as one section
+    if (matches.length === 0) {
+      return [{ text: markdown, startIndex: 0, endIndex: markdown.length }];
+    }
+    
+    // Split by headings (use h1 and h2 as section boundaries)
+    const splitPoints: number[] = [];
+    matches.forEach(m => {
+      if (m.level <= 2) { // h1 or h2
+        splitPoints.push(m.index);
+      }
+    });
+    splitPoints.push(markdown.length); // Add end
+    
+    let lastIndex = 0;
+    
+    for (let i = 0; i < splitPoints.length; i++) {
+      const start = lastIndex;
+      const end = splitPoints[i];
+      const sectionText = markdown.slice(start, end).trim();
+      
+      if (sectionText.length > 0) {
+        // Find the heading for this section - it should be at the start of the section
+        // or the first heading we encounter in this section
+        let headingMatch = matches.find(m => m.index === start);
+        // If no heading at exact start, find the first heading in this range
+        if (!headingMatch) {
+          headingMatch = matches.find(m => m.index >= start && m.index < end);
+        }
+        
+        sections.push({
+          text: sectionText,
+          heading: headingMatch?.text,
+          startIndex: start,
+          endIndex: end,
+        });
+      }
+      
+      lastIndex = end;
+    }
+    
+    return sections;
+  }
+
+  // Clean text for TTS (remove markdown, code blocks, etc.)
+  function cleanTextForTTS(text: string): string {
+    return text
+      .replace(/```[\s\S]*?```/g, '') // Remove code blocks
+      .replace(/`[^`]+`/g, '') // Remove inline code
+      .replace(/\$\$[\s\S]*?\$\$/g, '') // Remove block math
+      .replace(/\$[^$]+\$/g, '') // Remove inline math
+      .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1') // Convert markdown links to text
+      .replace(/[#*_~`]/g, '') // Remove markdown formatting
+      .replace(/\n{3,}/g, '\n\n') // Normalize line breaks
+      .trim();
+  }
+
+  // Split text into sentences
+  function splitIntoSentences(text: string): string[] {
+    // First, split by sentence-ending punctuation followed by space
+    // This regex matches: . ! ? followed by whitespace or end of string
+    const sentenceEndings = /([.!?]+)(\s+|$)/g;
+    const sentences: string[] = [];
+    let lastIndex = 0;
+    let match;
+    
+    while ((match = sentenceEndings.exec(text)) !== null) {
+      const sentenceEnd = match.index + match[1].length;
+      const sentence = text.substring(lastIndex, sentenceEnd).trim();
+      if (sentence.length > 0) {
+        sentences.push(sentence);
+      }
+      lastIndex = sentenceEnd + match[2].length;
+    }
+    
+    // Add remaining text if any
+    if (lastIndex < text.length) {
+      const remaining = text.substring(lastIndex).trim();
+      if (remaining.length > 0) {
+        sentences.push(remaining);
+      }
+    }
+    
+    // If no sentences found (no punctuation), split by newlines
+    if (sentences.length === 0) {
+      const byNewlines = text.split(/\n+/).filter(s => s.trim().length > 0);
+      return byNewlines.length > 0 ? byNewlines : [text];
+    }
+    
+    return sentences;
+  }
+
   async function readLesson() {
-    if (isPlaying && audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
+    // Handle pause (when playing and not paused)
+    if (isPlaying && audioRef.current && !isPaused) {
+      pauseTTS();
+      return;
+    }
+    
+    // Handle resume (when paused)
+    if (isPaused && audioRef.current) {
+      resumeTTS();
+      return;
+    }
+    
+    // Handle stop (when playing but no audio ref, or when we want to stop completely)
+    if (isPlaying && !audioRef.current) {
       setIsPlaying(false);
+      setIsPaused(false);
+      setCurrentSectionIndex(-1);
+      currentSectionIndexRef.current = -1;
+      // Clean up URLs
+      const urlsToClean = audioQueueRef.current.filter((item): item is { url: string; sectionIndex: number; text: string } => item !== null);
+      audioQueueRef.current = [];
+      urlsToClean.forEach(item => {
+        if (item && item.url) {
+          URL.revokeObjectURL(item.url);
+        }
+      });
       return;
     }
 
     try {
       setAudioLoading(true);
       const lessonBody = sanitizeLessonBody(content?.lessons?.[activeLessonIndex]?.body || "");
-      if (!lessonBody) return;
-
-      // Extract plain text from lesson content
-      const response = await fetch('/api/text-to-speech', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: lessonBody }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to generate audio');
+      if (!lessonBody) {
+        setAudioLoading(false);
+        return;
       }
 
-      const audioBlob = await response.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
-
-      audio.onended = () => {
-        setIsPlaying(false);
-        URL.revokeObjectURL(audioUrl);
-        audioRef.current = null;
-      };
-
-      audio.onerror = () => {
-        setIsPlaying(false);
+      // Split lesson by headings
+      const sections = splitByHeadings(lessonBody);
+      setTtsSections(sections);
+      
+      if (sections.length === 0) {
         setAudioLoading(false);
-        URL.revokeObjectURL(audioUrl);
-        audioRef.current = null;
-      };
+        return;
+      }
 
-      await audio.play();
-      setIsPlaying(true);
-      setAudioLoading(false);
+      // Initialize queue with placeholders
+      audioQueueRef.current = new Array(sections.length).fill(null);
+      let firstSectionReady = false;
+
+      // Generate audio for all sections concurrently, but start playing as soon as first is ready
+      const audioPromises = sections.map(async (section, index) => {
+        const cleanText = cleanTextForTTS(section.text);
+        if (!cleanText || cleanText.length < 10) {
+          return null;
+        }
+
+        try {
+          const response = await fetch('/api/text-to-speech', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: cleanText, voice: selectedVoice }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to generate audio for section ${index}`);
+          }
+
+          const audioBlob = await response.blob();
+          const audioUrl = URL.createObjectURL(audioBlob);
+          
+          const audioItem = {
+            url: audioUrl,
+            sectionIndex: index,
+            text: section.text,
+          };
+
+          // Add to queue at the correct position
+          audioQueueRef.current[index] = audioItem;
+
+          // Start playing the first section as soon as it's ready
+          if (index === 0 && !firstSectionReady) {
+            firstSectionReady = true;
+            setAudioLoading(false);
+            await playNextSection();
+          }
+
+          return audioItem;
+        } catch (error) {
+          console.error(`Error generating audio for section ${index}:`, error);
+          return null;
+        }
+      });
+
+      // Wait for all to complete (but playback already started)
+      await Promise.all(audioPromises);
     } catch (error: any) {
       console.error('Error reading lesson:', error);
       setAudioLoading(false);
       setIsPlaying(false);
+      setIsPaused(false);
     }
   }
+
+  async function playNextSection() {
+    // Don't play next section if paused - wait for resume
+    if (isPaused) {
+      return;
+    }
+
+    // Find the next section to play
+    const nextIndex = currentSectionIndexRef.current + 1;
+    
+    if (nextIndex >= audioQueueRef.current.length) {
+      // All sections played
+      setIsPlaying(false);
+      setIsPaused(false);
+      setCurrentSectionIndex(-1);
+      currentSectionIndexRef.current = -1;
+      
+      // Clean up URLs
+      const urlsToClean = audioQueueRef.current.filter((item): item is { url: string; sectionIndex: number; text: string } => item !== null);
+      audioQueueRef.current = [];
+      urlsToClean.forEach(item => {
+        if (item && item.url) {
+          URL.revokeObjectURL(item.url);
+        }
+      });
+      return;
+    }
+
+    // Wait for the next section to be ready (with timeout)
+    let nextAudio = audioQueueRef.current[nextIndex];
+    if (!nextAudio) {
+      // Wait up to 30 seconds for the section to be ready
+      const maxWait = 30000;
+      const startTime = Date.now();
+      while (!nextAudio && (Date.now() - startTime) < maxWait) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        nextAudio = audioQueueRef.current[nextIndex];
+      }
+    }
+
+    if (!nextAudio) {
+      // Section still not ready, skip to next
+      console.warn(`Section ${nextIndex} not ready, skipping`);
+      currentSectionIndexRef.current = nextIndex;
+      playNextSection();
+      return;
+    }
+
+    setCurrentSectionIndex(nextIndex);
+    currentSectionIndexRef.current = nextIndex;
+
+    // Split current section into sentences for tracking
+    const cleanText = cleanTextForTTS(nextAudio.text);
+    const sentences = splitIntoSentences(cleanText);
+    currentSectionSentencesRef.current = sentences;
+    setCurrentSentenceIndex(0);
+    audioStartTimeRef.current = Date.now();
+
+    const audio = new Audio(nextAudio.url);
+    audioRef.current = audio;
+
+    // Track playback progress for sentence highlighting
+    audio.addEventListener('timeupdate', () => {
+      if (!audioRef.current || isPaused) return;
+      
+      const currentTime = audioRef.current.currentTime;
+      const duration = audioRef.current.duration || 0;
+      
+      if (duration > 0 && sentences.length > 0) {
+        // Estimate which sentence we're on based on playback progress
+        const progress = currentTime / duration;
+        const estimatedSentenceIndex = Math.floor(progress * sentences.length);
+        const clampedIndex = Math.min(estimatedSentenceIndex, sentences.length - 1);
+        
+        if (clampedIndex !== currentSentenceIndex) {
+          setCurrentSentenceIndex(clampedIndex);
+        }
+      }
+    });
+
+    audio.onended = () => {
+      setCurrentSentenceIndex(-1);
+      currentSectionSentencesRef.current = [];
+      // Play next section
+      playNextSection();
+    };
+
+    audio.onerror = () => {
+      console.error('Error playing audio section:', nextIndex);
+      setCurrentSentenceIndex(-1);
+      currentSectionSentencesRef.current = [];
+      // Try to play next section anyway
+      playNextSection();
+    };
+
+    try {
+      await audio.play();
+      setIsPlaying(true);
+      setIsPaused(false);
+    } catch (error) {
+      console.error('Error playing audio:', error);
+      setIsPlaying(false);
+      setCurrentSentenceIndex(-1);
+    }
+  }
+
+  function pauseTTS() {
+    if (audioRef.current && isPlaying && !isPaused) {
+      audioRef.current.pause();
+      setIsPaused(true);
+      // Keep isPlaying as true so we know we're in a paused state
+      // Don't reset sentence index - keep it so we know where we paused
+    }
+  }
+
+  async function resumeTTS() {
+    if (audioRef.current && isPaused) {
+      try {
+        await audioRef.current.play();
+        setIsPaused(false);
+        // isPlaying should already be true
+      } catch (error) {
+        console.error('Error resuming audio:', error);
+        // If resume fails, try to continue with next section
+        if (audioRef.current.ended) {
+          playNextSection();
+        }
+      }
+    }
+  }
+
+  function seekBackward() {
+    if (audioRef.current) {
+      const newTime = Math.max(0, audioRef.current.currentTime - 5);
+      audioRef.current.currentTime = newTime;
+    }
+  }
+
+  // Pre-generate all voice previews when menu opens
+  async function pregeneratePreviews() {
+    // Generate previews for all voices in parallel
+    const previewPromises = voices.map(async (voice) => {
+      if (previewCacheRef.current.has(voice.id)) {
+        return; // Already cached
+      }
+      
+      try {
+        const previewText = `This is the preview of the ${voice.name} voice.`;
+        const response = await fetch('/api/text-to-speech', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: previewText, voice: voice.id, preview: true }),
+        });
+
+        if (response.ok) {
+          const audioBlob = await response.blob();
+          const audioUrl = URL.createObjectURL(audioBlob);
+          previewCacheRef.current.set(voice.id, audioUrl);
+        }
+      } catch (error) {
+        console.error(`Error pre-generating preview for ${voice.id}:`, error);
+      }
+    });
+    
+    // Don't await - let them generate in background
+    Promise.all(previewPromises).catch(console.error);
+  }
+
+  async function previewVoice(voice: string) {
+    // Stop any current preview
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+
+    setPreviewingVoice(voice);
+    
+    try {
+      // Check cache first
+      let audioUrl = previewCacheRef.current.get(voice);
+      
+      if (!audioUrl) {
+        // Not cached, generate it now
+        const voiceName = voices.find(v => v.id === voice)?.name || voice;
+        const previewText = `This is the preview of the ${voiceName} voice.`;
+        const response = await fetch('/api/text-to-speech', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: previewText, voice, preview: true }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to generate preview');
+        }
+
+        const audioBlob = await response.blob();
+        audioUrl = URL.createObjectURL(audioBlob);
+        previewCacheRef.current.set(voice, audioUrl);
+      }
+
+      const audio = new Audio(audioUrl);
+      previewAudioRef.current = audio;
+
+      audio.onended = () => {
+        setPreviewingVoice(null);
+        // Don't revoke URL if it's cached
+        if (!previewCacheRef.current.has(voice)) {
+          URL.revokeObjectURL(audioUrl);
+        }
+        previewAudioRef.current = null;
+      };
+
+      audio.onerror = () => {
+        setPreviewingVoice(null);
+        // Remove from cache if it's broken
+        previewCacheRef.current.delete(voice);
+        if (!previewCacheRef.current.has(voice)) {
+          URL.revokeObjectURL(audioUrl);
+        }
+        previewAudioRef.current = null;
+      };
+
+      await audio.play();
+    } catch (error) {
+      console.error('Error previewing voice:', error);
+      setPreviewingVoice(null);
+    }
+  }
+
+  function selectVoice(voice: string) {
+    setSelectedVoice(voice);
+    localStorage.setItem('tts-voice', voice);
+    setVoiceMenuOpen(false);
+  }
+
+  const voices = [
+    { id: 'alloy', name: 'Alloy', description: 'Balanced and clear' },
+    { id: 'echo', name: 'Echo', description: 'Deep and calm' },
+    { id: 'fable', name: 'Fable', description: 'Warm and expressive' },
+    { id: 'onyx', name: 'Onyx', description: 'Authoritative and firm' },
+    { id: 'nova', name: 'Nova', description: 'Friendly and enthusiastic' },
+    { id: 'shimmer', name: 'Shimmer', description: 'Crisp and pleasant' },
+  ];
 
   // Initialize practice answers from stored state
   useEffect(() => {
@@ -366,8 +842,27 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
         audioRef.current.pause();
         audioRef.current = null;
       }
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current = null;
+      }
+      // Clean up audio URLs
+      const urlsToClean = audioQueueRef.current.filter((item): item is { url: string; sectionIndex: number; text: string } => item !== null);
+      audioQueueRef.current = [];
+      urlsToClean.forEach(item => {
+        if (item && item.url) {
+          URL.revokeObjectURL(item.url);
+        }
+      });
+      // Clean up preview cache
+      previewCacheRef.current.forEach((url) => {
+        URL.revokeObjectURL(url);
+      });
+      previewCacheRef.current.clear();
     };
   }, []);
+
+
 
   const [subjectData, setSubjectData] = useState<StoredSubjectData | null>(null);
   
@@ -1845,6 +2340,232 @@ function toggleStar(flashcardId: string) {
                     </svg>
                   </button>
 
+                  {/* TTS Controls - unified button with dropdown */}
+                  {isAuthenticated && (content.lessons[activeLessonIndex]?.body && content.lessons[activeLessonIndex]?.body.trim().length > 0) && (
+                    <div className="ml-auto flex items-center gap-2 relative">
+                      {/* When playing/paused, show playback controls */}
+                      {(isPlaying || isPaused) ? (
+                        <>
+                          {/* Rewind 5s button */}
+                          <button
+                            onClick={seekBackward}
+                            disabled={!audioRef.current}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.currentTarget.blur();
+                            }}
+                            className="unified-button relative inline-flex items-center justify-center px-1.5 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none transition-all duration-300 ease-out disabled:opacity-50 disabled:cursor-not-allowed"
+                            style={{ 
+                              outline: 'none', 
+                              WebkitTapHighlightColor: 'transparent', 
+                              transform: 'none !important',
+                              borderRadius: '50%',
+                              margin: 0,
+                              display: 'flex',
+                              height: '32px',
+                              width: '32px',
+                              boxShadow: 'none',
+                            }}
+                            title="Rewind 5 seconds"
+                          >
+                            <svg className="h-4.5 w-4.5 text-[var(--foreground)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                              <path d="M11 18l-6-6 6-6v12z" />
+                              <path d="M18 18l-6-6 6-6v12z" />
+                              <path d="M5 12h14" />
+                            </svg>
+                          </button>
+                          
+                          {/* Play/Pause button */}
+                          <button
+                            onClick={readLesson}
+                            disabled={audioLoading}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.currentTarget.blur();
+                            }}
+                            className="unified-button relative inline-flex items-center justify-center px-1.5 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none transition-all duration-300 ease-out disabled:opacity-50 disabled:cursor-not-allowed"
+                            style={{ 
+                              outline: 'none', 
+                              WebkitTapHighlightColor: 'transparent', 
+                              transform: 'none !important',
+                              borderRadius: '50%',
+                              margin: 0,
+                              display: 'flex',
+                              height: '32px',
+                              width: '32px',
+                              boxShadow: 'none',
+                            }}
+                            title={isPaused ? "Resume reading" : "Pause reading"}
+                          >
+                            {audioLoading ? (
+                              <svg className="h-4.5 w-4.5 animate-spin text-[var(--foreground)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                <path d="M21 12a9 9 0 11-6.219-8.56"/>
+                              </svg>
+                            ) : isPaused ? (
+                              <svg className="h-4.5 w-4.5 text-[var(--foreground)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                <path d="M5 3l14 9-14 9V3z"/>
+                              </svg>
+                            ) : (
+                              <svg className="h-4.5 w-4.5 text-[var(--foreground)]" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                              </svg>
+                            )}
+                          </button>
+                          
+                          {/* Stop button */}
+                          <button
+                            onClick={() => {
+                              if (audioRef.current) {
+                                audioRef.current.pause();
+                                audioRef.current = null;
+                              }
+                              setIsPlaying(false);
+                              setIsPaused(false);
+                              setCurrentSectionIndex(-1);
+                              currentSectionIndexRef.current = -1;
+                              setCurrentSentenceIndex(-1);
+                              currentSectionSentencesRef.current = [];
+                              const urlsToClean = audioQueueRef.current.filter((item): item is { url: string; sectionIndex: number; text: string } => item !== null);
+                              audioQueueRef.current = [];
+                              urlsToClean.forEach(item => {
+                                if (item && item.url) {
+                                  URL.revokeObjectURL(item.url);
+                                }
+                              });
+                            }}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.currentTarget.blur();
+                            }}
+                            className="unified-button relative inline-flex items-center justify-center px-1.5 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none transition-all duration-300 ease-out"
+                            style={{ 
+                              outline: 'none', 
+                              WebkitTapHighlightColor: 'transparent', 
+                              transform: 'none !important',
+                              borderRadius: '50%',
+                              margin: 0,
+                              display: 'flex',
+                              height: '32px',
+                              width: '32px',
+                              boxShadow: 'none',
+                            }}
+                            title="Stop"
+                          >
+                            <svg className="h-4.5 w-4.5 text-[var(--foreground)]" viewBox="0 0 24 24" fill="currentColor">
+                              <rect x="6" y="6" width="12" height="12" rx="1" />
+                            </svg>
+                          </button>
+                        </>
+                      ) : (
+                        /* When not playing, show unified TTS button with dropdown */
+                        <div className="relative">
+                          <button
+                            onClick={() => {
+                              const newState = !voiceMenuOpen;
+                              setVoiceMenuOpen(newState);
+                              // Pre-generate previews when opening menu
+                              if (newState) {
+                                pregeneratePreviews();
+                              }
+                            }}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.currentTarget.blur();
+                            }}
+                            disabled={audioLoading}
+                            className="unified-button relative inline-flex items-center justify-center px-3 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none transition-all duration-300 ease-out disabled:opacity-50 disabled:cursor-not-allowed rounded-lg"
+                            style={{ 
+                              outline: 'none', 
+                              WebkitTapHighlightColor: 'transparent', 
+                              transform: 'none !important',
+                              margin: 0,
+                              display: 'flex',
+                              gap: '6px',
+                              boxShadow: 'none',
+                            }}
+                            title="Read lesson"
+                          >
+                            {audioLoading ? (
+                              <svg className="h-4 w-4 animate-spin text-[var(--foreground)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                <path d="M21 12a9 9 0 11-6.219-8.56"/>
+                              </svg>
+                            ) : null}
+                            <span className="text-sm font-medium text-[var(--foreground)]">Listen</span>
+                            <svg className="h-3.5 w-3.5 text-[var(--foreground)]/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="m6 9 6 6 6-6"/>
+                            </svg>
+                          </button>
+                          
+                          {voiceMenuOpen && (
+                            <>
+                              <div className="absolute right-0 top-full mt-2 w-72 bg-[var(--background)] border border-[var(--foreground)]/20 rounded-lg shadow-lg z-50 p-3">
+                                <div className="text-xs font-semibold text-[var(--foreground)]/70 mb-3 px-1 uppercase tracking-wide">Select Voice</div>
+                                <div className="space-y-1 mb-3 max-h-64 overflow-y-auto">
+                                  {voices.map((voice) => (
+                                    <div
+                                      key={voice.id}
+                                      onClick={() => selectVoice(voice.id)}
+                                      className={`flex items-center justify-between p-2.5 rounded-lg hover:bg-[var(--foreground)]/5 cursor-pointer transition-colors ${
+                                        selectedVoice === voice.id ? 'bg-[var(--foreground)]/10 border border-[var(--foreground)]/20' : ''
+                                      }`}
+                                    >
+                                      <div className="flex-1">
+                                        <div className="text-sm font-medium text-[var(--foreground)]">{voice.name}</div>
+                                        <div className="text-xs text-[var(--foreground)]/60">{voice.description}</div>
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            previewVoice(voice.id);
+                                          }}
+                                          disabled={previewingVoice === voice.id}
+                                          className="unified-button inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--foreground)]/10 hover:border-[var(--foreground)]/30 transition-colors disabled:opacity-50"
+                                          style={{ boxShadow: 'none' }}
+                                          title="Preview voice"
+                                        >
+                                          {previewingVoice === voice.id ? (
+                                            <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                              <path d="M21 12a9 9 0 11-6.219-8.56"/>
+                                            </svg>
+                                          ) : (
+                                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                              <path d="M5 3l14 9-14 9V3z"/>
+                                            </svg>
+                                          )}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    setVoiceMenuOpen(false);
+                                    readLesson();
+                                  }}
+                                  disabled={audioLoading}
+                                  className="w-full synapse-style px-4 py-2.5 rounded-lg text-sm font-semibold !text-white transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                  style={{ zIndex: 100, position: 'relative' }}
+                                >
+                                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M5 3l14 9-14 9V3z"/>
+                                  </svg>
+                                  <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                                    Start Reading
+                                  </span>
+                                </button>
+                              </div>
+                              <div
+                                className="fixed inset-0 z-40"
+                                onClick={() => setVoiceMenuOpen(false)}
+                              />
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                 {/* Single-lesson mode: dropdown removed */}
               </div>
 
@@ -1861,43 +2582,6 @@ function toggleStar(flashcardId: string) {
                   <>
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-sm text-[var(--foreground)]/70">{content.lessonsMeta?.[activeLessonIndex]?.title}</div>
-                      {isAuthenticated && (
-                      <button
-                        onClick={readLesson}
-                        disabled={audioLoading}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          e.currentTarget.blur();
-                        }}
-                        className="unified-button relative inline-flex items-center justify-center px-1.5 py-1.5 focus:outline-none focus:ring-0 focus-visible:outline-none transition-all duration-300 ease-out disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{ 
-                          outline: 'none', 
-                          WebkitTapHighlightColor: 'transparent', 
-                          transform: 'none !important',
-                          borderRadius: '50%',
-                          margin: 0,
-                          display: 'flex',
-                          height: '32px',
-                          width: '32px',
-                          boxShadow: 'none',
-                        }}
-                        title={isPlaying ? "Stop reading" : "Read lesson"}
-                      >
-                        {audioLoading ? (
-                          <svg className="h-4.5 w-4.5 animate-spin text-[var(--foreground)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                            <path d="M21 12a9 9 0 11-6.219-8.56"/>
-                          </svg>
-                        ) : isPlaying ? (
-                          <svg className="h-4.5 w-4.5 text-[var(--foreground)]" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
-                          </svg>
-                        ) : (
-                          <svg className="h-4.5 w-4.5 text-[var(--foreground)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                            <path d="M5 3l14 9-14 9V3z"/>
-                          </svg>
-                        )}
-                      </button>
-                      )}
                     </div>
                     {lessonMetadata && (
                       <div className="mb-6 rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4 space-y-4">
@@ -2372,22 +3056,49 @@ function toggleStar(flashcardId: string) {
                             <LessonBody body={sanitizeLessonBody(String(p.problem || ""))} />
                           </div>
                           <div className="space-y-2">
-                            <textarea
-                              value={practiceAnswers[pi] || ""}
-                              onChange={(e) => {
-                                const nextVal = e.target.value;
-                                setPracticeAnswers((prev) => ({ ...prev, [pi]: nextVal }));
-                              }}
-                              onTouchStart={(e) => {
-                                e.currentTarget.focus();
-                              }}
-                              className={
-                                practiceResults?.[pi]
-                                  ? practiceResults[pi].correct
+                            {practiceResults?.[pi] ? (
+                              <textarea
+                                value={practiceAnswers[pi] || ""}
+                                onChange={(e) => {
+                                  const nextVal = e.target.value;
+                                  setPracticeAnswers((prev) => ({ ...prev, [pi]: nextVal }));
+                                }}
+                                onTouchStart={(e) => {
+                                  e.currentTarget.focus();
+                                }}
+                                className={
+                                  practiceResults[pi].correct
                                     ? "w-full rounded-lg border border-green-300 bg-green-50 text-green-800 dark:border-green-500/40 dark:bg-green-500/10 dark:text-green-200 px-3 py-2 text-sm transition-colors resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
                                     : "w-full rounded-lg border border-red-300 bg-red-50 text-red-800 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200 px-3 py-2 text-sm transition-colors resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
-                                  : "w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:border-[var(--foreground)]/40 focus:outline-none px-3 py-2 text-sm transition-colors resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
-                              }
+                                }
+                                placeholder="Write your answer here..."
+                                rows={3}
+                                disabled={checkingAnswers}
+                                tabIndex={0}
+                                inputMode="text"
+                                autoComplete="off"
+                                autoCorrect="off"
+                                autoCapitalize="off"
+                                spellCheck={false}
+                                style={{
+                                  WebkitUserSelect: "text",
+                                  WebkitTouchCallout: "none",
+                                  WebkitAppearance: "none",
+                                  touchAction: "manipulation"
+                                }}
+                              />
+                            ) : (
+                              <div className="w-full chat-input-container rounded-lg border border-[var(--foreground)]/10 px-3 py-2">
+                                <textarea
+                                  value={practiceAnswers[pi] || ""}
+                                  onChange={(e) => {
+                                    const nextVal = e.target.value;
+                                    setPracticeAnswers((prev) => ({ ...prev, [pi]: nextVal }));
+                                  }}
+                                  onTouchStart={(e) => {
+                                    e.currentTarget.focus();
+                                  }}
+                                  className="w-full bg-transparent border-none outline-none text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none text-sm"
                               placeholder="Write your answer here..."
                               rows={3}
                               disabled={checkingAnswers}
@@ -2403,7 +3114,9 @@ function toggleStar(flashcardId: string) {
                                 WebkitAppearance: "none",
                                 touchAction: "manipulation",
                               }}
-                            />
+                                />
+                              </div>
+                            )}
                             {practiceResults?.[pi] && (
                               <div className="space-y-3">
                                 <div
@@ -2656,16 +3369,16 @@ function toggleStar(flashcardId: string) {
                               {q.options.map((option, oi) => (
                                 <label
                                   key={oi}
-                                  className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
+                                  className={`chat-input-container flex items-start gap-2 px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
                                     mcResults?.[qi]
-                                      ? oi === q.correctAnswer
-                                        ? 'border-green-500 bg-green-500/10'
+                                      ? `quiz-option-result ${oi === q.correctAnswer
+                                        ? 'border-green-500'
                                         : mcAnswers[qi] === oi
-                                        ? 'border-red-500 bg-red-500/10'
-                                        : 'border-[var(--foreground)]/10 opacity-50'
+                                        ? 'border-red-500'
+                                        : 'border-[var(--foreground)]/10 opacity-50'}`
                                       : mcAnswers[qi] === oi
-                                      ? 'border-[var(--accent-cyan)] bg-[var(--accent-cyan)]/10'
-                                      : 'border-[var(--foreground)]/20 hover:border-[var(--accent-cyan)]/50'
+                                      ? 'quiz-option-selected border-[var(--foreground)]/40 border-2'
+                                      : 'border-[var(--foreground)]/20'
                                   }`}
                                 >
                                   <input
@@ -3426,6 +4139,71 @@ function toggleStar(flashcardId: string) {
       </div>
     )}
     <LarsCoach open={larsOpen} onClose={() => setLarsOpen(false)} />
+    
+    {/* Floating TTS Playback Controls */}
+    {(isPlaying || isPaused) && (
+      <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 flex items-center gap-3 bg-[var(--background)]/95 backdrop-blur-sm border border-[var(--foreground)]/20 rounded-full px-4 py-2 shadow-lg">
+        <button
+          onClick={seekBackward}
+          disabled={!audioRef.current}
+          className="unified-button inline-flex items-center justify-center w-10 h-10 rounded-full border border-[var(--foreground)]/10 hover:border-[var(--foreground)]/30 transition-colors disabled:opacity-50"
+          title="Rewind 5 seconds"
+          style={{ boxShadow: 'none' }}
+        >
+          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M11 18l-6-6 6-6v12z" />
+            <path d="M18 18l-6-6 6-6v12z" />
+            <path d="M5 12h14" />
+          </svg>
+        </button>
+        
+        <button
+          onClick={readLesson}
+          className="unified-button inline-flex items-center justify-center w-12 h-12 rounded-full border border-[var(--foreground)]/10 hover:border-[var(--foreground)]/30 transition-colors"
+          title={isPaused ? "Resume" : "Pause"}
+          style={{ boxShadow: 'none' }}
+        >
+          {isPaused ? (
+            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M5 3l14 9-14 9V3z" />
+            </svg>
+          ) : (
+            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+            </svg>
+          )}
+        </button>
+        
+        <button
+          onClick={() => {
+            if (audioRef.current) {
+              audioRef.current.pause();
+              audioRef.current = null;
+            }
+            setIsPlaying(false);
+            setIsPaused(false);
+            setCurrentSectionIndex(-1);
+            currentSectionIndexRef.current = -1;
+            setCurrentSentenceIndex(-1);
+            currentSectionSentencesRef.current = [];
+            const urlsToClean = audioQueueRef.current.filter((item): item is { url: string; sectionIndex: number; text: string } => item !== null);
+            audioQueueRef.current = [];
+            urlsToClean.forEach(item => {
+              if (item && item.url) {
+                URL.revokeObjectURL(item.url);
+              }
+            });
+          }}
+          className="unified-button inline-flex items-center justify-center w-10 h-10 rounded-full border border-[var(--foreground)]/10 hover:border-[var(--foreground)]/30 transition-colors"
+          title="Stop"
+          style={{ boxShadow: 'none' }}
+        >
+          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="6" width="12" height="12" rx="1" />
+          </svg>
+        </button>
+      </div>
+    )}
     </>
   );
 }

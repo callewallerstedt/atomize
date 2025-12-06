@@ -56,58 +56,64 @@ export default function CourseCreateModal({ open, onClose, onCreate }: { open: b
       <form onSubmit={submit} className="space-y-4">
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Course name</label>
-          <input
-            value={name}
-            onChange={(e) => { if (!e.target) return; setName(e.target.value); }}
-            onTouchStart={(e) => { (e.currentTarget as HTMLInputElement).focus(); }}
-            className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
-            placeholder="e.g., Concurrent Programming"
-            inputMode="text"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            tabIndex={0}
-            style={{ WebkitUserSelect: 'text', WebkitTouchCallout: 'none', WebkitAppearance: 'none' }}
-          />
+          <div className="w-full chat-input-container rounded-xl border border-[#222731] px-3 py-2">
+            <input
+              value={name}
+              onChange={(e) => { if (!e.target) return; setName(e.target.value); }}
+              onTouchStart={(e) => { (e.currentTarget as HTMLInputElement).focus(); }}
+              className="w-full bg-transparent border-none outline-none text-sm text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+              placeholder="e.g., Concurrent Programming"
+              inputMode="text"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              tabIndex={0}
+              style={{ WebkitUserSelect: 'text', WebkitTouchCallout: 'none', WebkitAppearance: 'none' }}
+            />
+          </div>
         </div>
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Preferred language (optional)</label>
-          <input
-            value={preferredLanguage}
-            onChange={(e) => { if (!e.target) return; setPreferredLanguage(e.target.value); }}
-            onTouchStart={(e) => { (e.currentTarget as HTMLInputElement).focus(); }}
-            className="w-full rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-base text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
-            placeholder="e.g., English, Svenska, Español"
-            inputMode="text"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            tabIndex={0}
-            style={{ WebkitUserSelect: 'text', WebkitTouchCallout: 'none', WebkitAppearance: 'none' }}
-          />
+          <div className="w-full chat-input-container rounded-xl border border-[#222731] px-3 py-2">
+            <input
+              value={preferredLanguage}
+              onChange={(e) => { if (!e.target) return; setPreferredLanguage(e.target.value); }}
+              onTouchStart={(e) => { (e.currentTarget as HTMLInputElement).focus(); }}
+              className="w-full bg-transparent border-none outline-none text-base text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+              placeholder="e.g., English, Svenska, Español"
+              inputMode="text"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              tabIndex={0}
+              style={{ WebkitUserSelect: 'text', WebkitTouchCallout: 'none', WebkitAppearance: 'none' }}
+            />
+          </div>
           <div className="mt-1 text-[10px] text-[#9AA3B2]">If empty, the language will be inferred from your files.</div>
         </div>
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Syllabus (optional)</label>
-          <textarea
-            value={syllabus}
-            onChange={(e) => { if (!e.target) return; setSyllabus(e.target.value); }}
-            onTouchStart={(e) => {
-              // Ensure focus works on iOS PWA
-              e.currentTarget.focus();
-            }}
-            rows={5}
-            className="w-full resize-y rounded-xl border border-[#222731] bg-[#0F141D] px-3 py-2 text-base text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
-            placeholder="Paste syllabus or course description..."
-            tabIndex={0}
-            style={{
-              WebkitUserSelect: 'text',
-              WebkitTouchCallout: 'none',
-              WebkitAppearance: 'none'
-            }}
-          />
+          <div className="w-full chat-input-container rounded-xl border border-[#222731] px-3 py-2">
+            <textarea
+              value={syllabus}
+              onChange={(e) => { if (!e.target) return; setSyllabus(e.target.value); }}
+              onTouchStart={(e) => {
+                // Ensure focus works on iOS PWA
+                e.currentTarget.focus();
+              }}
+              rows={5}
+              className="w-full bg-transparent border-none outline-none resize-y text-base text-[#E5E7EB] placeholder:text-[#6B7280] focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+              placeholder="Paste syllabus or course description..."
+              tabIndex={0}
+              style={{
+                WebkitUserSelect: 'text',
+                WebkitTouchCallout: 'none',
+                WebkitAppearance: 'none'
+              }}
+            />
+          </div>
         </div>
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Upload files (optional)</label>

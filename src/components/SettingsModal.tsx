@@ -32,7 +32,7 @@ const SOFT_DEFAULTS: Theme = {
 };
 
 const LIGHT_DEFAULTS: Theme = {
-  background: "#F8FAFC",
+  background: "#F5F5F5",
   foreground: "#1E293B",
   accentCyan: "#00E5FF",
   accentPink: "#FF2D96",
@@ -590,7 +590,7 @@ export default function SettingsModal({
             <div className="p-2">
               <div 
                 className="w-full h-10 rounded mb-1.5"
-                style={{ backgroundColor: '#F8FAFC' }}
+                style={{ backgroundColor: '#F5F5F5' }}
               />
               <div className="text-[10px] font-medium text-[var(--foreground)] text-center">Light</div>
             </div>

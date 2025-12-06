@@ -3789,7 +3789,7 @@ export default function SurgePage() {
                             onChange={(e) => setShortAnswer(e.target.value)}
                             placeholder="Type your answer here..."
                             disabled={!!quizResponses[currentQ.id]?.checked}
-                            className="chat-input-container w-full min-h-[120px] px-4 py-3 rounded-lg border border-[var(--foreground)]/10 text-[var(--foreground)] focus:outline-none focus:border-[var(--foreground)]/20 resize-none disabled:opacity-70 disabled:cursor-not-allowed"
+                            className="chat-input-container w-full min-h-[120px] px-4 py-3 rounded-lg border border-[var(--foreground)]/10 bg-transparent text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none focus:border-[var(--foreground)]/20 resize-none disabled:opacity-70 disabled:cursor-not-allowed"
                           />
                         </div>
                       )}
@@ -3902,7 +3902,7 @@ export default function SurgePage() {
                                   }
                                 }}
                                 placeholder="Enter custom topic..."
-                                className="chat-input-container flex-1 min-w-[200px] rounded-lg border border-[var(--foreground)]/10 px-4 py-2 text-[var(--foreground)] focus:outline-none focus:border-[var(--foreground)]/20"
+                                className="chat-input-container flex-1 min-w-[200px] rounded-lg border border-[var(--foreground)]/10 px-4 py-2 focus:outline-none focus:border-[var(--foreground)]/20 bg-transparent text-[var(--foreground)] placeholder:text-[var(--foreground)]/60"
                                 style={{ boxShadow: 'none' }}
                                 autoFocus
                               />

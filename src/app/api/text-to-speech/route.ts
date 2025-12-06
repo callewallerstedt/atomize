@@ -13,6 +13,12 @@ export async function POST(req: Request) {
 
     const body = await req.json().catch(() => ({}));
     const text = String(body.text || "").trim();
+    const voice = String(body.voice || "nova").toLowerCase();
+    const isPreview = Boolean(body.preview);
+
+    // Validate voice
+    const validVoices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
+    const selectedVoice = validVoices.includes(voice) ? voice : "nova";
 
     if (!text) {
       return NextResponse.json({ ok: false, error: "Missing text" }, { status: 400 });
@@ -35,10 +41,13 @@ export async function POST(req: Request) {
 
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+    // Use faster model for previews, higher quality for actual lessons
+    const model = isPreview ? "tts-1" : "tts-1-hd";
+    
     // Use OpenAI TTS API
     const mp3 = await client.audio.speech.create({
-      model: "tts-1",
-      voice: "nova", // Can be: alloy, echo, fable, onyx, nova, shimmer
+      model: model,
+      voice: selectedVoice as "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer",
       input: cleanText.slice(0, 4096), // TTS has a limit
     });
 
