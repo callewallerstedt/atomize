@@ -2928,6 +2928,30 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                 </button>
                 <button
                   onClick={() => {
+                    if (!hasPremiumAccess) {
+                      if (typeof document !== "undefined") {
+                        document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
+                      }
+                      return;
+                    }
+                    if (!homepageSending && !isTutorialActive) {
+                      router.push('/lab-assist');
+                    }
+                  }}
+                  disabled={homepageSending || isTutorialActive}
+                  className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
+                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
+                  title="Upload lab instructions and get a simple, step by step version"
+                >
+                  Lab Assist
+                  {!hasPremiumAccess && (
+                    <span className="ml-1 inline-flex items-center rounded-full bg-[var(--foreground)]/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--foreground)]/60">
+                      Pro
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => {
                     if (!homepageSending && !isTutorialActive) {
                       handleSendMessage("Help!");
                     }
@@ -3111,6 +3135,30 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                 </button>
                 <button
                   onClick={() => {
+                    if (!hasPremiumAccess) {
+                      if (typeof document !== "undefined") {
+                        document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
+                      }
+                      return;
+                    }
+                    if (!homepageSending && !isTutorialActive) {
+                      router.push('/lab-assist');
+                    }
+                  }}
+                  disabled={homepageSending || isTutorialActive}
+                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
+                  title="Upload lab instructions and get a simple, step by step version"
+                >
+                  Lab Assist
+                  {!hasPremiumAccess && (
+                    <span className="ml-1 inline-flex items-center rounded-full bg-white/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/60">
+                      Pro
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => {
                     if (!homepageSending && !isTutorialActive) {
                       handleSendMessage("Help!");
                     }
@@ -3171,6 +3219,7 @@ function Home() {
   const [tutorialSignal, setTutorialSignal] = useState(0);
   const settingsFileInputRef = useRef<HTMLInputElement>(null);
   const settingsNameSavedRef = useRef('');
+  const autoCreateFileInputRef = useRef<HTMLInputElement>(null);
   const [calendarOpenFor, setCalendarOpenFor] = useState<string | null>(null); // slug of course for which calendar is open
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<Date | null>(null);
   const [calendarCurrentMonth, setCalendarCurrentMonth] = useState<Date>(() => {
@@ -3184,6 +3233,8 @@ function Home() {
   
   const [examSnipeModalOpen, setExamSnipeModalOpen] = useState(false);
   const [detectedExamFiles, setDetectedExamFiles] = useState<File[]>([]);
+  const [labAssistModalOpen, setLabAssistModalOpen] = useState(false);
+  const [detectedLabFiles, setDetectedLabFiles] = useState<File[]>([]);
   const [examSnipeCourseSlug, setExamSnipeCourseSlug] = useState<string | null>(null);
   
   const [subscriptionLevel, setSubscriptionLevel] = useState<string | null>(null);
@@ -4217,6 +4268,91 @@ function Home() {
     if (files.length === 0) return;
 
     setIsDragging(false);
+    
+    // Check if files might be lab instructions
+    (async () => {
+      try {
+        // Extract first 2000 characters from each file for AI analysis
+        const fileSnippets: Array<{ name: string; preview: string }> = [];
+        for (const file of files) {
+          try {
+            const lower = file.name.toLowerCase();
+            let preview = '';
+            
+            if (lower.endsWith('.pdf') || lower.endsWith('.docx')) {
+              // For PDFs and DOCX, use server-side extraction
+              const form = new FormData();
+              form.append('files', file);
+              const res = await fetch('/api/upload-course-files', { method: 'POST', body: form });
+              const json = await res.json().catch(() => ({}));
+              if (res.ok && json?.ok && Array.isArray(json.docs) && json.docs.length > 0) {
+                preview = json.docs[0].text || '';
+              }
+            } else if (file.type.startsWith('text/') || lower.endsWith('.txt') || lower.endsWith('.md')) {
+              preview = await file.text();
+            }
+            
+            // Take first 2000 characters
+            if (preview) {
+              preview = preview.slice(0, 2000).trim();
+              if (preview.length > 50) {
+                fileSnippets.push({ name: file.name, preview });
+              }
+            }
+          } catch (err) {
+            console.warn(`Failed to extract preview from ${file.name}:`, err);
+          }
+        }
+
+        if (fileSnippets.length === 0) {
+          // No preview available, proceed with course creation
+          await createCourse('New Course', "", files);
+          return;
+        }
+
+        // Use AI to detect which files are lab instructions
+        const detectRes = await fetch('/api/detect-lab-files', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileSnippets }),
+          keepalive: true,
+        });
+
+        if (!detectRes.ok) {
+          // Detection failed, proceed with course creation
+          await createCourse('New Course', "", files);
+          return;
+        }
+
+        const detectJson = await detectRes.json().catch(() => ({}));
+        if (!detectJson?.ok || !Array.isArray(detectJson.labFiles)) {
+          // No lab files detected, proceed with course creation
+          await createCourse('New Course', "", files);
+          return;
+        }
+
+        const labFileNames = new Set(detectJson.labFiles.map((name: string) => name));
+        const labFiles = files.filter(file => labFileNames.has(file.name));
+
+        if (labFiles.length > 0) {
+          // Show modal asking user if they want to use Lab Assist
+          setDetectedLabFiles(labFiles);
+          setLabAssistModalOpen(true);
+          return;
+        }
+
+        // No lab files detected, proceed with course creation
+        await createCourse('New Course', "", files);
+      } catch (err) {
+        console.warn('Failed to detect lab files:', err);
+        // On error, proceed with course creation
+        try {
+          await createCourse('New Course', "", files);
+        } catch (createErr) {
+          console.error('Failed to auto-create course', createErr);
+        }
+      }
+    })();
     try {
       // Create with a neutral placeholder; final name will be set after AI summary
       await createCourse('New Course', "", files);
@@ -4490,9 +4626,9 @@ function Home() {
                               setCalendarCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
                               setCalendarOpenFor(s.slug);
                             }}
-                            className="date-button inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold tracking-wide text-white/70 border border-white/10 hover:text-white hover:border-white/30 transition-all"
+                            className="date-button inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold tracking-wide text-[var(--foreground)] bg-[color-mix(in_srgb,var(--foreground)_8%,transparent)] border border-[var(--foreground)]/20 backdrop-blur-sm shadow-[0_1px_2px_rgba(0,0,0,0.2)] hover:bg-[color-mix(in_srgb,var(--foreground)_12%,transparent)] hover:border-[var(--foreground)]/30 transition-all"
                           >
-                            <span className="inline-block w-1 h-1 rounded-full bg-white/50" />
+                            <span className="inline-block w-1 h-1 rounded-full bg-[var(--foreground)]/60" />
                             Set Date
                           </button>
                         )}
@@ -4680,36 +4816,58 @@ function Home() {
           </div>
         );})}
         {hasPremiumAccess && (
-          <div
-            onDragEnter={(e) => {
-              e.preventDefault();
-              setIsDragging(true);
-            }}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setIsDragging(true);
-            }}
-            onDragLeave={(e) => {
-              e.preventDefault();
-              setIsDragging(false);
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              const files = Array.from(e.dataTransfer?.files || []);
-              createCourseFromFiles(files);
-            }}
-            className={`drop-files-area relative rounded-2xl border border-dashed p-6 text-center text-sm transition-all duration-200 min-h-[80px] flex flex-col items-center justify-center gap-2 ${
-              isDragging
-                ? 'border-[var(--foreground)]/40 shadow-[0_4px_12px_rgba(0,0,0,0.8)] dragging'
-                : 'border-[var(--foreground)]/20 hover:border-[var(--foreground)]/30'
-            }`}
-            style={{
-              boxShadow: 'none',
-            }}
-          >
-            <span className="text-[var(--foreground)]/70">Drop files here to auto-create a course</span>
-            <span className="text-xs text-[var(--foreground)]/50">We'll scan the files and name it for you</span>
-          </div>
+          <>
+            <div
+              onClick={() => autoCreateFileInputRef.current?.click()}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                setIsDragging(true);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragging(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                setIsDragging(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragging(false);
+                const files = Array.from(e.dataTransfer?.files || []);
+                createCourseFromFiles(files);
+              }}
+              className={`drop-files-area relative rounded-2xl border-2 border-dashed p-8 text-center transition-all duration-200 min-h-[120px] flex flex-col items-center justify-center gap-2 cursor-pointer ${
+                isDragging
+                  ? 'border-[var(--foreground)]/30 shadow-[0_4px_12px_rgba(0,0,0,0.8)] dragging'
+                  : 'border-[var(--foreground)]/25 hover:border-[var(--foreground)]/35'
+              }`}
+              style={{
+                boxShadow: 'none',
+              }}
+            >
+              <div className="flex flex-col items-center justify-center gap-1">
+                <span className="text-base font-medium text-[var(--foreground)]/50">Drop course files here</span>
+                <span className="text-sm text-[var(--foreground)]/40">(Including old exams)</span>
+                <span className="text-xs text-[var(--foreground)]/35 mt-1">We'll handle the rest</span>
+              </div>
+            </div>
+            <input
+              ref={autoCreateFileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.txt,.md,.docx,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              className="hidden"
+              onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                if (files.length > 0) {
+                  createCourseFromFiles(files);
+                  // Reset input so same file can be selected again
+                  e.target.value = '';
+                }
+              }}
+            />
+          </>
         )}
         {subjects.length === 0 && null}
       </div>
@@ -4882,6 +5040,148 @@ function Home() {
             <p className="mb-2">Detected {detectedExamFiles.length} exam file{detectedExamFiles.length !== 1 ? 's' : ''}:</p>
             <ul className="list-disc list-inside space-y-1 ml-2">
               {detectedExamFiles.map((file, index) => (
+                <li key={index}>{file.name}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Lab Assist Detection Modal */}
+      <Modal
+        open={labAssistModalOpen}
+        onClose={() => {
+          setLabAssistModalOpen(false);
+          setDetectedLabFiles([]);
+        }}
+        title="Lab Files Detected"
+        footer={
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={async () => {
+                // Create course from files
+                setLabAssistModalOpen(false);
+                const allFiles = detectedLabFiles;
+                setDetectedLabFiles([]);
+                try {
+                  await createCourse('New Course', "", allFiles);
+                } catch (err) {
+                  console.error('Failed to create course:', err);
+                }
+              }}
+              className="synapse-style inline-flex h-10 items-center rounded-full px-6 text-sm font-medium disabled:opacity-60 transition-opacity"
+              style={{ 
+                background: 'rgba(128, 128, 128, 0.2)',
+                backgroundColor: 'rgba(128, 128, 128, 0.2)',
+                color: 'var(--foreground)',
+                zIndex: 100, 
+                position: 'relative' 
+              }}
+            >
+              <span style={{ color: 'var(--foreground)', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                Create course from this file
+              </span>
+            </button>
+            <button
+              onClick={async () => {
+                // Navigate to Lab Assist with the detected files
+                if (detectedLabFiles.length > 0) {
+                  // Store files temporarily
+                  (window as any).__pendingLabFiles = detectedLabFiles;
+                  router.push('/lab-assist');
+                }
+                setLabAssistModalOpen(false);
+                setDetectedLabFiles([]);
+              }}
+              className="synapse-style inline-flex h-10 items-center rounded-full px-6 text-sm font-medium text-white disabled:opacity-60 transition-opacity"
+              style={{ color: 'white', zIndex: 100, position: 'relative' }}
+            >
+              <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                Open in Lab Assist (step by step lab view)
+              </span>
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-[var(--foreground)]">
+            I detected lab instruction files. How would you like to proceed?
+          </p>
+          <div className="text-xs text-[var(--foreground)]/60">
+            <p className="mb-2">Detected {detectedLabFiles.length} lab file{detectedLabFiles.length !== 1 ? 's' : ''}:</p>
+            <ul className="list-disc list-inside space-y-1 ml-2">
+              {detectedLabFiles.map((file, index) => (
+                <li key={index}>{file.name}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Lab Assist Detection Modal */}
+      <Modal
+        open={labAssistModalOpen}
+        onClose={() => {
+          setLabAssistModalOpen(false);
+          setDetectedLabFiles([]);
+        }}
+        title="Lab Files Detected"
+        footer={
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={async () => {
+                // Create course from files
+                setLabAssistModalOpen(false);
+                const allFiles = detectedLabFiles;
+                setDetectedLabFiles([]);
+                try {
+                  await createCourse('New Course', "", allFiles);
+                } catch (err) {
+                  console.error('Failed to create course:', err);
+                }
+              }}
+              className="synapse-style inline-flex h-10 items-center rounded-full px-6 text-sm font-medium disabled:opacity-60 transition-opacity"
+              style={{ 
+                background: 'rgba(128, 128, 128, 0.2)',
+                backgroundColor: 'rgba(128, 128, 128, 0.2)',
+                color: 'var(--foreground)',
+                zIndex: 100, 
+                position: 'relative' 
+              }}
+            >
+              <span style={{ color: 'var(--foreground)', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                Create course from this file
+              </span>
+            </button>
+            <button
+              onClick={async () => {
+                // Navigate to Lab Assist with the detected files
+                if (detectedLabFiles.length > 0) {
+                  // Store files temporarily
+                  (window as any).__pendingLabFiles = detectedLabFiles;
+                  router.push('/lab-assist');
+                }
+                setLabAssistModalOpen(false);
+                setDetectedLabFiles([]);
+              }}
+              className="synapse-style inline-flex h-10 items-center rounded-full px-6 text-sm font-medium text-white disabled:opacity-60 transition-opacity"
+              style={{ color: 'white', zIndex: 100, position: 'relative' }}
+            >
+              <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                Open in Lab Assist (step by step lab view)
+              </span>
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-[var(--foreground)]">
+            I detected lab instruction files. How would you like to proceed?
+          </p>
+          <div className="text-xs text-[var(--foreground)]/60">
+            <p className="mb-2">Detected {detectedLabFiles.length} lab file{detectedLabFiles.length !== 1 ? 's' : ''}:</p>
+            <ul className="list-disc list-inside space-y-1 ml-2">
+              {detectedLabFiles.map((file, index) => (
                 <li key={index}>{file.name}</li>
               ))}
             </ul>

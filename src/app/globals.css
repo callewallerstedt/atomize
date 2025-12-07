@@ -246,6 +246,15 @@ input, textarea, [contenteditable] {
   font-size: 1.05rem;
   white-space: normal !important;
   word-break: break-word;
+  background-color: color-mix(in srgb, var(--foreground) 8%, transparent) !important;
+}
+
+.lesson-content .katex * {
+  background-color: transparent !important;
+}
+
+.lesson-content .katex .katex-html {
+  background-color: color-mix(in srgb, var(--foreground) 8%, transparent) !important;
 }
 
 /* Code blocks and inline code */
@@ -258,8 +267,7 @@ input, textarea, [contenteditable] {
   margin: 0.75rem 0;
 }
 .lesson-content code {
-  background-color: #0F141D;
-  border: 1px solid #222731;
+  background-color: color-mix(in srgb, var(--foreground) 16%, transparent);
   padding: 0.1rem 0.35rem;
   border-radius: 0.375rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -454,27 +462,27 @@ html.light-mode div[data-chat-pill].chat-input-container,
 }
 
 .drop-files-area {
-  background-color: color-mix(in srgb, var(--foreground) 8%, transparent) !important;
+  background-color: transparent !important;
 }
 
 .light-mode .drop-files-area {
-  background-color: rgba(250, 250, 250, 0.8) !important;
+  background-color: transparent !important;
 }
 
 .drop-files-area:hover {
-  background-color: color-mix(in srgb, var(--foreground) 12%, transparent) !important;
+  background-color: color-mix(in srgb, var(--foreground) 5%, transparent) !important;
 }
 
 .light-mode .drop-files-area:hover {
-  background-color: rgba(252, 252, 252, 0.9) !important;
+  background-color: rgba(245, 245, 245, 0.6) !important;
 }
 
 .drop-files-area.dragging {
-  background-color: color-mix(in srgb, var(--foreground) 12%, transparent) !important;
+  background-color: color-mix(in srgb, var(--foreground) 8%, transparent) !important;
 }
 
 .light-mode .drop-files-area.dragging {
-  background-color: rgba(252, 252, 252, 0.9) !important;
+  background-color: rgba(250, 250, 250, 0.8) !important;
 }
 
 /* Login page text inputs - always slightly lighter than background */

@@ -2085,6 +2085,11 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
   // Global keyboard listener to open chat when typing starts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Check if chat auto-open is disabled (e.g., on lab assist page)
+      if ((window as any).__labAssistDisableChatAutoOpen) {
+        return;
+      }
+
       // Ignore special keys and shortcuts
       if (e.ctrlKey || e.metaKey || e.altKey || e.key === 'Escape' || e.key === 'Tab') {
         return;
@@ -4671,6 +4676,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     if (typeof window === 'undefined') return;
     
     const handleScroll = () => {
+      // Don't show header if lab assist is active
+      if ((window as any).__labAssistActive) {
+        setHeaderVisible(false);
+        return;
+      }
+      
       const currentScrollY = window.scrollY;
       const scrollDifference = currentScrollY - lastScrollY;
       

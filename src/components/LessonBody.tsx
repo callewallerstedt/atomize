@@ -214,6 +214,28 @@ const bracketMathBlock: PluginSimple = (mdInstance) => {
 	});
 };
 
+// Arrow Block →→ (synapse-style arrow)
+const arrowBlock: PluginSimple = (mdInstance) => {
+	mdInstance.block.ruler.before("fence", "arrow_block", (state, startLine, endLine, silent) => {
+		const startPos = state.bMarks[startLine] + state.tShift[startLine];
+		const maxPos = state.eMarks[startLine];
+		const src = state.src;
+
+		// Line must contain only "→→" (optionally with whitespace)
+		const lineContent = src.slice(startPos, maxPos).trim();
+		if (lineContent !== "→→") {
+			return false;
+		}
+		if (silent) return true;
+
+		const token = state.push("arrow_block", "div", 0);
+		token.block = true;
+		token.map = [startLine, startLine + 1];
+		state.line = startLine + 1;
+		return true;
+	});
+};
+
 // Practice Problem Container :::practice-problem ... :::
 const practiceProblemContainer: PluginSimple = (mdInstance) => {
 	mdInstance.block.ruler.before("fence", "practice_problem", (state, startLine, endLine, silent) => {
@@ -278,6 +300,7 @@ const md = new MarkdownIt({
 	.use(bracketMathInline)
 	.use(bracketMathBlock)
 	.use(mdKatex as any, { throwOnError: false, errorColor: "#cc0000" })
+	.use(arrowBlock)
 	.use(practiceProblemContainer);
 
 // Add custom renderers for bracket math tokens
@@ -297,6 +320,11 @@ md.renderer.rules.math_block = (tokens, idx) => {
 	} catch (e) {
 		return `<div class="math-error">\\[${token.content}\\]</div>`;
 	}
+};
+
+// Renderer for arrow block - returns placeholder that we'll replace with React component
+md.renderer.rules.arrow_block = () => {
+	return '<div class="synapse-arrow-placeholder"></div>';
 };
 
 // Normalize language name for prism-react-renderer
@@ -493,6 +521,37 @@ function normalizeLanguage(lang: string): string {
 	// Prism supports many languages with their standard names
 	// If the language isn't supported, it will fall back to plain text
 	return normalized;
+}
+
+// Component to render synapse-style arrow
+function SynapseArrow() {
+	return (
+		<div className="flex justify-center my-6">
+			<div className="relative w-24 h-1.5 overflow-visible">
+				{/* Arrow line with gradient */}
+				<div 
+					className="absolute inset-0 rounded-full"
+					style={{
+						background: 'linear-gradient(90deg, #00E5FF, #FF2D96, #00E5FF)',
+						backgroundSize: '200% 100%',
+						animation: 'gradient-shift 3s ease-in-out infinite',
+					}}
+				/>
+				{/* Arrow head with gradient */}
+				<div 
+					className="absolute right-0 top-1/2 -translate-y-1/2"
+					style={{
+						width: 0,
+						height: 0,
+						borderLeft: '10px solid #FF2D96',
+						borderTop: '6px solid transparent',
+						borderBottom: '6px solid transparent',
+						marginLeft: '2px',
+					}}
+				/>
+			</div>
+		</div>
+	);
 }
 
 // Component to render code blocks with syntax highlighting
@@ -722,32 +781,76 @@ export function LessonBody({ body }: { body: string }) {
 	// Render the markdown with placeholders (math conversion already applied in withMathDelimiters)
 	let html = md.render(processed);
 	
+	// Replace arrow placeholders with React components
+	const arrowPlaceholderRegex = /<div class="synapse-arrow-placeholder"><\/div>/g;
+	let arrowIndex = 0;
+	const arrowPlaceholders: Array<{ index: number; placeholder: string }> = [];
+	let arrowMatch;
+	
+	while ((arrowMatch = arrowPlaceholderRegex.exec(html)) !== null) {
+		const placeholder = `<!--ARROW${arrowIndex}-->`;
+		arrowPlaceholders.push({ index: arrowIndex, placeholder });
+		html = html.slice(0, arrowMatch.index) + placeholder + html.slice(arrowMatch.index + arrowMatch[0].length);
+		arrowIndex++;
+		arrowPlaceholderRegex.lastIndex = 0; // Reset regex
+	}
+	
 	// Replace placeholders with React components
-	const parts: (string | { type: 'code'; code: string; language: string })[] = [];
+	const parts: (string | { type: 'code'; code: string; language: string } | { type: 'arrow' })[] = [];
 	let lastIndex = 0;
+	
+	// Process code blocks and arrow placeholders together
+	const allPlaceholders: Array<{ index: number; type: 'code' | 'arrow'; placeholder: string; data?: any }> = [];
 	
 	for (const block of codeBlocks) {
 		const placeholderIndex = html.indexOf(block.placeholder);
 		if (placeholderIndex !== -1) {
-			// Add text before code block
-			if (placeholderIndex > lastIndex) {
-				parts.push(html.slice(lastIndex, placeholderIndex));
-			}
+			allPlaceholders.push({
+				index: placeholderIndex,
+				type: 'code',
+				placeholder: block.placeholder,
+				data: block
+			});
+		}
+	}
+	
+	for (const arrow of arrowPlaceholders) {
+		const placeholderIndex = html.indexOf(arrow.placeholder);
+		if (placeholderIndex !== -1) {
+			allPlaceholders.push({
+				index: placeholderIndex,
+				type: 'arrow',
+				placeholder: arrow.placeholder
+			});
+		}
+	}
+	
+	// Sort by index
+	allPlaceholders.sort((a, b) => a.index - b.index);
+	
+	for (const placeholder of allPlaceholders) {
+		if (placeholder.index > lastIndex) {
+			parts.push(html.slice(lastIndex, placeholder.index));
+		}
+		
+		if (placeholder.type === 'code' && placeholder.data) {
 			// Decode HTML entities in code before passing to CodeBlock
-			const decodedCode = block.code
+			const decodedCode = placeholder.data.code
 				.replace(/&lt;/g, '<')
 				.replace(/&gt;/g, '>')
 				.replace(/&amp;/g, '&')
 				.replace(/&quot;/g, '"')
 				.replace(/&#39;/g, "'");
-			// Add code block
 			parts.push({
 				type: 'code',
 				code: decodedCode,
-				language: block.language
+				language: placeholder.data.language
 			});
-			lastIndex = placeholderIndex + block.placeholder.length;
+		} else if (placeholder.type === 'arrow') {
+			parts.push({ type: 'arrow' });
 		}
+		
+		lastIndex = placeholder.index + placeholder.placeholder.length;
 	}
 	
 	// Add remaining text
@@ -808,9 +911,12 @@ export function LessonBody({ body }: { body: string }) {
 				{parts.map((part, idx) => {
 					if (typeof part === 'string') {
 						return <div key={idx} dangerouslySetInnerHTML={{ __html: part }} />;
-					} else {
+					} else if (part.type === 'code') {
 						return <CodeBlock key={idx} code={part.code} language={part.language} />;
+					} else if (part.type === 'arrow') {
+						return <SynapseArrow key={idx} />;
 					}
+					return null;
 				})}
 			</div>
 			<style jsx global>{`
