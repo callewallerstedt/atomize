@@ -695,6 +695,33 @@ button.synapse-style {
   /* Ensure Tailwind border-radius classes work - don't override them */
 }
 
+/* iOS/WebKit clip-path fix - use inset with rounded corners for each border-radius variant */
+button.synapse-style.rounded-full {
+  -webkit-clip-path: inset(0 round 9999px);
+  clip-path: inset(0 round 9999px);
+}
+
+button.synapse-style.rounded-lg {
+  -webkit-clip-path: inset(0 round 0.5rem);
+  clip-path: inset(0 round 0.5rem);
+}
+
+button.synapse-style.rounded-xl {
+  -webkit-clip-path: inset(0 round 0.75rem);
+  clip-path: inset(0 round 0.75rem);
+}
+
+button.synapse-style.rounded-2xl {
+  -webkit-clip-path: inset(0 round 1rem);
+  clip-path: inset(0 round 1rem);
+}
+
+/* Default fallback for buttons without specific rounded class */
+button.synapse-style:not(.rounded-full):not(.rounded-lg):not(.rounded-xl):not(.rounded-2xl) {
+  -webkit-clip-path: inset(0 round 0.5rem);
+  clip-path: inset(0 round 0.5rem);
+}
+
 .light-mode button.synapse-style {
   background: transparent !important;
 }
@@ -719,31 +746,6 @@ button.synapse-style::after {
   will-change: transform, background-position;
   transform: translateZ(0);
   -webkit-transform: translateZ(0);
-}
-
-/* Explicitly match common border-radius values for mobile compatibility */
-button.synapse-style.rounded-full::before,
-button.synapse-style.rounded-full::after {
-  border-radius: 9999px;
-  -webkit-border-radius: 9999px;
-}
-
-button.synapse-style.rounded-lg::before,
-button.synapse-style.rounded-lg::after {
-  border-radius: 0.5rem;
-  -webkit-border-radius: 0.5rem;
-}
-
-button.synapse-style.rounded-xl::before,
-button.synapse-style.rounded-xl::after {
-  border-radius: 0.75rem;
-  -webkit-border-radius: 0.75rem;
-}
-
-button.synapse-style.rounded-2xl::before,
-button.synapse-style.rounded-2xl::after {
-  border-radius: 1rem;
-  -webkit-border-radius: 1rem;
 }
 
 /* Scale blob size based on button height for better proportions */
@@ -884,6 +886,9 @@ button.synapse-style::after {
   overflow: hidden;
   isolation: isolate;
   z-index: 1;
+  /* iOS/WebKit clip-path fix for proper clipping of animated pseudo-elements */
+  -webkit-clip-path: inset(0 round 9999px);
+  clip-path: inset(0 round 9999px);
 }
 
 /* Force button text to be white - highest priority */
