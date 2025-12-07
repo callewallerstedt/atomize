@@ -147,7 +147,6 @@ function PromoCodeModal({
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [usersLoading, setUsersLoading] = useState(false);
-  const [resetLoading, setResetLoading] = useState(false);
   const [editingCode, setEditingCode] = useState<any | null>(null);
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [userCodeInput, setUserCodeInput] = useState<{ [userId: string]: string }>({});
@@ -155,6 +154,10 @@ function PromoCodeModal({
   const [userToDelete, setUserToDelete] = useState<any | null>(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deletingUser, setDeletingUser] = useState(false);
+  const [expandedUsers, setExpandedUsers] = useState<Set<string>>(new Set());
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [userSortBy, setUserSortBy] = useState<"name" | "latestOnline" | "subscriptionLevel">("latestOnline");
   const [formData, setFormData] = useState({
     code: "",
     description: "",
@@ -178,35 +181,6 @@ function PromoCodeModal({
       }
     }
   }, [open, activeTab]);
-
-  const handleResetAll = async () => {
-    if (!confirm("Are you sure you want to reset ALL user subscriptions to Free and delete ALL promo codes? This cannot be undone!")) {
-      return;
-    }
-    if (!confirm("This will affect ALL users. Are you absolutely sure?")) {
-      return;
-    }
-
-    setResetLoading(true);
-    try {
-      const res = await fetch("/api/admin/reset-subscriptions", {
-        method: "POST",
-        credentials: "include",
-      });
-      const data = await res.json();
-      if (data.ok) {
-        alert(data.summary || `Successfully reset ${data.usersUpdated} users and deleted ${data.promoCodesDeleted} promo codes.`);
-        await loadPromoCodes();
-      } else {
-        alert(data.error || "Failed to reset subscriptions");
-      }
-    } catch (err) {
-      console.error("Error resetting subscriptions:", err);
-      alert("Failed to reset subscriptions");
-    } finally {
-      setResetLoading(false);
-    }
-  };
 
   const loadPromoCodes = async () => {
     setLoading(true);
@@ -333,6 +307,7 @@ function PromoCodeModal({
   const cancelEdit = () => {
     setEditingCode(null);
     setFormData({ code: "", description: "", subscriptionLevel: "Tester", expiresAt: "", validityDays: "", maxUses: "" });
+    setShowCreateForm(false);
   };
 
   const loadUsers = async () => {
@@ -459,27 +434,87 @@ function PromoCodeModal({
     }
   };
 
+  const toggleUserExpanded = (userId: string) => {
+    setExpandedUsers(prev => {
+      const next = new Set(prev);
+      if (next.has(userId)) {
+        next.delete(userId);
+      } else {
+        next.add(userId);
+      }
+      return next;
+    });
+  };
+
+  // Filter and sort users
+  const filteredAndSortedUsers = useMemo(() => {
+    let filtered = [...users];
+
+    // Filter by search query
+    if (userSearchQuery.trim()) {
+      const query = userSearchQuery.toLowerCase().trim();
+      filtered = filtered.filter(user => 
+        user.username?.toLowerCase().includes(query) ||
+        user.email?.toLowerCase().includes(query) ||
+        user.promoCodeUsed?.toLowerCase().includes(query)
+      );
+    }
+
+    // Sort users
+    filtered.sort((a, b) => {
+      switch (userSortBy) {
+        case "name":
+          return (a.username || "").localeCompare(b.username || "");
+        
+        case "latestOnline":
+          const aTime = a.lastLoginAt ? new Date(a.lastLoginAt).getTime() : 0;
+          const bTime = b.lastLoginAt ? new Date(b.lastLoginAt).getTime() : 0;
+          return bTime - aTime; // Most recent first
+        
+        case "subscriptionLevel":
+          const levelOrder: { [key: string]: number } = {
+            "mylittlepwettybebe": 4,
+            "Tester": 3,
+            "Paid": 2,
+            "Free": 1,
+          };
+          const aLevel = levelOrder[a.subscriptionLevel] || 0;
+          const bLevel = levelOrder[b.subscriptionLevel] || 0;
+          if (bLevel !== aLevel) {
+            return bLevel - aLevel; // Higher level first
+          }
+          // If same level, sort by name
+          return (a.username || "").localeCompare(b.username || "");
+        
+        default:
+          return 0;
+      }
+    });
+
+    return filtered;
+  }, [users, userSearchQuery, userSortBy]);
+
   return (
-    <Modal open={open} onClose={onClose} title="Founders Toolbox">
-      <div className="space-y-4 pb-4">
+    <Modal open={open} onClose={onClose} title="Founders Toolbox" className="max-w-4xl">
+      <div className="space-y-6 pb-4">
         {/* Tabs */}
-        <div className="flex gap-2 border-b border-[var(--foreground)]/20">
+        <div className="flex gap-0 border-b-2 border-[var(--foreground)]/20">
           <button
             onClick={() => setActiveTab("promoCodes")}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
+            className={`relative px-6 py-3 text-sm font-semibold transition-all duration-200 border-b-2 ${
               activeTab === "promoCodes"
-                ? "text-[var(--accent-cyan)] border-b-2 border-[var(--accent-cyan)]"
-                : "text-[var(--foreground)]/60 hover:text-[var(--foreground)]"
+                ? "text-[var(--accent-cyan)] border-[var(--accent-cyan)] bg-[var(--accent-cyan)]/5"
+                : "text-[var(--foreground)]/50 hover:text-[var(--foreground)]/80 border-transparent hover:border-[var(--foreground)]/10"
             }`}
           >
             Promo Codes
           </button>
           <button
             onClick={() => setActiveTab("users")}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
+            className={`relative px-6 py-3 text-sm font-semibold transition-all duration-200 border-b-2 ${
               activeTab === "users"
-                ? "text-[var(--accent-cyan)] border-b-2 border-[var(--accent-cyan)]"
-                : "text-[var(--foreground)]/60 hover:text-[var(--foreground)]"
+                ? "text-[var(--accent-cyan)] border-[var(--accent-cyan)] bg-[var(--accent-cyan)]/5"
+                : "text-[var(--foreground)]/50 hover:text-[var(--foreground)]/80 border-transparent hover:border-[var(--foreground)]/10"
             }`}
           >
             Users
@@ -488,142 +523,248 @@ function PromoCodeModal({
 
         {/* Promo Codes Tab */}
         {activeTab === "promoCodes" && (
-          <div className="space-y-4">
-        {/* Reset All Button */}
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-red-400 mb-1">Danger Zone</h3>
-              <p className="text-xs text-[var(--foreground)]/60">
-                Reset all user subscriptions to Free and delete all promo codes
-              </p>
-            </div>
+          <div className="space-y-5">
+        {/* Create/Edit Form Toggle */}
+        {!editingCode && (
+          <div className="rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/60 overflow-hidden">
             <button
-              onClick={handleResetAll}
-              disabled={resetLoading}
-              className="px-4 py-2 rounded-full border border-red-500/50 bg-red-500/20 text-sm font-medium text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => setShowCreateForm(!showCreateForm)}
+              className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-[var(--background)]/40 transition-colors"
             >
-              {resetLoading ? "Resetting..." : "Reset All"}
+              <span className="text-base font-semibold text-[var(--foreground)]">
+                ➕ Create New Promo Code
+              </span>
+              <svg 
+                className={`w-5 h-5 text-[var(--foreground)]/40 transition-transform duration-200 ${showCreateForm ? 'rotate-180' : ''}`}
+                fill="none" 
+                viewBox="0 0 24 24" 
+                stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
             </button>
+            {showCreateForm && (
+              <div className="px-5 pb-5 pt-0 space-y-4 border-t border-[var(--foreground)]/10 animate-in slide-in-from-top-2 duration-200">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Code</label>
+                    <input
+                      type="text"
+                      value={formData.code}
+                      onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                      placeholder="PROMO123"
+                      className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Subscription Level</label>
+                    <select
+                      value={formData.subscriptionLevel}
+                      onChange={(e) => setFormData({ ...formData, subscriptionLevel: e.target.value as any })}
+                      className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                    >
+                      <option value="Free">Free</option>
+                      <option value="Paid">Premium</option>
+                      <option value="Tester">Tester</option>
+                      <option value="mylittlepwettybebe">mylittlepwettybebe</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Max Uses</label>
+                    <input
+                      type="number"
+                      value={formData.maxUses}
+                      onChange={(e) => setFormData({ ...formData, maxUses: e.target.value })}
+                      placeholder="Unlimited"
+                      className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Validity Days (Per User)</label>
+                    <input
+                      type="number"
+                      value={formData.validityDays}
+                      onChange={(e) => {
+                        setFormData({ ...formData, validityDays: e.target.value });
+                      }}
+                      placeholder="e.g., 30 (days each user gets)"
+                      min="1"
+                      className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                    />
+                    <p className="text-[10px] text-[var(--foreground)]/50 mt-1">Each user gets this many days from when they redeem (leave empty for unlimited)</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Code Expires At (Optional)</label>
+                    <input
+                      type="datetime-local"
+                      value={formData.expiresAt}
+                      onChange={(e) => {
+                        setFormData({ ...formData, expiresAt: e.target.value });
+                      }}
+                      className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                    />
+                    <p className="text-[10px] text-[var(--foreground)]/50 mt-1">When the code itself expires (can't be redeemed after this date)</p>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Description</label>
+                  <input
+                    type="text"
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    placeholder="Optional description"
+                    className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      setShowCreateForm(false);
+                      setFormData({ code: "", description: "", subscriptionLevel: "Tester", expiresAt: "", validityDays: "", maxUses: "" });
+                    }}
+                    className="px-4 py-2 rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await handleCreate();
+                      setShowCreateForm(false);
+                    }}
+                    disabled={!formData.code.trim()}
+                    className="synapse-style px-4 py-2 rounded-full text-sm font-medium !text-white transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <span style={{ color: '#ffffff', position: 'relative', zIndex: 101, opacity: 1, textShadow: 'none' }}>
+                      Create
+                    </span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
+        )}
 
-        {/* Create/Edit Form */}
-        <div className="rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/60 p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-[var(--foreground)]">
-            {editingCode ? "Edit Promo Code" : "Create New Promo Code"}
-          </h3>
-          <div className="grid grid-cols-2 gap-3">
+        {/* Edit Form */}
+        {editingCode && (
+          <div className="rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/60 p-5 space-y-4">
+            <h3 className="text-base font-semibold text-[var(--foreground)]">
+              ✏️ Edit Promo Code
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Code</label>
+                <input
+                  type="text"
+                  value={formData.code}
+                  onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                  placeholder="PROMO123"
+                  className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Subscription Level</label>
+                <select
+                  value={formData.subscriptionLevel}
+                  onChange={(e) => setFormData({ ...formData, subscriptionLevel: e.target.value as any })}
+                  className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                >
+                  <option value="Free">Free</option>
+                  <option value="Paid">Premium</option>
+                  <option value="Tester">Tester</option>
+                  <option value="mylittlepwettybebe">mylittlepwettybebe</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Max Uses</label>
+                <input
+                  type="number"
+                  value={formData.maxUses}
+                  onChange={(e) => setFormData({ ...formData, maxUses: e.target.value })}
+                  placeholder="Unlimited"
+                  className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Validity Days (Per User)</label>
+                <input
+                  type="number"
+                  value={formData.validityDays}
+                  onChange={(e) => {
+                    setFormData({ ...formData, validityDays: e.target.value });
+                  }}
+                  placeholder="e.g., 30 (days each user gets)"
+                  min="1"
+                  className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                />
+                <p className="text-[10px] text-[var(--foreground)]/50 mt-1">Each user gets this many days from when they redeem (leave empty for unlimited)</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Code Expires At (Optional)</label>
+                <input
+                  type="datetime-local"
+                  value={formData.expiresAt}
+                  onChange={(e) => {
+                    setFormData({ ...formData, expiresAt: e.target.value });
+                  }}
+                  className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                />
+                <p className="text-[10px] text-[var(--foreground)]/50 mt-1">When the code itself expires (can't be redeemed after this date)</p>
+              </div>
+            </div>
             <div>
-              <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Code</label>
+              <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Description</label>
               <input
                 type="text"
-                value={formData.code}
-                onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                placeholder="PROMO123"
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Optional description"
                 className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Subscription Level</label>
-              <select
-                value={formData.subscriptionLevel}
-                onChange={(e) => setFormData({ ...formData, subscriptionLevel: e.target.value as any })}
-                className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
-              >
-                <option value="Free">Free</option>
-                <option value="Paid">Premium</option>
-                <option value="Tester">Tester</option>
-                <option value="mylittlepwettybebe">mylittlepwettybebe</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Max Uses</label>
-              <input
-                type="number"
-                value={formData.maxUses}
-                onChange={(e) => setFormData({ ...formData, maxUses: e.target.value })}
-                placeholder="Unlimited"
-                className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Validity Days (Per User)</label>
-              <input
-                type="number"
-                value={formData.validityDays}
-                onChange={(e) => {
-                  setFormData({ ...formData, validityDays: e.target.value });
-                }}
-                placeholder="e.g., 30 (days each user gets)"
-                min="1"
-                className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
-              />
-              <p className="text-[10px] text-[var(--foreground)]/50 mt-1">Each user gets this many days from when they redeem (leave empty for unlimited)</p>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Code Expires At (Optional)</label>
-              <input
-                type="datetime-local"
-                value={formData.expiresAt}
-                onChange={(e) => {
-                  setFormData({ ...formData, expiresAt: e.target.value });
-                }}
-                className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
-              />
-              <p className="text-[10px] text-[var(--foreground)]/50 mt-1">When the code itself expires (can't be redeemed after this date)</p>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--foreground)]/70 mb-1">Description</label>
-            <input
-              type="text"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Optional description"
-              className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
-            />
-          </div>
-          <div className="flex justify-end gap-2">
-            {editingCode && (
+            <div className="flex justify-end gap-2">
               <button
                 onClick={cancelEdit}
                 className="px-4 py-2 rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
               >
                 Cancel
               </button>
-            )}
-            <button
-              onClick={editingCode ? handleUpdate : handleCreate}
-              disabled={!formData.code.trim()}
-              className="synapse-style px-4 py-2 rounded-full text-sm font-medium !text-white transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <span style={{ color: '#ffffff', position: 'relative', zIndex: 101, opacity: 1, textShadow: 'none' }}>
-                {editingCode ? "Update" : "Create"}
-              </span>
-            </button>
+              <button
+                onClick={handleUpdate}
+                disabled={!formData.code.trim()}
+                className="synapse-style px-4 py-2 rounded-full text-sm font-medium !text-white transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span style={{ color: '#ffffff', position: 'relative', zIndex: 101, opacity: 1, textShadow: 'none' }}>
+                  Update
+                </span>
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* List of Promo Codes */}
-        <div className="border-t border-[var(--foreground)]/20 pt-4">
-          <h3 className="text-sm font-semibold text-[var(--foreground)] mb-3">All Promo Codes</h3>
+        <div className="border-t border-[var(--foreground)]/20 pt-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-[var(--foreground)]">All Promo Codes</h3>
+            <div className="text-xs text-[var(--foreground)]/50">
+              {promoCodes.length} {promoCodes.length === 1 ? 'code' : 'codes'}
+            </div>
+          </div>
           {loading ? (
-            <div className="text-sm text-[var(--foreground)]/60 text-center py-4">Loading...</div>
+            <div className="text-sm text-[var(--foreground)]/60 text-center py-8">Loading promo codes...</div>
           ) : promoCodes.length === 0 ? (
-            <div className="text-sm text-[var(--foreground)]/60 text-center py-4">No promo codes yet</div>
+            <div className="text-sm text-[var(--foreground)]/60 text-center py-8">No promo codes yet</div>
           ) : (
-            <div className="space-y-3 max-h-[400px] overflow-y-auto">
+            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
               {promoCodes.map((code) => (
                 <div
                   key={code.id}
-                  className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-3"
+                  className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-4 hover:border-[var(--foreground)]/25 transition-colors"
                 >
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start justify-between gap-3">
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-sm font-semibold text-[var(--foreground)] font-mono">{code.code}</span>
-                        <span className="text-xs px-2 py-0.5 rounded bg-[var(--accent-cyan)]/20 text-[var(--accent-cyan)]">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-base font-bold text-[var(--foreground)] font-mono">{code.code}</span>
+                        <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-[var(--accent-cyan)]/20 text-[var(--accent-cyan)]">
                           {code.subscriptionLevel}
                         </span>
                       </div>
@@ -684,13 +825,13 @@ function PromoCodeModal({
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <button
                         onClick={() => startEdit(code)}
-                        className="px-3 py-1.5 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/70 text-xs text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
+                        className="px-4 py-2 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/70 text-xs font-medium text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => handleDelete(code.id)}
-                        className="px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/10 text-xs text-red-400 hover:bg-red-500/20 transition-colors"
+                        className="px-4 py-2 rounded-lg border border-red-500/30 bg-red-500/10 text-xs font-medium text-red-400 hover:bg-red-500/20 transition-colors"
                       >
                         Delete
                       </button>
@@ -709,9 +850,9 @@ function PromoCodeModal({
           <div className="space-y-4">
             {/* Edit User Form */}
             {editingUser && (
-              <div className="rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/60 p-4 space-y-3">
-                <h3 className="text-sm font-semibold text-[var(--foreground)]">
-                  Edit User: {editingUser.username}
+              <div className="rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/60 p-5 space-y-4">
+                <h3 className="text-base font-semibold text-[var(--foreground)]">
+                  ✏️ Edit User: {editingUser.username}
                 </h3>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -768,96 +909,210 @@ function PromoCodeModal({
 
             {/* Users List */}
             <div>
-              <h3 className="text-sm font-semibold text-[var(--foreground)] mb-3">All Users</h3>
-              {usersLoading ? (
-                <div className="text-sm text-[var(--foreground)]/60 text-center py-4">Loading...</div>
-              ) : users.length === 0 ? (
-                <div className="text-sm text-[var(--foreground)]/60 text-center py-4">No users found</div>
-              ) : (
-                <div className="space-y-3 max-h-[500px] overflow-y-auto">
-                  {users.map((user) => (
-                    <div
-                      key={user.id}
-                      className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-3"
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-semibold text-[var(--foreground)]">All Users</h3>
+                <div className="text-xs text-[var(--foreground)]/50">
+                  {filteredAndSortedUsers.length} {filteredAndSortedUsers.length === 1 ? 'user' : 'users'}
+                  {userSearchQuery && users.length !== filteredAndSortedUsers.length && (
+                    <span className="ml-1">of {users.length}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Search and Sort Controls */}
+              <div className="flex gap-3 mb-4">
+                <div className="flex-1 relative">
+                  <input
+                    type="text"
+                    value={userSearchQuery}
+                    onChange={(e) => setUserSearchQuery(e.target.value)}
+                    placeholder="Search by name, email, or promo code..."
+                    className="w-full rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-2.5 pl-10 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                  />
+                  <svg 
+                    className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--foreground)]/40"
+                    fill="none" 
+                    viewBox="0 0 24 24" 
+                    stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  {userSearchQuery && (
+                    <button
+                      onClick={() => setUserSearchQuery("")}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--foreground)]/40 hover:text-[var(--foreground)]/60"
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm font-semibold text-[var(--foreground)]">{user.username}</span>
-                            <span className={`text-xs px-2 py-0.5 rounded ${
-                              user.subscriptionLevel === "Tester" ? "bg-[var(--accent-cyan)]/20 text-[var(--accent-cyan)]" :
-                              user.subscriptionLevel === "Paid" ? "bg-[var(--accent-pink)]/20 text-[var(--accent-pink)]" :
-                              user.subscriptionLevel === "mylittlepwettybebe" ? "bg-[var(--accent-pink)]/20 text-[var(--accent-pink)]" :
-                              "bg-[var(--foreground)]/20 text-[var(--foreground)]/70"
-                            }`}>
-                              {user.subscriptionLevel === "Paid" ? "Premium" : user.subscriptionLevel}
-                            </span>
-                          </div>
-                          <div className="text-xs text-[var(--foreground)]/60 space-y-0.5">
-                            {user.email && (
-                              <div>Email: {user.email}</div>
-                            )}
-                            {user.promoCodeUsed && (
-                              <div>Promo Code: <span className="font-mono">{user.promoCodeUsed}</span></div>
-                            )}
-                            {user.subscriptionStart && (
-                              <div>Start: {new Date(user.subscriptionStart).toLocaleString()}</div>
-                            )}
-                            {user.subscriptionEnd && (
-                              <div>Ends: {new Date(user.subscriptionEnd).toLocaleString()}</div>
-                            )}
-                            {user.lastLoginAt && (
-                              <div>Last Online: {new Date(user.lastLoginAt).toLocaleString()}</div>
-                            )}
-                            <div>Created: {new Date(user.createdAt).toLocaleString()}</div>
-                          </div>
-                          {/* Redeem Code Input */}
-                          <div className="mt-2 pt-2 border-t border-[var(--foreground)]/10">
-                            <div className="flex gap-2">
-                              <input
-                                type="text"
-                                value={userCodeInput[user.id] || ""}
-                                onChange={(e) => setUserCodeInput({ ...userCodeInput, [user.id]: e.target.value })}
-                                placeholder="Enter promo code"
-                                className="flex-1 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-1.5 text-xs text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    handleRedeemCodeForUser(user.id, userCodeInput[user.id] || "");
-                                  }
-                                }}
-                              />
-                              <button
-                                onClick={() => handleRedeemCodeForUser(user.id, userCodeInput[user.id] || "")}
-                                className="synapse-style px-3 py-1.5 rounded-lg text-xs font-medium !text-white"
-                              >
-                                <span style={{ color: '#ffffff', position: 'relative', zIndex: 101, opacity: 1, textShadow: 'none' }}>
-                                  Redeem
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                <select
+                  value={userSortBy}
+                  onChange={(e) => setUserSortBy(e.target.value as "name" | "latestOnline" | "subscriptionLevel")}
+                  className="rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-4 py-2.5 text-sm text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                >
+                  <option value="latestOnline">Latest Online</option>
+                  <option value="name">Name (A-Z)</option>
+                  <option value="subscriptionLevel">Subscription Level</option>
+                </select>
+              </div>
+
+              {usersLoading ? (
+                <div className="text-sm text-[var(--foreground)]/60 text-center py-8">Loading users...</div>
+              ) : users.length === 0 ? (
+                <div className="text-sm text-[var(--foreground)]/60 text-center py-8">No users found</div>
+              ) : filteredAndSortedUsers.length === 0 ? (
+                <div className="text-sm text-[var(--foreground)]/60 text-center py-8">No users match your search</div>
+              ) : (
+                <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+                  {filteredAndSortedUsers.map((user) => {
+                    const isExpanded = expandedUsers.has(user.id);
+                    return (
+                      <div
+                        key={user.id}
+                        className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden transition-all duration-200 hover:border-[var(--foreground)]/25"
+                      >
+                        {/* Collapsed Summary View */}
+                        <div 
+                          className="p-4 cursor-pointer"
+                          onClick={() => toggleUserExpanded(user.id)}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-[var(--accent-cyan)]/20 flex items-center justify-center">
+                                <span className="text-sm font-bold text-[var(--accent-cyan)]">
+                                  {user.username?.[0]?.toUpperCase() || '?'}
                                 </span>
-                              </button>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-sm font-semibold text-[var(--foreground)] truncate">{user.username}</span>
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
+                                    user.subscriptionLevel === "Tester" ? "bg-[var(--accent-cyan)]/20 text-[var(--accent-cyan)]" :
+                                    user.subscriptionLevel === "Paid" ? "bg-[var(--accent-pink)]/20 text-[var(--accent-pink)]" :
+                                    user.subscriptionLevel === "mylittlepwettybebe" ? "bg-[var(--accent-pink)]/20 text-[var(--accent-pink)]" :
+                                    "bg-[var(--foreground)]/20 text-[var(--foreground)]/70"
+                                  }`}>
+                                    {user.subscriptionLevel === "Paid" ? "Premium" : user.subscriptionLevel}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-[var(--foreground)]/50 truncate">
+                                  {user.email || 'No email'}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <svg 
+                                className={`w-5 h-5 text-[var(--foreground)]/40 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}
+                                fill="none" 
+                                viewBox="0 0 24 24" 
+                                stroke="currentColor"
+                              >
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                              </svg>
                             </div>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <button
-                            onClick={() => startEditUser(user)}
-                            className="px-3 py-1.5 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/70 text-xs text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => {
-                              setUserToDelete(user);
-                              setDeleteConfirmText("");
-                              setDeleteConfirmOpen(true);
-                            }}
-                            className="px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/10 text-xs text-red-500 hover:bg-red-500/20 transition-colors"
-                          >
-                            Delete
-                          </button>
-                        </div>
+
+                        {/* Expanded Details View */}
+                        {isExpanded && (
+                          <div className="px-4 pb-4 pt-0 border-t border-[var(--foreground)]/10 space-y-4 animate-in slide-in-from-top-2 duration-200">
+                            <div className="grid grid-cols-2 gap-4 pt-4">
+                              <div className="space-y-2">
+                                <div className="text-xs font-medium text-[var(--foreground)]/70">Email</div>
+                                <div className="text-xs text-[var(--foreground)]/90">{user.email || 'N/A'}</div>
+                              </div>
+                              {user.promoCodeUsed && (
+                                <div className="space-y-2">
+                                  <div className="text-xs font-medium text-[var(--foreground)]/70">Promo Code</div>
+                                  <div className="text-xs text-[var(--foreground)]/90 font-mono">{user.promoCodeUsed}</div>
+                                </div>
+                              )}
+                              {user.subscriptionStart && (
+                                <div className="space-y-2">
+                                  <div className="text-xs font-medium text-[var(--foreground)]/70">Subscription Start</div>
+                                  <div className="text-xs text-[var(--foreground)]/90">{new Date(user.subscriptionStart).toLocaleString()}</div>
+                                </div>
+                              )}
+                              {user.subscriptionEnd && (
+                                <div className="space-y-2">
+                                  <div className="text-xs font-medium text-[var(--foreground)]/70">Subscription End</div>
+                                  <div className="text-xs text-[var(--foreground)]/90">{new Date(user.subscriptionEnd).toLocaleString()}</div>
+                                </div>
+                              )}
+                              {user.lastLoginAt && (
+                                <div className="space-y-2">
+                                  <div className="text-xs font-medium text-[var(--foreground)]/70">Last Online</div>
+                                  <div className="text-xs text-[var(--foreground)]/90">{new Date(user.lastLoginAt).toLocaleString()}</div>
+                                </div>
+                              )}
+                              <div className="space-y-2">
+                                <div className="text-xs font-medium text-[var(--foreground)]/70">Created</div>
+                                <div className="text-xs text-[var(--foreground)]/90">{new Date(user.createdAt).toLocaleString()}</div>
+                              </div>
+                            </div>
+                            
+                            {/* Redeem Code Input */}
+                            <div className="pt-2 border-t border-[var(--foreground)]/10">
+                              <div className="text-xs font-medium text-[var(--foreground)]/70 mb-2">Redeem Promo Code</div>
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={userCodeInput[user.id] || ""}
+                                  onChange={(e) => setUserCodeInput({ ...userCodeInput, [user.id]: e.target.value })}
+                                  placeholder="Enter promo code"
+                                  className="flex-1 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/80 px-3 py-2 text-xs text-[var(--foreground)] focus:border-[var(--accent-cyan)] focus:outline-none"
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      handleRedeemCodeForUser(user.id, userCodeInput[user.id] || "");
+                                    }
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRedeemCodeForUser(user.id, userCodeInput[user.id] || "");
+                                  }}
+                                  className="synapse-style px-4 py-2 rounded-lg text-xs font-medium !text-white flex-shrink-0"
+                                >
+                                  <span style={{ color: '#ffffff', position: 'relative', zIndex: 101, opacity: 1, textShadow: 'none' }}>
+                                    Redeem
+                                  </span>
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="flex gap-2 pt-2 border-t border-[var(--foreground)]/10">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  startEditUser(user);
+                                }}
+                                className="flex-1 px-4 py-2 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/70 text-xs font-medium text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
+                              >
+                                Edit User
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setUserToDelete(user);
+                                  setDeleteConfirmText("");
+                                  setDeleteConfirmOpen(true);
+                                }}
+                                className="flex-1 px-4 py-2 rounded-lg border border-red-500/30 bg-red-500/10 text-xs font-medium text-red-400 hover:bg-red-500/20 transition-colors"
+                              >
+                                Delete User
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

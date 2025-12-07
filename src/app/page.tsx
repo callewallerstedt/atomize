@@ -515,31 +515,45 @@ function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn }: { t
   const isCreatingCourseRef = useRef(false);
 
   const [subscriptionLevel, setSubscriptionLevel] = useState<string | null>(null);
-  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true); // Start as true to prevent flash
 
   const hasPremiumAccess =
     subscriptionLevel === "Tester" ||
     subscriptionLevel === "Paid" ||
     subscriptionLevel === "mylittlepwettybebe";
 
+  // Store me data in a ref to share between subscription check and welcome message
+  const meDataRef = useRef<any>(null);
+  
   useEffect(() => {
-    // Fetch subscription level for gating premium features on the homepage
-    setSubscriptionLoading(true);
-    fetch("/api/me", { credentials: "include" })
-      .then((r) => r.json().catch(() => ({})))
-      .then((data) => {
-        if (data?.user?.subscriptionLevel) {
-          setSubscriptionLevel(data.user.subscriptionLevel);
-        } else {
+    // Fetch subscription level immediately but don't block UI rendering
+    // Use requestIdleCallback or setTimeout to avoid blocking, but start immediately
+    const fetchSubscription = () => {
+      fetch("/api/me", { credentials: "include" })
+        .then((r) => r.json().catch(() => ({})))
+        .then((data) => {
+          meDataRef.current = data; // Store for welcome message to reuse
+          if (data?.user?.subscriptionLevel) {
+            setSubscriptionLevel(data.user.subscriptionLevel);
+          } else {
+            setSubscriptionLevel("Free");
+          }
+        })
+        .catch(() => {
           setSubscriptionLevel("Free");
-        }
-      })
-      .catch(() => {
-        setSubscriptionLevel("Free");
-      })
-      .finally(() => {
-        setSubscriptionLoading(false);
-      });
+        })
+        .finally(() => {
+          setSubscriptionLoading(false);
+        });
+    };
+    
+    // Start immediately but use microtask to not block initial render
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(fetchSubscription, { timeout: 0 });
+    } else {
+      // Use setTimeout with 0 delay to make it async but start immediately
+      setTimeout(fetchSubscription, 0);
+    }
   }, []);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -807,7 +821,9 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     if (hasStreamed.current || typeof window === "undefined") return;
     hasStreamed.current = true;
 
-    // Set streaming immediately so spinner shows right away
+    // Set name and placeholder message immediately so they appear together
+    setAiName("Chad");
+    setHomepageMessages([{ role: 'assistant', content: '', isLoading: true }]);
     setIsStreaming(true);
     setWelcomeText("");
 
@@ -815,20 +831,27 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     const startStreaming = () => {
       const generateWelcome = async () => {
         try {
-          // Fetch user info including lastLoginAt and preferredTitle
+          // Reuse me data from subscription check if available, otherwise fetch
           let lastLoginAt: string | null = null;
           let preferredTitle: string | null = null;
-          try {
-            const meRes = await fetch("/api/me", { credentials: "include" });
-            const meData = await meRes.json().catch(() => ({}));
-            if (meData?.user?.lastLoginAt) {
-              lastLoginAt = meData.user.lastLoginAt;
-            }
-            const prefs = meData?.user?.preferences;
-            if (prefs && typeof prefs === "object" && prefs.preferredTitle) {
-              preferredTitle = prefs.preferredTitle;
-            }
-          } catch {}
+          let meData = meDataRef.current;
+          
+          if (!meData) {
+            // If subscription check hasn't completed yet, fetch it
+            try {
+              const meRes = await fetch("/api/me", { credentials: "include" });
+              meData = await meRes.json().catch(() => ({}));
+              meDataRef.current = meData; // Cache it
+            } catch {}
+          }
+          
+          if (meData?.user?.lastLoginAt) {
+            lastLoginAt = meData.user.lastLoginAt;
+          }
+          const prefs = meData?.user?.preferences;
+          if (prefs && typeof prefs === "object" && prefs.preferredTitle) {
+            preferredTitle = prefs.preferredTitle;
+          }
 
           const now = new Date();
           const hours = now.getHours();
@@ -865,10 +888,6 @@ Surge is for those who want to minimize friction and get results fast. I will pr
           if (reader) {
             let fullText = "";
             let name = "";
-            
-            // Add message placeholder immediately with same format to prevent size changes
-            setHomepageMessages([{ role: 'assistant', content: '' }]);
-            setAiName(""); // Will be set when name arrives
 
             let lastUpdateTime = 0;
             const updateThrottle = 16; // ~60fps (16ms)
@@ -877,12 +896,13 @@ Surge is for those who want to minimize friction and get results fast. I will pr
               const now = Date.now();
               if (now - lastUpdateTime >= updateThrottle) {
                 lastUpdateTime = now;
+                // Update both welcomeText (for isWelcomeMessage check) and messages array
                 setWelcomeText(text);
                 setHomepageMessages((prev) => {
                   if (prev.length === 0 || prev[0].role !== 'assistant') {
-                    return [{ role: 'assistant', content: text }];
+                    return [{ role: 'assistant', content: text, isLoading: false }];
                   }
-                  return [{ ...prev[0], content: text }, ...prev.slice(1)];
+                  return [{ ...prev[0], content: text, isLoading: false }, ...prev.slice(1)];
                 });
               }
             };
@@ -911,9 +931,9 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     setIsStreaming(false);
                     setHomepageMessages((prev) => {
                       if (prev.length === 0 || prev[0].role !== 'assistant') {
-                        return [{ role: 'assistant', content: fullText }];
+                        return [{ role: 'assistant', content: fullText, isLoading: false }];
                       }
-                      return [{ ...prev[0], content: fullText }, ...prev.slice(1)];
+                      return [{ ...prev[0], content: fullText, isLoading: false }, ...prev.slice(1)];
                     });
                   }
                 } catch {}
@@ -926,12 +946,18 @@ Surge is for those who want to minimize friction and get results fast. I will pr
               setIsStreaming(false);
               setHomepageMessages((prev) => {
                 if (prev.length === 0 || prev[0].role !== 'assistant') {
-                  return [{ role: 'assistant', content: fullText }];
+                  return [{ role: 'assistant', content: fullText, isLoading: false }];
                 }
-                return [{ ...prev[0], content: fullText }, ...prev.slice(1)];
+                return [{ ...prev[0], content: fullText, isLoading: false }, ...prev.slice(1)];
               });
             } else {
               setIsStreaming(false);
+              setHomepageMessages((prev) => {
+                if (prev.length > 0 && prev[0].role === 'assistant') {
+                  return [{ ...prev[0], isLoading: false }, ...prev.slice(1)];
+                }
+                return prev;
+              });
             }
           }
         } catch (e: any) {
@@ -943,11 +969,38 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       generateWelcome();
     };
 
-    // Use requestAnimationFrame to ensure page is rendered, then start streaming
-    requestAnimationFrame(() => {
-      // Small delay to ensure user sees the page before streaming starts
-      setTimeout(startStreaming, 100);
-    });
+    // Start welcome message streaming immediately but non-blocking
+    // Use requestIdleCallback if available for better performance
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(() => {
+        if (document.visibilityState === "visible") {
+          startStreaming();
+        } else {
+          const handleVisibilityChange = () => {
+            if (document.visibilityState === "visible") {
+              startStreaming();
+              document.removeEventListener("visibilitychange", handleVisibilityChange);
+            }
+          };
+          document.addEventListener("visibilitychange", handleVisibilityChange);
+        }
+      }, { timeout: 0 }); // Start immediately
+    } else {
+      // Fallback: start immediately with minimal delay
+      setTimeout(() => {
+        if (document.visibilityState === "visible") {
+          startStreaming();
+        } else {
+          const handleVisibilityChange = () => {
+            if (document.visibilityState === "visible") {
+              startStreaming();
+              document.removeEventListener("visibilitychange", handleVisibilityChange);
+            }
+          };
+          document.addEventListener("visibilitychange", handleVisibilityChange);
+        }
+      }, 0); // Start immediately
+    }
   }, []);
 
   // Parse UI elements and actions from Chad's messages
@@ -2717,9 +2770,104 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     };
   }, [cleanupMediaStream, stopActiveRecording]);
 
-  // Don't render until subscription level is loaded to prevent flash
+  // Show skeleton/ghost shapes while loading to prevent flash of wrong UI
   if (subscriptionLoading) {
-    return null;
+    return (
+      <div className="mx-auto mb-6 w-full max-w-3xl" style={{ overflowY: 'visible' }}>
+        {/* Skeleton name header - matches actual spacing */}
+        <div className="mb-1.5 flex items-center justify-between gap-3">
+          <div className="text-xs text-[var(--foreground)]/60 font-medium animate-pulse" style={{ opacity: 0.3 }}>
+            <div className="h-3 w-16 bg-[var(--foreground)]/20 rounded"></div>
+          </div>
+        </div>
+
+        {/* Skeleton welcome message bubble - matches exact styling */}
+        <div className="flex justify-start">
+          <div 
+            className="chat-bubble-assistant max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10 animate-pulse"
+            style={{ 
+              backgroundColor: 'color-mix(in srgb, var(--foreground) 4%, transparent)',
+              opacity: 0.3,
+              minHeight: '40px',
+              width: 'auto',
+              maxWidth: '80%'
+            }}
+          >
+            <div className="text-sm text-[var(--foreground)]/90 leading-relaxed" style={{ minHeight: '1.5rem' }}>
+              <div className="space-y-1.5">
+                <div className="h-3 bg-[var(--foreground)]/20 rounded" style={{ width: '85%' }}></div>
+                <div className="h-3 bg-[var(--foreground)]/20 rounded" style={{ width: '70%' }}></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Skeleton chat input area - matches exact styling */}
+        <div className="mt-3 w-full max-w-2xl mx-auto" style={{ width: '80%', overflowY: 'visible' }}>
+          <div 
+            className="chat-input-container flex items-center gap-2 pl-0 pr-2 py-2 border border-[var(--foreground)]/10 animate-pulse"
+            style={{
+              backgroundColor: 'color-mix(in srgb, var(--foreground) 4%, transparent)',
+              opacity: 0.3,
+              boxShadow: "none",
+              borderRadius: "1.5rem",
+              overflow: 'visible'
+            }}
+          >
+            <div className="flex-1 relative min-w-0 flex items-center">
+              <div className="w-8 h-8 rounded-full bg-[var(--foreground)]/20 ml-1.5" style={{ opacity: 0.3 }}></div>
+              <div className="flex-1 h-4 bg-[var(--foreground)]/20 rounded ml-2" style={{ opacity: 0.3 }}></div>
+            </div>
+            <div className="w-8 h-8 rounded-full bg-[var(--foreground)]/20" style={{ opacity: 0.3 }}></div>
+          </div>
+
+          {/* Skeleton pill buttons - matches exact styling */}
+          <div 
+            className="mt-2 w-full relative pills-scroll-container" 
+            style={{ 
+              overflowX: 'auto', 
+              overflowY: 'visible', 
+              scrollbarWidth: 'none', 
+              msOverflowStyle: 'none', 
+              WebkitOverflowScrolling: 'touch', 
+              paddingTop: '12px', 
+              paddingBottom: '12px', 
+              paddingLeft: '16px', 
+              paddingRight: '16px' 
+            }}
+          >
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '0.5rem', 
+              flexWrap: 'nowrap', 
+              width: 'max-content',
+              position: 'relative'
+            }}>
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div
+                  key={i}
+                  className="pill-button rounded-full border border-[var(--foreground)]/10 animate-pulse"
+                  style={{
+                    backgroundColor: 'color-mix(in srgb, var(--foreground) 4%, transparent)',
+                    opacity: 0.3,
+                    height: '28px',
+                    paddingLeft: '12px',
+                    paddingRight: '12px',
+                    paddingTop: '4px',
+                    paddingBottom: '4px',
+                    width: i === 1 ? '100px' : i === 2 ? '90px' : i === 3 ? '85px' : i === 4 ? '80px' : '60px',
+                    flexShrink: 0,
+                    whiteSpace: 'nowrap',
+                    minWidth: 'fit-content'
+                  }}
+                ></div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // If user does not have premium (Free or unknown), show a focused upgrade screen instead of interactive chat
@@ -2803,16 +2951,9 @@ Surge is for those who want to minimize friction and get results fast. I will pr
           )}
         </div>
       )}
-      {homepageMessages.length === 0 && !isStreaming && welcomeText ? (
+      {/* Removed duplicate welcome message rendering - now only rendered from homepageMessages array */}
+      {homepageMessages.length === 0 && !isStreaming && welcomeText && !hasPremiumAccess ? (
         <>
-          <div 
-            className="chat-bubble-assistant max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10"
-            style={{ minHeight: '40px' }}
-          >
-            <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
-              {renderTextWithSynapse(welcomeText)}
-            </div>
-          </div>
           {!hasPremiumAccess && (
             <div className="mt-4 w-full max-w-2xl mx-auto">
               <div className="relative overflow-hidden rounded-2xl border border-[var(--foreground)]/15 bg-gradient-to-r from-[var(--background)]/90 via-[var(--background)] to-[var(--background)]/90 px-4 py-3 flex items-center gap-3">
@@ -2984,8 +3125,9 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       ) : (
         <div className="space-y-3">
           {homepageMessages.map((m, i) => {
-            // Check if this is the welcome message (first assistant message)
-            const isWelcomeMessage = i === 0 && m.role === 'assistant' && m.content === welcomeText;
+            // Check if this is the welcome message (first assistant message in the array)
+            // Use index-based check to avoid flash from state sync issues between welcomeText and m.content
+            const isWelcomeMessage = i === 0 && m.role === 'assistant';
             
             return (
               <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
@@ -3003,21 +3145,24 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                 ) : (
                   <div 
                     className="chat-bubble-assistant max-w-[80%] inline-block px-3 py-1.5 rounded-2xl border border-[var(--foreground)]/10"
+                    style={{ minHeight: '40px' }}
                   >
-                    <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
+                    <div className="text-sm text-[var(--foreground)]/90 leading-relaxed" style={{ minHeight: '1.5rem' }}>
                       {m.isLoading ? (
-                        <div className="flex items-center justify-center py-2">
-                          <GlowSpinner size={24} inline ariaLabel="Generating response" idSuffix={`home-msg-${i}`} style={{ margin: 0 }} />
+                        <div className="flex items-center gap-2" style={{ minHeight: '1.5rem' }}>
+                          <span className="inline-block w-2 h-2 bg-[var(--foreground)]/60 rounded-full animate-pulse" style={{ lineHeight: '1.5rem' }}></span>
                         </div>
                       ) : isCreatingCourse && i === homepageMessages.length - 1 ? (
                         <div className="flex items-center gap-2">
                           <span className="inline-block w-2 h-2 bg-white/60 rounded-full animate-pulse"></span>
                           Creating course...
                         </div>
-                      ) : m.content === '' && isStreaming && i === 0 ? (
-                        <div className="flex items-center gap-2">
-                          <span className="inline-block w-2 h-2 bg-[var(--foreground)]/60 rounded-full animate-pulse"></span>
+                      ) : (!m.content || m.content.trim() === '') && (isStreaming || m.isLoading) ? (
+                        <div className="flex items-center gap-2" style={{ minHeight: '1.5rem' }}>
+                          <span className="inline-block w-2 h-2 bg-[var(--foreground)]/60 rounded-full animate-pulse" style={{ lineHeight: '1.5rem' }}></span>
                         </div>
+                      ) : !m.content || m.content.trim() === '' ? (
+                        <span style={{ opacity: 0 }}>&nbsp;</span>
                       ) : isWelcomeMessage ? (
                         renderTextWithSynapse(m.content)
                       ) : (
@@ -3296,76 +3441,100 @@ function Home() {
         
         // If authenticated, load subjects from server
         if (authenticated) {
-          try {
-            const subjectsRes = await fetch("/api/subjects", { credentials: "include" });
-            const subjectsJson = await subjectsRes.json().catch(() => ({}));
+          // Load subjects immediately from localStorage first for instant display
+          const localSubjects = readSubjects();
+          const filteredLocal = localSubjects.filter((s: Subject) => s.slug !== "quicklearn");
+          if (filteredLocal.length > 0) {
+            setSubjects(filteredLocal);
+          }
+          
+          // Defer server sync to avoid blocking initial render
+          // Use requestIdleCallback if available, otherwise setTimeout
+          const syncWithServer = async () => {
+            try {
+              const subjectsRes = await fetch("/api/subjects", { credentials: "include" });
+              const subjectsJson = await subjectsRes.json().catch(() => ({}));
               if (subjectsRes.ok && Array.isArray(subjectsJson?.subjects)) {
-              // Filter out quicklearn from homepage
-              const filteredSubjects = subjectsJson.subjects.filter((s: Subject) => s.slug !== "quicklearn");
-              // Update localStorage with server subjects
-              localStorage.setItem("atomicSubjects", JSON.stringify(subjectsJson.subjects));
-              setSubjects(filteredSubjects);
-              
-              // Also sync subject data from server
-              // CRITICAL: Merge server data with localStorage, don't overwrite
-              // This preserves edited timestamps in SurgeLog
-              for (const subject of subjectsJson.subjects) {
-                try {
-                  const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(subject.slug)}`, { credentials: "include" });
-                  const dataJson = await dataRes.json().catch(() => ({}));
-                  if (dataRes.ok && dataJson?.data) {
-                    const serverData = dataJson.data as StoredSubjectData;
-                    const localData = loadSubjectData(subject.slug);
-                    
-                    // If local surgeLog is explicitly empty (was cleared), use that instead of server
-                    // Check if localData exists and surgeLog is explicitly set to empty array (not undefined)
-                    const useLocalSurgeLog = localData && localData.surgeLog !== undefined && Array.isArray(localData.surgeLog) && localData.surgeLog.length === 0;
-                    
-                    // If we have local data, merge intelligently to preserve edited timestamps
-                    if (!useLocalSurgeLog && localData?.surgeLog && serverData?.surgeLog) {
-                      // Create a map of local surgeLog entries by sessionId to preserve edited timestamps
-                      const localSurgeLogMap = new Map<string, any>();
-                      localData.surgeLog.forEach((entry: any) => {
-                        localSurgeLogMap.set(entry.sessionId, entry);
-                      });
-                      
-                      // Merge: use local timestamps if they exist (may have been edited), otherwise use server
-                      const mergedSurgeLog = serverData.surgeLog.map((serverEntry: any) => {
-                        const localEntry = localSurgeLogMap.get(serverEntry.sessionId);
-                        if (localEntry) {
-                          // Preserve local timestamp (may have been edited by user)
-                          return {
-                            ...serverEntry,
-                            timestamp: localEntry.timestamp
-                          };
+                // Filter out quicklearn from homepage
+                const filteredSubjects = subjectsJson.subjects.filter((s: Subject) => s.slug !== "quicklearn");
+                // Update localStorage with server subjects
+                localStorage.setItem("atomicSubjects", JSON.stringify(subjectsJson.subjects));
+                setSubjects(filteredSubjects);
+                
+                // Sync subject data from server in parallel (non-blocking)
+                // Use Promise.allSettled to fetch all in parallel without blocking
+                Promise.allSettled(
+                  subjectsJson.subjects.map(async (subject: Subject) => {
+                    try {
+                      const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(subject.slug)}`, { credentials: "include" });
+                      const dataJson = await dataRes.json().catch(() => ({}));
+                      if (dataRes.ok && dataJson?.data) {
+                        const serverData = dataJson.data as StoredSubjectData;
+                        const localData = loadSubjectData(subject.slug);
+                        
+                        // If local surgeLog is explicitly empty (was cleared), use that instead of server
+                        // Check if localData exists and surgeLog is explicitly set to empty array (not undefined)
+                        const useLocalSurgeLog = localData && localData.surgeLog !== undefined && Array.isArray(localData.surgeLog) && localData.surgeLog.length === 0;
+                        
+                        // If we have local data, merge intelligently to preserve edited timestamps
+                        if (!useLocalSurgeLog && localData?.surgeLog && serverData?.surgeLog) {
+                          // Create a map of local surgeLog entries by sessionId to preserve edited timestamps
+                          const localSurgeLogMap = new Map<string, any>();
+                          localData.surgeLog.forEach((entry: any) => {
+                            localSurgeLogMap.set(entry.sessionId, entry);
+                          });
+                          
+                          // Merge: use local timestamps if they exist (may have been edited), otherwise use server
+                          const mergedSurgeLog = serverData.surgeLog.map((serverEntry: any) => {
+                            const localEntry = localSurgeLogMap.get(serverEntry.sessionId);
+                            if (localEntry) {
+                              // Preserve local timestamp (may have been edited by user)
+                              return {
+                                ...serverEntry,
+                                timestamp: localEntry.timestamp
+                              };
+                            }
+                            return serverEntry;
+                          });
+                          
+                          // Also add any local entries that don't exist on server
+                          localData.surgeLog.forEach((localEntry: any) => {
+                            if (!serverData.surgeLog || !serverData.surgeLog.find((e: any) => e.sessionId === localEntry.sessionId)) {
+                              mergedSurgeLog.push(localEntry);
+                            }
+                          });
+                          
+                          // Use merged surgeLog
+                          serverData.surgeLog = mergedSurgeLog;
                         }
-                        return serverEntry;
-                      });
-                      
-                      // Also add any local entries that don't exist on server
-                      localData.surgeLog.forEach((localEntry: any) => {
-                        if (!serverData.surgeLog || !serverData.surgeLog.find((e: any) => e.sessionId === localEntry.sessionId)) {
-                          mergedSurgeLog.push(localEntry);
-                        }
-                      });
-                      
-                      // Use merged surgeLog
-                      serverData.surgeLog = mergedSurgeLog;
-                    }
-                    
-                    // Merge other fields: prefer local if it exists and is more recent
-                    const mergedData: StoredSubjectData = {
-                      ...serverData,
-                      ...(localData || {}),
-                      surgeLog: useLocalSurgeLog ? [] : (serverData?.surgeLog || localData?.surgeLog || [])
-                    };
-                    
-                    localStorage.setItem(`atomicSubjectData:${subject.slug}`, JSON.stringify(mergedData));
-                  }
-                } catch {}
+                        
+                        // Merge other fields: prefer local if it exists and is more recent
+                        const mergedData: StoredSubjectData = {
+                          ...serverData,
+                          ...(localData || {}),
+                          surgeLog: useLocalSurgeLog ? [] : (serverData?.surgeLog || localData?.surgeLog || [])
+                        };
+                        
+                        localStorage.setItem(`atomicSubjectData:${subject.slug}`, JSON.stringify(mergedData));
+                      }
+                    } catch {}
+                  })
+                );
               }
-            }
-          } catch {}
+            } catch {}
+          };
+          
+          // Defer server sync to avoid blocking initial render
+          if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            (window as any).requestIdleCallback(syncWithServer, { timeout: 2000 });
+          } else {
+            setTimeout(syncWithServer, 100);
+          }
+        } else {
+          // Not authenticated - load from localStorage immediately
+          const localSubjects = readSubjects();
+          const filteredLocal = localSubjects.filter((s: Subject) => s.slug !== "quicklearn");
+          setSubjects(filteredLocal);
         }
       })
       .catch(() => {
@@ -4499,17 +4668,15 @@ function Home() {
         }}
       />
       <div className="relative z-10">
-        {subscriptionLoading ? null : (
-          <>
-            <WelcomeMessage 
-            tutorialSignal={tutorialSignal}
-            setTutorialSignal={setTutorialSignal}
-            onQuickLearn={(query) => {
-              setQuickLearnQuery(query);
-              handleQuickLearn();
-            }}
-          />
-          <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
+        <WelcomeMessage 
+          tutorialSignal={tutorialSignal}
+          setTutorialSignal={setTutorialSignal}
+          onQuickLearn={(query) => {
+            setQuickLearnQuery(query);
+            handleQuickLearn();
+          }}
+        />
+        <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-semibold text-[var(--foreground)]">Your subjects</h1>
           {!hasPremiumAccess && (
@@ -4910,8 +5077,6 @@ function Home() {
           </div>
         </div>
       )}
-          </>
-        )}
 
       {/* Sniped exams section removed per user request */}
 
