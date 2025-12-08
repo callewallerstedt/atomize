@@ -21,6 +21,7 @@ import {
 } from "@/utils/storage";
 import LarsCoach from "@/components/LarsCoach";
 import GlowSpinner from "@/components/GlowSpinner";
+import VideoModal from "@/components/VideoModal";
 
 // Regex patterns moved inside component to avoid any global scope issues
 
@@ -80,6 +81,7 @@ export default function NodePage({ lessonIndexFromUrl }: { lessonIndexFromUrl?: 
   const previewCacheRef = useRef<Map<string, string>>(new Map()); // Cache of preview audio URLs
   const [larsOpen, setLarsOpen] = useState(false);
   const [practiceOpen, setPracticeOpen] = useState(false);
+  const [videoModalOpen, setVideoModalOpen] = useState(false);
 const [flashcardOptionsOpen, setFlashcardOptionsOpen] = useState(false);
 const [flashcardModalOpen, setFlashcardModalOpen] = useState(false);
 const [generatingFlashcards, setGeneratingFlashcards] = useState(false);
@@ -2582,6 +2584,16 @@ function toggleStar(flashcardId: string) {
                   <>
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-sm text-[var(--foreground)]/70">{content.lessonsMeta?.[activeLessonIndex]?.title}</div>
+                      <button
+                        onClick={() => setVideoModalOpen(true)}
+                        className="find-videos-btn inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 transition-all text-xs font-medium"
+                        title="Find YouTube videos about this topic"
+                      >
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                        </svg>
+                        Find Videos
+                      </button>
                     </div>
                     {lessonMetadata && (
                       <div className="mb-6 rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4 space-y-4">
@@ -4139,6 +4151,35 @@ function toggleStar(flashcardId: string) {
       </div>
     )}
     <LarsCoach open={larsOpen} onClose={() => setLarsOpen(false)} />
+    
+    {/* Video Modal for finding YouTube videos */}
+    <VideoModal
+      open={videoModalOpen}
+      onClose={() => setVideoModalOpen(false)}
+      lessonTitle={content?.lessons[activeLessonIndex]?.title || content?.lessonsMeta?.[activeLessonIndex]?.title || title}
+      lessonSummary={lessonMetadata?.summary || content?.overview}
+      lessonBody={content?.lessons[activeLessonIndex]?.body}
+      courseName={subjectData?.subject || slug}
+      courseContext={title}
+      slug={slug}
+      nodeName={title}
+      lessonIndex={activeLessonIndex}
+      onVideosSaved={() => {
+        // Reload content to show saved videos
+        const updatedData = loadSubjectData(slug);
+        if (updatedData?.nodes?.[title]) {
+          const nodeContent = updatedData.nodes[title] as any;
+          if (nodeContent && typeof nodeContent === 'object') {
+            setContent({
+              overview: nodeContent.overview || "",
+              symbols: Array.isArray(nodeContent.symbols) ? nodeContent.symbols : [],
+              lessons: Array.isArray(nodeContent.lessons) ? nodeContent.lessons : [],
+              lessonsMeta: Array.isArray(nodeContent.lessonsMeta) ? nodeContent.lessonsMeta : [],
+            });
+          }
+        }
+      }}
+    />
     
     {/* Floating TTS Playback Controls */}
     {(isPlaying || isPaused) && (

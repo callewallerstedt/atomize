@@ -22,7 +22,15 @@ When you are ready to connect your OpenAI API key, create a file named `.env.loc
 
 ```
 OPENAI_API_KEY=your_key_here
+YOUTUBE_API_KEY=your_youtube_api_key_here
 ```
+
+To get a YouTube API key:
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
+3. Enable the "YouTube Data API v3"
+4. Create credentials (API Key)
+5. Copy the API key to your `.env.local` file
 
 Do not commit `.env.local`.
 

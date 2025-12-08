@@ -7,6 +7,17 @@ export type LessonFlashcard = {
   answer: string;
 };
 
+export type LessonVideo = {
+  videoId: string;
+  title: string;
+  channel: string;
+  description: string;
+  thumbnail: string;
+  duration: string;
+  viewsFormatted?: string;
+  views?: number;
+};
+
 export type TopicGeneratedLesson = {
   title: string;
   body: string;
@@ -18,6 +29,9 @@ export type TopicGeneratedLesson = {
   quizCompletedAt?: number; // timestamp when answers were checked
   flashcards?: LessonFlashcard[];
   metadata?: LessonMetadata | null;
+  videos?: LessonVideo[]; // Saved YouTube videos for this lesson
+  videosQueries?: string[]; // Search queries used to find videos
+  videosFetchedAt?: number; // Timestamp when videos were fetched
   origin?: "surge" | "ai" | "quicklearn" | "manual" | string;
   surgeSessionId?: string;
   createdAt?: number;

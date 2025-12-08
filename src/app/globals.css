@@ -246,7 +246,7 @@ input, textarea, [contenteditable] {
   font-size: 1.05rem;
   white-space: normal !important;
   word-break: break-word;
-  background-color: color-mix(in srgb, var(--foreground) 8%, transparent) !important;
+  background-color: transparent !important;
 }
 
 .lesson-content .katex * {
@@ -254,7 +254,7 @@ input, textarea, [contenteditable] {
 }
 
 .lesson-content .katex .katex-html {
-  background-color: color-mix(in srgb, var(--foreground) 8%, transparent) !important;
+  background-color: transparent !important;
 }
 
 /* Code blocks and inline code */
@@ -1408,6 +1408,30 @@ button[class*="px-3"][class*="py-1"][class*="rounded-full"]:not([class*="bg-grad
 .light-mode .date-button:hover {
   background-color: rgba(252, 252, 252, 0.9) !important;
   border-color: rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Find Videos button - matches other buttons in light mode but keeps red accents */
+.find-videos-btn {
+  background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+  color: color-mix(in srgb, var(--foreground) 80%, transparent);
+}
+
+.find-videos-btn:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--foreground) 12%, transparent);
+  color: var(--foreground);
+}
+
+.light-mode .find-videos-btn {
+  background-color: rgba(250, 250, 250, 0.8) !important;
+  border-color: rgba(239, 68, 68, 0.3) !important; /* red-500/30 */
+  color: rgba(239, 68, 68, 0.8) !important; /* red-500/80 */
+}
+
+.light-mode .find-videos-btn:hover:not(:disabled) {
+  background-color: rgba(252, 252, 252, 0.9) !important;
+  border-color: rgba(239, 68, 68, 0.4) !important; /* red-500/40 */
+  color: rgba(239, 68, 68, 1) !important; /* red-500 full */
 }
 
 /* Force white text on synapse-style and upgrade-liquid-btn buttons - must be at end to override light mode button color */
