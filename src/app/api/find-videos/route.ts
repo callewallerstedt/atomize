@@ -179,6 +179,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Lesson title is required' }, { status: 400 });
     }
 
+    // Detect the language of the lesson
+    let detectedLanguage = { code: 'en', name: 'English' };
+    try {
+      const languageSample = [lessonTitle, lessonSummary, lessonBody?.substring(0, 500)].filter(Boolean).join(' ');
+      if (languageSample.trim()) {
+        const langResponse = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          response_format: { type: 'json_object' },
+          messages: [
+            { 
+              role: 'system', 
+              content: 'Detect the primary language of the provided text. Return STRICT JSON: { code: string; name: string } where code is ISO 639-1 (e.g., "en", "sv", "de"). If uncertain, default to { code: "en", name: "English" }.' 
+            },
+            { role: 'user', content: languageSample.substring(0, 2000) }
+          ],
+          temperature: 0,
+          max_tokens: 50,
+        });
+        const langData = JSON.parse(langResponse.choices[0]?.message?.content || '{}');
+        detectedLanguage = {
+          code: String(langData.code || 'en'),
+          name: String(langData.name || 'English'),
+        };
+      }
+    } catch (error) {
+      console.error('Language detection failed:', error);
+      // Keep default English
+    }
+
     // Build comprehensive context for OpenAI to generate good search queries
     let searchContext = `Lesson Topic/Title: ${lessonTitle}`;
     
@@ -202,64 +231,117 @@ export async function POST(req: NextRequest) {
       searchContext += `\n\nCourse Context: ${courseContext}`;
     }
 
-    // Use OpenAI to generate effective YouTube search queries that are SPECIFIC to the lesson topic
-    const systemPrompt = `You are a helpful assistant that generates SPECIFIC YouTube search queries for educational content based on lesson context.
+    // Generate queries in the lesson's language
+    const systemPromptOriginal = `You are an expert at creating natural, effective YouTube search queries for educational content.
 
 CRITICAL REQUIREMENTS:
-1. Read the FULL lesson context provided (title, content, summary) to understand what is being taught
-2. The search query MUST include the exact lesson topic/title AND reflect what is actually taught in the lesson
-3. Use the lesson content to understand the specific concepts, not just the title
-4. Make the query SPECIFIC to what the lesson teaches - don't make it generic
-5. Add educational keywords like "explained", "tutorial", "lecture", "introduction", or "how to"
-6. Keep the lesson topic as the MAIN focus of the query
-7. If the topic is technical, keep technical terms from the lesson
-8. Make queries 4-10 words - specific enough to find relevant educational videos
-9. AVOID generic terms that don't relate to the specific lesson content
+1. Read the FULL lesson context (title, content, summary) to deeply understand what is being taught
+2. Create NATURAL, well-crafted search queries - don't just append words to the title
+3. Think about what someone would actually search for on YouTube to learn this topic
+4. Use natural language that flows well - queries should sound like real searches
+5. Include the core topic/concept but phrase it naturally with educational intent
+6. Make queries specific enough to find relevant videos, but natural enough to match how people actually search
+7. Each query should be 4-10 words and sound like a real YouTube search
+8. AVOID just combining the title with "explained" or "tutorial" - create thoughtful, natural queries
 
-Example: If lesson is about "z-transform" and teaches discrete-time systems, good queries:
-- "z transform discrete time systems explained"
-- "z transform tutorial signal processing"
-- "z transform analysis explained"
+GOOD examples (natural and specific):
+- Lesson about "z-transform": "z transform explained discrete time systems"
+- Lesson about "Laplace transform": "Laplace transform introduction signal processing"
+- Lesson about "Fourier series": "Fourier series tutorial mathematics"
 
-BAD examples (too generic or irrelevant):
-- "signal processing" (missing the specific z-transform topic)
+BAD examples (unnatural or too generic):
+- "z transform explained tutorial" (too mechanical)
+- "signal processing" (missing specific topic)
 - "mathematics" (way too broad)
-- "full body transplant" (completely irrelevant)
 
 Return your response as a JSON object with this structure:
 {
-  "queries": ["specific topic from lesson + educational term", "specific topic + different educational term"]
+  "queries": ["natural query 1", "natural query 2", "natural query 3"]
 }
 
-Return 2-3 queries. Each query MUST be relevant to what is actually taught in the lesson. Only return the JSON object, nothing else.`;
+Return 2-3 natural, well-crafted queries in the SAME LANGUAGE as the lesson. Only return the JSON object, nothing else.`;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { 
-          role: "user", 
-          content: `Based on this lesson, generate SPECIFIC YouTube search queries that will find educational videos about what is being taught:\n\n${searchContext}\n\nIMPORTANT: Read the lesson content to understand what is actually being taught, not just the title. Generate queries that are specific to the lesson topic and content. Return as JSON with a "queries" array.` 
-        }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.3, // Lower temperature for more focused queries
-      max_tokens: 300,
-    });
-
-    const responseText = completion.choices[0]?.message?.content?.trim() || '';
-    let queries: string[] = [];
-    
+    // Generate queries in the lesson's original language
+    let queriesOriginal: string[] = [];
     try {
-      const parsed = JSON.parse(responseText);
-      if (Array.isArray(parsed.queries)) {
-        queries = parsed.queries
+      const completionOriginal = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPromptOriginal },
+          { 
+            role: "user", 
+            content: `Generate natural YouTube search queries for this lesson. Create queries in the SAME LANGUAGE as the lesson content. Make them sound like real searches people would make:\n\n${searchContext}\n\nReturn as JSON with a "queries" array. All queries must be in the same language as the lesson.` 
+          }
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.4,
+        max_tokens: 300,
+      });
+
+      const responseTextOriginal = completionOriginal.choices[0]?.message?.content?.trim() || '';
+      const parsedOriginal = JSON.parse(responseTextOriginal);
+      if (Array.isArray(parsedOriginal.queries)) {
+        queriesOriginal = parsedOriginal.queries
           .filter((q: any) => typeof q === 'string' && q.trim().length > 0)
           .map((q: string) => q.trim());
       }
-    } catch (parseError) {
-      console.error('Failed to parse OpenAI response:', parseError);
+    } catch (error) {
+      console.error('Failed to generate queries in original language:', error);
     }
+
+    // Generate queries in English (translated/adapted)
+    let queriesEnglish: string[] = [];
+    if (detectedLanguage.code !== 'en') {
+      try {
+        const systemPromptEnglish = `You are an expert at creating natural, effective YouTube search queries for educational content in English.
+
+CRITICAL REQUIREMENTS:
+1. Translate and adapt the lesson content to create natural English YouTube search queries
+2. Create NATURAL, well-crafted search queries - don't just translate word-for-word
+3. Think about what English speakers would search for on YouTube to learn this topic
+4. Use natural English that flows well - queries should sound like real searches
+5. Include the core topic/concept but phrase it naturally with educational intent
+6. Make queries specific enough to find relevant videos, but natural enough to match how people actually search
+7. Each query should be 4-10 words and sound like a real YouTube search
+
+Return your response as a JSON object with this structure:
+{
+  "queries": ["natural English query 1", "natural English query 2", "natural English query 3"]
+}
+
+Return 2-3 natural, well-crafted queries in ENGLISH. Only return the JSON object, nothing else.`;
+
+        const completionEnglish = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPromptEnglish },
+            { 
+              role: "user", 
+              content: `Translate and adapt this lesson to create natural English YouTube search queries. The lesson is in ${detectedLanguage.name}. Create queries that English speakers would use to find videos about this topic:\n\n${searchContext}\n\nReturn as JSON with a "queries" array. All queries must be in English.` 
+            }
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.4,
+          max_tokens: 300,
+        });
+
+        const responseTextEnglish = completionEnglish.choices[0]?.message?.content?.trim() || '';
+        const parsedEnglish = JSON.parse(responseTextEnglish);
+        if (Array.isArray(parsedEnglish.queries)) {
+          queriesEnglish = parsedEnglish.queries
+            .filter((q: any) => typeof q === 'string' && q.trim().length > 0)
+            .map((q: string) => q.trim());
+        }
+      } catch (error) {
+        console.error('Failed to generate English queries:', error);
+      }
+    } else {
+      // If already English, use the original queries as English queries
+      queriesEnglish = queriesOriginal;
+    }
+
+    // Combine queries: original language first, then English
+    const queries = [...queriesOriginal, ...queriesEnglish].filter((q, idx, arr) => arr.indexOf(q) === idx); // Remove duplicates
 
     // Only use AI-generated queries - no fallbacks
     if (queries.length === 0) {
@@ -270,52 +352,43 @@ Return 2-3 queries. Each query MUST be relevant to what is actually taught in th
     }
 
     // Search YouTube with the generated queries
-    // Prioritize the first query (most specific) and get more results from it
+    // Search in original language first, then English
     const allVideos: VideoResult[] = [];
     const seenVideoIds = new Set<string>();
 
-    // Use the primary query (first one) to get more results since it's most specific
-    if (queries.length > 0) {
+    // Search with original language queries first
+    for (const query of queriesOriginal.slice(0, 2)) {
       try {
-        const primaryVideos = await searchYouTube(queries[0], 8); // Get more from primary query
-        for (const video of primaryVideos) {
+        const videos = await searchYouTube(query, 5);
+        for (const video of videos) {
           if (!seenVideoIds.has(video.videoId)) {
             seenVideoIds.add(video.videoId);
             allVideos.push(video);
           }
         }
       } catch (error: any) {
-        console.error(`Error searching YouTube with primary query "${queries[0]}":`, error);
+        console.error(`Error searching YouTube with query "${query}":`, error);
       }
     }
 
-    // Add a few more from secondary queries if we don't have enough
-    if (allVideos.length < 5 && queries.length > 1) {
-      for (const query of queries.slice(1, 3)) { // Use up to 2 more queries
+    // Then search with English queries (if different from original)
+    if (detectedLanguage.code !== 'en' && queriesEnglish.length > 0) {
+      for (const query of queriesEnglish.slice(0, 2)) {
         try {
-          const videos = await searchYouTube(query, 3);
+          const videos = await searchYouTube(query, 5);
           for (const video of videos) {
-            if (!seenVideoIds.has(video.videoId) && allVideos.length < 5) {
+            if (!seenVideoIds.has(video.videoId) && allVideos.length < 8) {
               seenVideoIds.add(video.videoId);
               allVideos.push(video);
             }
           }
         } catch (error: any) {
-          console.error(`Error searching YouTube with query "${query}":`, error);
-          // Continue with next query if one fails
+          console.error(`Error searching YouTube with English query "${query}":`, error);
         }
       }
     }
 
-    // If we still don't have videos, try a simple fallback search
-    if (allVideos.length === 0) {
-      try {
-        const fallbackVideos = await searchYouTube(lessonTitle, 5);
-        allVideos.push(...fallbackVideos);
-      } catch (error: any) {
-        console.error('Fallback YouTube search failed:', error);
-      }
-    }
+    // No fallback - only use AI-generated queries
 
     // Remove duplicates
     const uniqueVideos = Array.from(
@@ -364,7 +437,7 @@ Return 2-3 queries. Each query MUST be relevant to what is actually taught in th
     return NextResponse.json({ 
       ok: true, 
       videos: formattedVideos,
-      queries: queries, // Return the AI-generated queries
+      queries: [...queriesOriginal, ...queriesEnglish], // Return both original language and English queries
       subscriptionLevel: subscriptionLevel
     });
   } catch (error: any) {
