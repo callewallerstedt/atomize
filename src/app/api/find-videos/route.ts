@@ -323,7 +323,7 @@ Return 2-3 queries. Each query MUST be relevant to what is actually taught in th
     );
 
     // Prioritize videos that have the lesson topic in the title (more relevant)
-    const topicWords = lessonTitle.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const topicWords = lessonTitle.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
     const sortedVideos = uniqueVideos.sort((a, b) => {
       const aTitle = a.title.toLowerCase();
       const bTitle = b.title.toLowerCase();
