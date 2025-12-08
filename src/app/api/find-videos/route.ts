@@ -329,8 +329,8 @@ Return 2-3 queries. Each query MUST be relevant to what is actually taught in th
       const bTitle = b.title.toLowerCase();
       
       // Count how many topic words appear in the title
-      const aMatches = topicWords.filter(word => aTitle.includes(word)).length;
-      const bMatches = topicWords.filter(word => bTitle.includes(word)).length;
+      const aMatches = topicWords.filter((word: string) => aTitle.includes(word)).length;
+      const bMatches = topicWords.filter((word: string) => bTitle.includes(word)).length;
       
       // Videos with more topic words in title come first
       if (aMatches !== bMatches) {
