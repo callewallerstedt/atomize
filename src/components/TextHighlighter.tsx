@@ -264,21 +264,16 @@ export default function TextHighlighter({
         {renderHighlightedContent()}
       </div>
       
-      {showToolbar && (
-        <HighlightToolbar
-          selectedText={selectedText}
-          position={toolbarPosition}
-          onSave={handleSave}
-          onDelete={editingHighlight ? handleDelete : undefined}
-          onElaborate={handleElaborate}
-          onClose={closeToolbar}
-          initialColor={editingHighlight?.color || HIGHLIGHT_COLORS[0].value}
-          initialNote={editingHighlight?.note || ""}
-          isEditing={!!editingHighlight}
-          elaboration={currentElaboration}
-          elaborationLoading={elaborationLoading}
-        />
-      )}
+      <HighlightToolbar
+        open={showToolbar}
+        selectedText={selectedText}
+        onSave={handleSave}
+        onDelete={editingHighlight ? handleDelete : undefined}
+        onClose={closeToolbar}
+        initialColor={editingHighlight?.color || HIGHLIGHT_COLORS[0].value}
+        initialNote={editingHighlight?.note || ""}
+        isEditing={!!editingHighlight}
+      />
     </>
   );
 }
