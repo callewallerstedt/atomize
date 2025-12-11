@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import React, { Suspense, useEffect, useState, useRef, useCallback, useMemo, type ChangeEvent, type DragEvent } from "react";
+import { flushSync } from "react-dom";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import GlowSpinner from "@/components/GlowSpinner";
 import CourseCreateModal from "@/components/CourseCreateModal";
@@ -4462,7 +4463,7 @@ function Home() {
 
     setIsDragging(false);
     
-    // Generate slug and show preparing card immediately
+    // Generate slug and show preparing card IMMEDIATELY - before any async work
     const tempName = 'New Course';
     const slugBase = tempName.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-") || "subject";
     const list = readSubjects();
@@ -4477,12 +4478,17 @@ function Home() {
     const next = [placeholderCourse, ...updatedList];
     localStorage.setItem("atomicSubjects", JSON.stringify(next));
     
-    // Set both states - React will batch these but they'll render together
-    setSubjects([placeholderCourse, ...updatedList]);
-    setPreparingSlug(unique);
+    // Force immediate rendering using flushSync - this ensures the UI updates BEFORE async work starts
+    flushSync(() => {
+      setSubjects([placeholderCourse, ...updatedList]);
+      setPreparingSlug(unique);
+    });
     
-    // Check if files might be lab instructions
-    (async () => {
+    // Now start async work AFTER React has rendered the preparing card
+    // Use setTimeout to ensure React has painted the UI
+    setTimeout(() => {
+      // Check if files might be lab instructions
+      (async () => {
       try {
         // Extract first 2000 characters from each file for AI analysis
         const fileSnippets: Array<{ name: string; preview: string }> = [];
@@ -4575,7 +4581,8 @@ function Home() {
           localStorage.setItem("atomicSubjects", JSON.stringify(updatedList));
         }
       }
-    })();
+      })();
+    }, 0); // Use 0ms timeout to push to next tick, ensuring React renders first
   };
 
   const renameSnipedExam = async (slug: string, currentName: string) => {
