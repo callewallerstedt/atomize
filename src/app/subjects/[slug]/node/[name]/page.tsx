@@ -18,10 +18,15 @@ import {
   markLessonReviewed,
   ReviewSchedule,
   LessonFlashcard,
+  LessonHighlight,
 } from "@/utils/storage";
 import LarsCoach from "@/components/LarsCoach";
 import GlowSpinner from "@/components/GlowSpinner";
 import VideoModal from "@/components/VideoModal";
+import HighlightToolbar, { HIGHLIGHT_COLORS } from "@/components/HighlightToolbar";
+import SelectionToolbar from "@/components/SelectionToolbar";
+import HighlightsModal from "@/components/HighlightsModal";
+import ElaborateModal from "@/components/ElaborateModal";
 
 // Regex patterns moved inside component to avoid any global scope issues
 
@@ -105,7 +110,23 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  
+  // Highlight feature state
+  const [showSelectionToolbar, setShowSelectionToolbar] = useState(false);
+  const [selectionToolbarPosition, setSelectionToolbarPosition] = useState({ x: 0, y: 0 });
+  const [showHighlightToolbar, setShowHighlightToolbar] = useState(false);
+  const [showHighlightsModal, setShowHighlightsModal] = useState(false);
+  const [showElaborateModal, setShowElaborateModal] = useState(false);
+  const lessonContentRef = useRef<HTMLDivElement>(null);
+  const [selectedHighlightText, setSelectedHighlightText] = useState("");
+  const [selectedHighlightRange, setSelectedHighlightRange] = useState<{ start: number; end: number } | null>(null);
+  const [editingHighlight, setEditingHighlight] = useState<LessonHighlight | null>(null);
+  const highlightMouseDownTime = useRef<number>(0);
+  const highlightMouseDownPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const isMouseDragging = useRef<boolean>(false);
+  
   const currentLesson = (content?.lessons?.[activeLessonIndex] ?? null) as TopicGeneratedLesson | null;
+  const lessonHighlights: LessonHighlight[] = currentLesson?.highlights ?? [];
   
   const hasPremiumAccess =
     subscriptionLevel === "Tester" ||
@@ -1358,6 +1379,238 @@ function toggleStar(flashcardId: string) {
     }
   }
 
+  // ========================================
+  // HIGHLIGHT FEATURE FUNCTIONS
+  // ========================================
+
+  // Generate a unique highlight ID
+  function generateHighlightId(): string {
+    return `hl-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  // Compute text offsets within the lesson body based on actual DOM selection
+  function getOffsetsFromRange(range: Range): { start: number; end: number } | null {
+    if (!lessonContentRef.current) return null;
+    const container = lessonContentRef.current;
+    if (!container.contains(range.commonAncestorContainer)) return null;
+
+    // Range from start of container to selection start
+    const preRange = range.cloneRange();
+    preRange.selectNodeContents(container);
+    preRange.setEnd(range.startContainer, range.startOffset);
+
+    const start = preRange.toString().length;
+    const selected = range.toString();
+    return { start, end: start + selected.length };
+  }
+
+  // Handle mouse down for highlight selection tracking
+  function handleHighlightMouseDown(e: React.MouseEvent) {
+    highlightMouseDownTime.current = Date.now();
+    highlightMouseDownPos.current = { x: e.clientX, y: e.clientY };
+    isMouseDragging.current = false;
+  }
+
+  // Handle text selection for highlighting - shows SelectionToolbar
+  function handleHighlightMouseUp(e: React.MouseEvent) {
+    // Calculate if this was a drag selection or just a click
+    const timeDiff = Date.now() - highlightMouseDownTime.current;
+    const distMoved = Math.sqrt(
+      Math.pow(e.clientX - highlightMouseDownPos.current.x, 2) +
+      Math.pow(e.clientY - highlightMouseDownPos.current.y, 2)
+    );
+    
+    // If it was a quick click with minimal movement, it's not a drag
+    // Let word click handle it (don't set isMouseDragging)
+    if (timeDiff < 250 && distMoved < 15) {
+      isMouseDragging.current = false;
+      return;
+    }
+    
+    // This was a drag selection
+    isMouseDragging.current = true;
+    
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) {
+      isMouseDragging.current = false;
+      return;
+    }
+    
+    const text = selection.toString().trim();
+    
+    // Only show toolbar for selections with multiple words
+    if (text.length < 5 || !text.includes(" ")) {
+      isMouseDragging.current = false;
+      return;
+    }
+    
+    const range = selection.getRangeAt(0);
+    const offset = getOffsetsFromRange(range);
+    if (!offset) {
+      isMouseDragging.current = false;
+      return;
+    }
+
+    // Calculate which occurrence this selection is (0-based) in the rendered text
+    let occurrenceIndex = 0;
+    if (lessonContentRef.current) {
+      const fullText = lessonContentRef.current.innerText || "";
+      const beforeText = fullText.slice(0, offset.start);
+      // Count occurrences of the selected text before this selection
+      occurrenceIndex = beforeText.split(text).length - 1;
+      if (occurrenceIndex < 0) occurrenceIndex = 0;
+    }
+    
+    // Store the selection data
+    setSelectedHighlightText(text);
+    setSelectedHighlightRange({ ...offset, occurrenceIndex });
+    setEditingHighlight(null);
+    
+    // Position the selection toolbar
+    const rect = range.getBoundingClientRect();
+    
+    setSelectionToolbarPosition({
+      x: rect.left + rect.width / 2,
+      y: rect.bottom,
+    });
+    setShowSelectionToolbar(true);
+  }
+
+  // Handle clicking "Highlight" from SelectionToolbar
+  function handleOpenHighlightModal() {
+    setShowSelectionToolbar(false);
+    setShowHighlightToolbar(true);
+    window.getSelection()?.removeAllRanges();
+  }
+
+  // Handle clicking "Elaborate" from SelectionToolbar  
+  function handleOpenElaborateModal() {
+    setShowSelectionToolbar(false);
+    setShowElaborateModal(true);
+    window.getSelection()?.removeAllRanges();
+  }
+
+  // Close selection toolbar
+  function closeSelectionToolbar() {
+    setShowSelectionToolbar(false);
+    window.getSelection()?.removeAllRanges();
+  }
+
+  // Save highlight (from HighlightToolbar modal)
+  async function handleSaveHighlight(color: string, note: string) {
+    if (!selectedHighlightRange || !currentLesson || !content) return;
+    
+    const highlight: LessonHighlight = {
+      id: editingHighlight?.id || generateHighlightId(),
+      text: selectedHighlightText,
+      color,
+      note: note || undefined,
+      elaboration: editingHighlight?.elaboration,
+      startOffset: selectedHighlightRange.start,
+      endOffset: selectedHighlightRange.end,
+      occurrenceIndex: (selectedHighlightRange as any).occurrenceIndex ?? editingHighlight?.occurrenceIndex,
+      createdAt: editingHighlight?.createdAt || Date.now(),
+      updatedAt: editingHighlight ? Date.now() : undefined,
+    };
+    
+    // Update lesson with new/updated highlight
+    const updatedHighlights = editingHighlight
+      ? lessonHighlights.map((h) => (h.id === highlight.id ? highlight : h))
+      : [...lessonHighlights, highlight];
+    
+    const updatedLesson: TopicGeneratedLesson = {
+      ...currentLesson,
+      highlights: updatedHighlights,
+    };
+    
+    const updatedLessons = [...(content.lessons || [])];
+    updatedLessons[activeLessonIndex] = updatedLesson;
+    
+    const updatedContent: TopicGeneratedContent = {
+      ...content,
+      lessons: updatedLessons,
+    };
+    
+    setContent(updatedContent);
+    await upsertNodeContentAsync(slug, title, updatedContent as any);
+    
+    closeHighlightToolbar();
+  }
+
+  // Save highlight from HighlightsModal
+  async function handleSaveHighlightFromModal(highlight: LessonHighlight) {
+    if (!currentLesson || !content) return;
+    
+    const updatedHighlights = lessonHighlights.some(h => h.id === highlight.id)
+      ? lessonHighlights.map((h) => (h.id === highlight.id ? highlight : h))
+      : [...lessonHighlights, highlight];
+    
+    const updatedLesson: TopicGeneratedLesson = {
+      ...currentLesson,
+      highlights: updatedHighlights,
+    };
+    
+    const updatedLessons = [...(content.lessons || [])];
+    updatedLessons[activeLessonIndex] = updatedLesson;
+    
+    const updatedContent: TopicGeneratedContent = {
+      ...content,
+      lessons: updatedLessons,
+    };
+    
+    setContent(updatedContent);
+    await upsertNodeContentAsync(slug, title, updatedContent as any);
+  }
+
+  // Delete highlight
+  async function handleDeleteHighlight(highlightId?: string) {
+    const idToDelete = highlightId || editingHighlight?.id;
+    if (!idToDelete || !currentLesson || !content) return;
+    
+    const updatedHighlights = lessonHighlights.filter((h) => h.id !== idToDelete);
+    
+    const updatedLesson: TopicGeneratedLesson = {
+      ...currentLesson,
+      highlights: updatedHighlights,
+    };
+    
+    const updatedLessons = [...(content.lessons || [])];
+    updatedLessons[activeLessonIndex] = updatedLesson;
+    
+    const updatedContent: TopicGeneratedContent = {
+      ...content,
+      lessons: updatedLessons,
+    };
+    
+    setContent(updatedContent);
+    await upsertNodeContentAsync(slug, title, updatedContent as any);
+    
+    if (!highlightId) {
+      closeHighlightToolbar();
+    }
+  }
+
+  // Close highlight toolbar modal
+  function closeHighlightToolbar() {
+    setShowHighlightToolbar(false);
+    setSelectedHighlightText("");
+    setSelectedHighlightRange(null);
+    setEditingHighlight(null);
+    window.getSelection()?.removeAllRanges();
+  }
+
+  // Handle clicking on existing highlight marks - open highlights modal to edit
+  function handleHighlightMarkClick(e: React.MouseEvent, highlight: LessonHighlight) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Open the highlights modal for editing
+    setShowHighlightsModal(true);
+  }
+
+  // ========================================
+  // END HIGHLIGHT FEATURE FUNCTIONS
+  // ========================================
 
   useEffect(() => {
     if (!title) return;
@@ -2584,16 +2837,30 @@ function toggleStar(flashcardId: string) {
                   <>
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-sm text-[var(--foreground)]/70">{content.lessonsMeta?.[activeLessonIndex]?.title}</div>
-                      <button
-                        onClick={() => setVideoModalOpen(true)}
-                        className="find-videos-btn inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 transition-all text-xs font-medium"
-                        title="Find YouTube videos about this topic"
-                      >
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-                        </svg>
-                        Find Videos
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {lessonHighlights.length > 0 && (
+                          <button
+                            onClick={() => setShowHighlightsModal(true)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent-cyan)]/10 hover:bg-[var(--accent-cyan)]/20 border border-[var(--accent-cyan)]/30 text-[var(--accent-cyan)] hover:text-[var(--accent-cyan)] transition-all text-xs font-medium"
+                            title="View your highlights"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                            Highlights ({lessonHighlights.length})
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setVideoModalOpen(true)}
+                          className="find-videos-btn inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 transition-all text-xs font-medium"
+                          title="Find YouTube videos about this topic"
+                        >
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                          </svg>
+                          Find Videos
+                        </button>
+                      </div>
                     </div>
                     {lessonMetadata && (
                       <div className="mb-6 rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4 space-y-4">
@@ -2648,14 +2915,21 @@ function toggleStar(flashcardId: string) {
                       </div>
                     )}
                     <div
-                      className="lesson-content"
+                      ref={lessonContentRef}
+                      className="lesson-content text-highlighter-container"
                       style={{ cursor: (isScrolling || cursorHidden) ? 'none' : (hoverWordRects.length > 0 ? 'pointer' : 'default') }}
+                      onMouseDown={handleHighlightMouseDown}
+                      onMouseUp={handleHighlightMouseUp}
                       onClick={(e) => {
                         try {
+                          // Don't trigger word click if this was a text selection drag
+                          if (isMouseDragging.current) {
+                            return;
+                          }
                           const target = e.target as HTMLElement | null;
                           if (!target) return;
-                          // Ignore clicks inside links, code, pre, and KaTeX
-                          if (target.closest("a, code, pre, .katex")) return;
+                          // Ignore clicks inside links, code, pre, KaTeX, and highlight marks
+                          if (target.closest("a, code, pre, .katex, mark[data-highlight-id]")) return;
                           const x = (e as any).clientX as number;
                           const y = (e as any).clientY as number;
                           const doc: any = document as any;
@@ -2862,6 +3136,33 @@ function toggleStar(flashcardId: string) {
                           .replace(/^Lesson Title:.*\n/m, '')
                           .replace(/^Subject:.*\n/m, '')
                           .replace(/^Topic:.*\n/m, '');
+                        
+                        // Apply highlights to the body
+                        // We respect occurrenceIndex to ensure the correct instance is marked
+                        const sortedHighlights = [...lessonHighlights].sort((a, b) => b.startOffset - a.startOffset);
+                        for (const hl of sortedHighlights) {
+                          if (!hl.text) continue;
+                          const occurrenceIdx = hl.occurrenceIndex ?? 0;
+                          let start = -1;
+                          let idx = 0;
+                          while (true) {
+                            start = processedBody.indexOf(hl.text, start + 1);
+                            if (start === -1) break;
+                            if (idx === occurrenceIdx) break;
+                            idx++;
+                          }
+                          if (start === -1) {
+                            // fallback to first occurrence
+                            start = processedBody.indexOf(hl.text);
+                          }
+                          if (start === -1) continue;
+                          const end = start + hl.text.length;
+                          const before = processedBody.slice(0, start);
+                          const highlighted = processedBody.slice(start, end);
+                          const after = processedBody.slice(end);
+                          processedBody = before + `<mark data-highlight-id="${hl.id}" style="background-color: ${hl.color}40; color: inherit; text-shadow: none; cursor: pointer; border-radius: 3px; padding: 1px 2px;" title="${hl.note || 'Click to edit highlight'}">${highlighted}</mark>` + after;
+                        }
+                        
                         processedBody = sanitizeLessonBody(processedBody);
                         return <LessonBody body={processedBody} />;
                       })()}
@@ -4245,6 +4546,49 @@ function toggleStar(flashcardId: string) {
         </button>
       </div>
     )}
+    
+    {/* Selection Toolbar - appears when text is selected */}
+    {showSelectionToolbar && (
+      <SelectionToolbar
+        position={selectionToolbarPosition}
+        onHighlight={handleOpenHighlightModal}
+        onElaborate={handleOpenElaborateModal}
+        onClose={closeSelectionToolbar}
+      />
+    )}
+    
+    {/* Highlight Modal - for creating/editing highlights */}
+    <HighlightToolbar
+      open={showHighlightToolbar}
+      selectedText={selectedHighlightText}
+      onSave={handleSaveHighlight}
+      onDelete={editingHighlight ? () => handleDeleteHighlight() : undefined}
+      onClose={closeHighlightToolbar}
+      initialColor={editingHighlight?.color || HIGHLIGHT_COLORS[0].value}
+      initialNote={editingHighlight?.note || ""}
+      isEditing={!!editingHighlight}
+    />
+    
+    {/* Highlights Modal - for viewing all highlights */}
+    <HighlightsModal
+      open={showHighlightsModal}
+      onClose={() => setShowHighlightsModal(false)}
+      highlights={lessonHighlights}
+      onSave={handleSaveHighlightFromModal}
+      onDelete={handleDeleteHighlight}
+      lessonTitle={currentLesson?.title || content?.lessonsMeta?.[activeLessonIndex]?.title}
+    />
+    
+    {/* Elaborate Modal - for AI elaboration */}
+    <ElaborateModal
+      open={showElaborateModal}
+      onClose={() => setShowElaborateModal(false)}
+      selectedText={selectedHighlightText}
+      lessonBody={currentLesson?.body || ""}
+      subject={subjectData?.subject || slug}
+      topic={title}
+      languageName={subjectData?.course_language_name || ""}
+    />
     </>
   );
 }

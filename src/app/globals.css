@@ -1519,3 +1519,92 @@ button.upgrade-liquid-btn * {
   opacity: 1 !important;
   text-shadow: none !important;
 }
+
+/* ========================================
+   TEXT HIGHLIGHTING FEATURE STYLES
+   ======================================== */
+
+/* Highlight mark styling */
+.lesson-content mark[data-highlight-id],
+.text-highlighter-container mark[data-highlight-id] {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 1px 3px;
+  margin: 0 -3px;
+  transition: filter 150ms ease, box-shadow 150ms ease;
+  position: relative;
+}
+
+.lesson-content mark[data-highlight-id]:hover,
+.text-highlighter-container mark[data-highlight-id]:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+}
+
+/* Highlight with note indicator */
+.lesson-content mark[data-highlight-id][data-has-note="true"]::after,
+.text-highlighter-container mark[data-highlight-id][data-has-note="true"]::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  box-shadow: 0 0 4px var(--accent-cyan);
+}
+
+/* Highlight selection animation */
+@keyframes highlight-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(0, 229, 255, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(0, 229, 255, 0.2);
+  }
+}
+
+.lesson-content mark[data-highlight-id].highlight-new,
+.text-highlighter-container mark[data-highlight-id].highlight-new {
+  animation: highlight-pulse 0.6s ease-out;
+}
+
+/* Highlight colors with proper opacity */
+.highlight-yellow { background-color: rgba(251, 191, 36, 0.35) !important; }
+.highlight-cyan { background-color: rgba(34, 211, 238, 0.35) !important; }
+.highlight-pink { background-color: rgba(244, 114, 182, 0.35) !important; }
+.highlight-green { background-color: rgba(74, 222, 128, 0.35) !important; }
+.highlight-purple { background-color: rgba(167, 139, 250, 0.35) !important; }
+.highlight-orange { background-color: rgba(251, 146, 60, 0.35) !important; }
+
+/* Highlight toolbar animations */
+@keyframes toolbar-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.highlight-toolbar-enter {
+  animation: toolbar-appear 150ms ease-out forwards;
+}
+
+/* Selection styling for text highlighting */
+.text-highlighter-container ::selection {
+  background: rgba(0, 229, 255, 0.3);
+}
+
+.text-highlighter-container ::-moz-selection {
+  background: rgba(0, 229, 255, 0.3);
+}
+
+/* Ensure highlight toolbar has proper z-index and shadow */
+.highlight-toolbar-container {
+  z-index: 100;
+  filter: drop-shadow(0 10px 25px rgba(0, 0, 0, 0.5));
+}

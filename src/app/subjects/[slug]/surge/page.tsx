@@ -1635,8 +1635,10 @@ export default function SurgePage() {
     const uniqueModel = Array.from(new Set(modelTokens));
     const matches = userTokens.filter((token) => uniqueModel.includes(token));
     const ratio = matches.length / uniqueModel.length;
-    const score = Math.max(0, Math.min(10, Math.round(ratio * 10)));
-    return { score, isCorrect: ratio >= 0.7 };
+    // Softer grading: boost partially correct answers and lower correctness threshold
+    const boosted = Math.max(ratio, ratio * 0.6 + 0.2); // gentle uplift for partial overlap
+    const score = Math.max(0, Math.min(10, Math.round(boosted * 10)));
+    return { score, isCorrect: ratio >= 0.55 };
   };
 
   const recordQuizStageTransition = (from: "mc" | "harder", to: "mc" | "harder") => {
@@ -1745,6 +1747,7 @@ export default function SurgePage() {
 
   const requestHarderQuestions = () => {
     if (harderQuestionsRequested.current || quizLoading) return;
+    harderQuestionsRequested.current = true;
     requestQuizQuestions("harder");
   };
 
@@ -1771,13 +1774,15 @@ export default function SurgePage() {
       return; // Review questions don't trigger harder questions generation
     }
 
+    // Don't auto-advance to harder questions; user will trigger next
     const totalMc = quizQuestions.filter((q) => q.stage === "mc").length;
     const answeredMc = getAnsweredCount("mc") + 1;
     if (answeredMc >= totalMc) {
-      if (quizQuestions.some((q) => q.stage === "harder")) {
-        setQuizLoading(false);
-      } else {
+      if (!quizQuestions.some((q) => q.stage === "harder")) {
+        // Prepare harder questions in background, but do not jump stage
         requestHarderQuestions();
+      } else {
+        setQuizLoading(false);
       }
     }
   };
@@ -2926,6 +2931,7 @@ export default function SurgePage() {
 
       const updatedData: StoredSubjectData = {
         ...currentData,
+        subject: currentData.subject || slug,
         nodes: nodesCopy,
         topics: topicsList,
         tree,

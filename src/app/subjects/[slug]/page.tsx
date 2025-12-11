@@ -5,7 +5,8 @@ import { createPortal } from "react-dom";
 import { LessonBody } from "@/components/LessonBody";
 import { FlashcardContent } from "@/components/FlashcardContent";
 import { sanitizeLessonBody, sanitizeFlashcardContent } from "@/lib/sanitizeLesson";
-import { loadSubjectData, saveSubjectData, saveSubjectDataAsync, StoredSubjectData, TopicMeta, getLessonsDueForReview, getUpcomingReviews, LessonFlashcard } from "@/utils/storage";
+import { loadSubjectData, saveSubjectData, saveSubjectDataAsync, StoredSubjectData, TopicMeta, getLessonsDueForReview, getUpcomingReviews, LessonFlashcard, LessonHighlight } from "@/utils/storage";
+import HighlightsModal from "@/components/HighlightsModal";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import Modal from "@/components/Modal";
@@ -88,6 +89,8 @@ export default function SubjectPage() {
   const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const menuButtonRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
   const isSyncingExamSnipesRef = useRef(false);
+  const [allHighlightsModalOpen, setAllHighlightsModalOpen] = useState(false);
+  const [allHighlights, setAllHighlights] = useState<Array<{ highlight: LessonHighlight; topicName: string; lessonTitle: string; lessonIndex: number }>>([]);
   
   const hasPremiumAccess =
     subscriptionLevel === "Tester" ||
@@ -369,72 +372,48 @@ export default function SubjectPage() {
           
           const planIdMapping: Record<number, string> = {};
           const lessonsMeta: Array<{ type: string; title: string; planId?: string; tag?: string }> = [...existingLessonsMeta];
-          // Merge existing lessons with new ones from exam snipe
-          const lessonsArray: any[] = [];
-          const maxLength = Math.max(lessons.length, existingLessons.length);
+          // Merge existing lessons with new ones from exam snipe.
+          // Never dedupe by title to avoid merging similarly named lessons.
+          // Use planId to update/replace; otherwise append.
+          const lessonsArray: any[] = Array.isArray(existingLessons) ? [...existingLessons] : [];
           
-          for (let idx = 0; idx < maxLength; idx++) {
-            const lessonPlanItem = lessons[idx];
-            const existingLesson = existingLessons[idx];
+          lessons.forEach((lessonPlanItem: any, idx: number) => {
+            const lessonPlanId = String(lessonPlanItem?.id ?? idx);
+            planIdMapping[idx] = lessonPlanId;
+            const lessonGenerated = generatedMap?.[lessonPlanId];
+            const lessonTitle = String(lessonGenerated?.title || lessonPlanItem?.title || `Lesson ${idx + 1}`);
             
-            // If there's an existing lesson and no plan item, keep the existing one
-            if (existingLesson && !lessonPlanItem) {
-              lessonsArray.push(existingLesson);
-              continue;
+            const quizFromGenerated = Array.isArray((lessonGenerated as any)?.quiz)
+              ? (lessonGenerated as any).quiz.map((q: any) => ({
+                  question: String(q?.question || ""),
+                  answer: q?.answer ? String(q.answer) : undefined,
+                }))
+              : [];
+            
+            const newLesson = {
+              title: lessonTitle,
+              body: typeof lessonGenerated?.body === "string" ? lessonGenerated.body : "",
+              origin: "exam-snipe",
+              planId: lessonPlanId,
+              quiz: quizFromGenerated,
+            };
+            
+            const existingIndexByPlan = lessonsArray.findIndex((l: any) => l?.planId === lessonPlanId);
+            if (existingIndexByPlan !== -1) {
+              lessonsArray[existingIndexByPlan] = { ...lessonsArray[existingIndexByPlan], ...newLesson };
+            } else {
+              lessonsArray.push(newLesson);
             }
             
-            // If there's a plan item, process it
-            if (lessonPlanItem) {
-              const lessonPlanId = String(lessonPlanItem.id ?? idx);
-              planIdMapping[idx] = lessonPlanId;
-              const lessonGenerated = generatedMap?.[lessonPlanId];
-              const lessonTitle = String(lessonGenerated?.title || lessonPlanItem.title || `Lesson ${idx + 1}`);
-              
-              // Check if this lesson already exists by planId or title
-              const matchingExisting = existingLessons.find((l: any) => 
-                l && ((l as any).planId === lessonPlanId || l.title === lessonTitle)
-              );
-              
-              const finalLesson = matchingExisting || existingLesson || {};
-              
-              // Only add to lessonsMeta if not already present
-              if (!lessonsMeta.some((m: any) => m.title === lessonTitle || m.planId === lessonPlanId)) {
-                lessonsMeta.push({
-                  type: lessonGenerated ? "Exam Snipe" : "Exam Snipe Outline",
-                  title: lessonTitle,
-                  planId: lessonPlanId,
-                  tag: "Exam Snipe",
-                });
-              }
-              
-              if (lessonGenerated) {
-                const quizFromGenerated = Array.isArray((lessonGenerated as any)?.quiz)
-                  ? (lessonGenerated as any).quiz.map((q: any) => ({
-                      question: String(q?.question || ""),
-                      answer: q?.answer ? String(q.answer) : undefined,
-                    }))
-                  : [];
-                
-                lessonsArray.push({
-                  ...finalLesson,
-                  title: lessonTitle,
-                  body: String(lessonGenerated.body || finalLesson.body || ""),
-                  origin: "exam-snipe",
-                  planId: lessonPlanId,
-                  quiz: (finalLesson as any)?.quiz?.length ? (finalLesson as any).quiz : quizFromGenerated,
-                });
-              } else {
-                lessonsArray.push({
-                  ...finalLesson,
-                  title: lessonTitle,
-                  body: typeof finalLesson?.body === "string" ? finalLesson.body : "",
-                  origin: "exam-snipe",
-                  planId: lessonPlanId,
-                  quiz: (finalLesson as any)?.quiz?.length ? (finalLesson as any).quiz : [],
-                });
-              }
+            if (!lessonsMeta.some((m: any) => m.planId === lessonPlanId)) {
+              lessonsMeta.push({
+                type: lessonGenerated ? "Exam Snipe" : "Exam Snipe Outline",
+                title: lessonTitle,
+                planId: lessonPlanId,
+                tag: "Exam Snipe",
+              });
             }
-          }
+          });
           
           // Update or create the node
           const topicSummary = concept?.description || `Exam Snipe concept: ${conceptName}`;
@@ -701,6 +680,52 @@ export default function SubjectPage() {
     setShowFlashcardTopicList(true);
     setSelectedFlashcardTopic(null);
     setAllFlashcardsModalOpen(true);
+  }
+
+  function collectAllHighlights() {
+    const saved = loadSubjectData(slug);
+    if (!saved || !saved.nodes) {
+      alert("No highlights found. Create highlights by selecting text in lessons.");
+      return;
+    }
+
+    const highlights: Array<{ highlight: LessonHighlight; topicName: string; lessonTitle: string; lessonIndex: number }> = [];
+    
+    // Iterate through all topics (nodes)
+    Object.keys(saved.nodes).forEach((topicName) => {
+      const node = saved.nodes[topicName];
+      if (!node || typeof node !== 'object') return;
+      
+      // Check if it's the format with lessons array
+      if (Array.isArray(node.lessons)) {
+        node.lessons.forEach((lesson: any, lessonIndex: number) => {
+          if (lesson && Array.isArray(lesson.highlights) && lesson.highlights.length > 0) {
+            lesson.highlights.forEach((highlight: LessonHighlight) => {
+              highlights.push({
+                highlight,
+                topicName,
+                lessonTitle: lesson.title || 'Untitled Lesson',
+                lessonIndex,
+              });
+            });
+          }
+        });
+      }
+    });
+
+    if (highlights.length === 0) {
+      alert("No highlights found. Create highlights by selecting text in lessons.");
+      return;
+    }
+
+    setAllHighlights(highlights);
+    setAllHighlightsModalOpen(true);
+  }
+
+  function navigateToLessonWithHighlight(topicName: string, lessonIndex: number) {
+    // Encode the topic name for the URL
+    const encodedTopicName = encodeURIComponent(topicName);
+    router.push(`/subjects/${slug}/node/${encodedTopicName}?lesson=${lessonIndex}`);
   }
 
   function toggleStar(flashcardId: string) {
@@ -1003,6 +1028,15 @@ export default function SubjectPage() {
                 className="pill-button w-full sm:w-auto inline-flex h-9 items-center justify-center rounded-full px-4 text-xs font-medium border border-[var(--foreground)]/10 text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors"
               >
                 Flashcards
+              </button>
+              <button
+                onClick={collectAllHighlights}
+                className="pill-button w-full sm:w-auto inline-flex h-9 items-center justify-center gap-1.5 rounded-full px-4 text-xs font-medium border border-[var(--foreground)]/10 text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+                Highlights
               </button>
               {isAuthenticated && (
                 <>
@@ -1631,12 +1665,21 @@ export default function SubjectPage() {
 
         {activeTab === 'topics' && (
           <>
-            <div className="mt-6">
+            <div className="mt-6 flex gap-3">
               <button
                 onClick={collectAllFlashcards}
-                className="w-full rounded-xl bg-gradient-to-r from-[var(--accent-cyan)]/10 to-[var(--accent-pink)]/10 hover:from-[var(--accent-cyan)]/20 hover:to-[var(--accent-pink)]/20 transition-all py-3 px-6 flex items-center justify-center text-base font-semibold text-[var(--foreground)]"
+                className="flex-1 rounded-xl bg-gradient-to-r from-[var(--accent-cyan)]/10 to-[var(--accent-pink)]/10 hover:from-[var(--accent-cyan)]/20 hover:to-[var(--accent-pink)]/20 transition-all py-3 px-6 flex items-center justify-center text-base font-semibold text-[var(--foreground)]"
               >
                 Flashcards
+              </button>
+              <button
+                onClick={collectAllHighlights}
+                className="flex-1 rounded-xl bg-gradient-to-r from-[var(--accent-cyan)]/10 to-[var(--accent-pink)]/10 hover:from-[var(--accent-cyan)]/20 hover:to-[var(--accent-pink)]/20 transition-all py-3 px-6 flex items-center justify-center gap-2 text-base font-semibold text-[var(--foreground)]"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+                Highlights
               </button>
             </div>
             {topics ? (
@@ -2348,6 +2391,18 @@ export default function SubjectPage() {
           </div>
         );
       })()}
+      
+      {/* All Course Highlights Modal */}
+      <HighlightsModal
+        open={allHighlightsModalOpen}
+        onClose={() => setAllHighlightsModalOpen(false)}
+        highlights={[]}
+        onSave={() => {}}
+        onDelete={() => {}}
+        allHighlights={allHighlights}
+        isCourseView={true}
+        onNavigateToLesson={navigateToLessonWithHighlight}
+      />
     </div>
   );
 }

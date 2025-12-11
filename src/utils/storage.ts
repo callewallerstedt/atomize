@@ -18,6 +18,19 @@ export type LessonVideo = {
   views?: number;
 };
 
+export type LessonHighlight = {
+  id: string;
+  text: string; // The highlighted text
+  color: string; // Highlight color (hex or named)
+  note?: string; // User's note/annotation
+  elaboration?: string; // AI-generated elaboration (markdown)
+  startOffset: number; // Character offset from start of lesson body
+  endOffset: number; // Character offset from start of lesson body
+  occurrenceIndex?: number; // Which occurrence of the text (0-based) in rendered text
+  createdAt: number; // Timestamp
+  updatedAt?: number; // Timestamp of last update
+};
+
 export type TopicGeneratedLesson = {
   title: string;
   body: string;
@@ -32,6 +45,7 @@ export type TopicGeneratedLesson = {
   videos?: LessonVideo[]; // Saved YouTube videos for this lesson
   videosQueries?: string[]; // Search queries used to find videos
   videosFetchedAt?: number; // Timestamp when videos were fetched
+  highlights?: LessonHighlight[]; // User-created text highlights
   origin?: "surge" | "ai" | "quicklearn" | "manual" | string;
   surgeSessionId?: string;
   createdAt?: number;
