@@ -4469,15 +4469,16 @@ function Home() {
     let unique = slugBase; let n = 1; const set = new Set(list.map((s) => s.slug));
     while (set.has(unique)) { n++; unique = `${slugBase}-${n}`; }
 
-    // Add placeholder course immediately
-    const next = [{ name: tempName, slug: unique, isPlaceholder: true }, ...list];
+    // Add placeholder course immediately - ensure it's added to both localStorage and state
+    const placeholderCourse: Subject = { name: tempName, slug: unique };
+    
+    // Update localStorage first
+    const updatedList = list.filter(s => s.slug !== unique); // Remove any existing with this slug
+    const next = [placeholderCourse, ...updatedList];
     localStorage.setItem("atomicSubjects", JSON.stringify(next));
-    setSubjects(prev => {
-      if (prev.some(s => s.slug === unique)) {
-        return prev;
-      }
-      return [{ name: tempName, slug: unique, isPlaceholder: true } as Subject, ...prev];
-    });
+    
+    // Set both states - React will batch these but they'll render together
+    setSubjects([placeholderCourse, ...updatedList]);
     setPreparingSlug(unique);
     
     // Check if files might be lab instructions

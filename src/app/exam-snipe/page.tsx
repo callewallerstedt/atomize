@@ -644,14 +644,30 @@ function ExamSnipeInner() {
 
   // Auto-start exam snipe when files are loaded from chat
   useEffect(() => {
-    if (autoStartPending && examFiles.length > 0 && !examAnalyzing && handleExamSnipeRef.current) {
-      setAutoStartPending(false);
-      // Auto-start exam snipe after a short delay to ensure state is set
-      setTimeout(() => {
+    if (autoStartPending && examFiles.length > 0 && !examAnalyzing) {
+      // Wait for handleExamSnipeRef to be set if it's not already
+      let retryCount = 0;
+      const maxRetries = 20; // Max 1 second of retries
+      const tryStart = () => {
         if (handleExamSnipeRef.current) {
-          handleExamSnipeRef.current();
+          setAutoStartPending(false);
+          console.log('Auto-starting exam snipe with', examFiles.length, 'files');
+          // Auto-start exam snipe after a short delay to ensure state is set
+          setTimeout(() => {
+            if (handleExamSnipeRef.current) {
+              handleExamSnipeRef.current();
+            }
+          }, 100);
+        } else if (retryCount < maxRetries) {
+          // If ref not set yet, wait a bit and try again
+          retryCount++;
+          setTimeout(tryStart, 50);
+        } else {
+          console.warn('Failed to auto-start exam snipe: handleExamSnipeRef not set after', maxRetries, 'retries');
+          setAutoStartPending(false);
         }
-      }, 100);
+      };
+      tryStart();
     }
   }, [autoStartPending, examFiles.length, examAnalyzing]);
 
