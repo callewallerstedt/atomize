@@ -614,8 +614,9 @@ function ExamSnipeInner() {
       }
     }
     
-    // Check for pending exam files from chat
+    // Check for pending exam files from chat or auto-create
     const pendingFiles = (window as any).__pendingExamFiles;
+    const pendingCourseSlug = (window as any).__pendingExamSnipeCourseSlug;
     if (pendingFiles && Array.isArray(pendingFiles) && pendingFiles.length > 0) {
       // Clear any existing files first
       setExamFiles([]);
@@ -624,6 +625,12 @@ function ExamSnipeInner() {
         setExamFiles(pendingFiles);
         // Clear the pending files
         delete (window as any).__pendingExamFiles;
+        // If there's a pending course slug from auto-create, set it as selected
+        if (pendingCourseSlug && typeof pendingCourseSlug === 'string') {
+          console.log('Setting pending course slug from auto-create:', pendingCourseSlug);
+          setSelectedSubjectSlug(pendingCourseSlug);
+          delete (window as any).__pendingExamSnipeCourseSlug;
+        }
         // Set flag to auto-start exam snipe
         setAutoStartPending(true);
       }, 50);

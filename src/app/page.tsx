@@ -5172,6 +5172,10 @@ function Home() {
                 // Navigate to exam snipe page with the detected files
                 if (detectedExamFiles.length > 0) {
                   (window as any).__pendingExamFiles = detectedExamFiles;
+                  // Store the course slug so exam snipe page can use it
+                  if (examSnipeCourseSlug) {
+                    (window as any).__pendingExamSnipeCourseSlug = examSnipeCourseSlug;
+                  }
                   router.push('/exam-snipe');
                 }
                 setExamSnipeModalOpen(false);
