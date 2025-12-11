@@ -4020,14 +4020,33 @@ function Home() {
     try {
       const slugBase = effectiveName.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-") || "subject";
       const list = readSubjects();
-      let unique = slugBase; let n = 1; const set = new Set(list.map((s) => s.slug));
-      while (set.has(unique)) { n++; unique = `${slugBase}-${n}`; }
+      // If preparingSlug exists and matches the slug base, reuse it (for placeholder replacement)
+      let unique = (preparingSlug && preparingSlug.startsWith(slugBase)) ? preparingSlug : slugBase;
+      if (!preparingSlug || !preparingSlug.startsWith(slugBase)) {
+        let n = 1; const set = new Set(list.map((s) => s.slug));
+        while (set.has(unique)) { n++; unique = `${slugBase}-${n}`; }
+        // Clean up placeholder if it exists and doesn't match
+        if (preparingSlug && preparingSlug !== unique) {
+          const cleanedList = list.filter(s => s.slug !== preparingSlug);
+          localStorage.setItem("atomicSubjects", JSON.stringify(cleanedList));
+          setSubjects(prev => prev.filter(s => s.slug !== preparingSlug));
+        }
+      }
 
-      const next = [{ name: effectiveName, slug: unique }, ...list];
+      // Replace placeholder if it exists, otherwise add new
+      const existingIndex = list.findIndex(s => s.slug === unique);
+      const next = existingIndex >= 0 
+        ? list.map((s, i) => i === existingIndex ? { name: effectiveName, slug: unique } : s)
+        : [{ name: effectiveName, slug: unique }, ...list];
       localStorage.setItem("atomicSubjects", JSON.stringify(next));
       setSubjects(prev => {
-        if (prev.some(s => s.slug === unique)) {
-          return prev;
+        // If slug exists, check if it's a placeholder - if so, replace it
+        const existingIndex = prev.findIndex(s => s.slug === unique);
+        if (existingIndex >= 0) {
+          // Replace placeholder with real course
+          const updated = [...prev];
+          updated[existingIndex] = { name: effectiveName, slug: unique };
+          return updated;
         }
         return [{ name: effectiveName, slug: unique }, ...prev];
       });
@@ -4193,6 +4212,11 @@ function Home() {
                 );
                 localStorage.setItem("atomicSubjects", JSON.stringify(updatedList));
                 setSubjects(updatedList);
+                
+                // Update preparingSlug if it matches the old slug
+                if (preparingSlug === unique) {
+                  setPreparingSlug(newUnique);
+                }
                 
                 // Update course data with new slug
                 const oldData = loadSubjectData(unique) as StoredSubjectData | null;
@@ -4438,6 +4462,24 @@ function Home() {
 
     setIsDragging(false);
     
+    // Generate slug and show preparing card immediately
+    const tempName = 'New Course';
+    const slugBase = tempName.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-") || "subject";
+    const list = readSubjects();
+    let unique = slugBase; let n = 1; const set = new Set(list.map((s) => s.slug));
+    while (set.has(unique)) { n++; unique = `${slugBase}-${n}`; }
+
+    // Add placeholder course immediately
+    const next = [{ name: tempName, slug: unique, isPlaceholder: true }, ...list];
+    localStorage.setItem("atomicSubjects", JSON.stringify(next));
+    setSubjects(prev => {
+      if (prev.some(s => s.slug === unique)) {
+        return prev;
+      }
+      return [{ name: tempName, slug: unique, isPlaceholder: true } as Subject, ...prev];
+    });
+    setPreparingSlug(unique);
+    
     // Check if files might be lab instructions
     (async () => {
       try {
@@ -4505,6 +4547,12 @@ function Home() {
 
         if (labFiles.length > 0) {
           // Show modal asking user if they want to use Lab Assist
+          // Clear preparing state since user will choose
+          setPreparingSlug(null);
+          setSubjects(prev => prev.filter(s => s.slug !== unique));
+          const updatedList = list.filter(s => s.slug !== unique);
+          localStorage.setItem("atomicSubjects", JSON.stringify(updatedList));
+          
           setDetectedLabFiles(labFiles);
           setLabAssistModalOpen(true);
           return;
@@ -4519,6 +4567,11 @@ function Home() {
           await createCourse('New Course', "", files);
         } catch (createErr) {
           console.error('Failed to auto-create course', createErr);
+          // Clear preparing state on error
+          setPreparingSlug(null);
+          setSubjects(prev => prev.filter(s => s.slug !== unique));
+          const updatedList = list.filter(s => s.slug !== unique);
+          localStorage.setItem("atomicSubjects", JSON.stringify(updatedList));
         }
       }
     })();
