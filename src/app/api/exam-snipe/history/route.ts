@@ -381,8 +381,37 @@ async function matchExamSnipeToCourse(
     
     const allSubjects = await prisma.subject.findMany({
       where: { userId },
-      select: { slug: true, name: true },
+      select: { slug: true, name: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
     });
+    
+    // First, check for recently created courses (within 5 minutes) that match the exam snipe course name
+    // This handles the case where auto-create just created a course and exam snipe should link to it
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const recentSubjects = allSubjects.filter(s => 
+      s.createdAt >= fiveMinutesAgo && 
+      !linkedSubjectSlugs.has(s.slug)
+    );
+    
+    // Try to match by name similarity (case-insensitive, normalized)
+    const normalizeName = (name: string) => name.toLowerCase().trim().replace(/[^a-z0-9\s]/g, '');
+    const examSnipeNormalizedName = normalizeName(examSnipeCourseName);
+    
+    for (const recentSubject of recentSubjects) {
+      const subjectNormalizedName = normalizeName(recentSubject.name);
+      // Check if names are very similar (exact match or one contains the other)
+      if (subjectNormalizedName === examSnipeNormalizedName ||
+          subjectNormalizedName.includes(examSnipeNormalizedName) ||
+          examSnipeNormalizedName.includes(subjectNormalizedName)) {
+        console.log(`[EXAM SNIPE] Found recently created course "${recentSubject.name}" (${recentSubject.slug}) matching exam snipe "${examSnipeCourseName}", linking directly`);
+        // Link exam snipe to this recently created course
+        await prisma.examSnipeHistory.update({
+          where: { userId_slug: { userId, slug: examSnipeSlug } },
+          data: { subjectSlug: recentSubject.slug },
+        });
+        return; // Exit early, no need to create new course
+      }
+    }
     
     // Filter out subjects that already have exam snipes linked
     const subjects = allSubjects.filter(s => !linkedSubjectSlugs.has(s.slug));

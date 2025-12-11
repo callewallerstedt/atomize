@@ -4522,12 +4522,6 @@ function Home() {
         }
       }
     })();
-    try {
-      // Create with a neutral placeholder; final name will be set after AI summary
-      await createCourse('New Course', "", files);
-    } catch (err) {
-      console.error('Failed to auto-create course', err);
-    }
   };
 
   const renameSnipedExam = async (slug: string, currentName: string) => {
