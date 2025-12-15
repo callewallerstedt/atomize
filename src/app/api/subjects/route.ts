@@ -147,7 +147,8 @@ export async function DELETE(req: Request) {
       },
     });
     
-    // 2. Delete subject data (lessons, topics, generated content, etc.)
+    // 2. Delete subject data (lessons, topics, generated content, surge logs, practice logs, etc.)
+    // This includes all lessons, topics, surge logs, practice logs stored in the database
     await prisma.subjectData.deleteMany({
       where: { userId: user.id, slug },
     });
@@ -160,6 +161,12 @@ export async function DELETE(req: Request) {
     if (deleted.count === 0) {
       return NextResponse.json({ ok: false, error: "Subject not found" }, { status: 404 });
     }
+    
+    // Note: localStorage cleanup should be done on the client side
+    // The client should remove:
+    // - atomicSubjectData:{slug}
+    // - atomicPracticeLog:{slug}
+    // - Remove from atomicSubjects array
     
     return NextResponse.json({ ok: true });
   } catch (e: any) {

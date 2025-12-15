@@ -3458,9 +3458,20 @@ function Home() {
               if (subjectsRes.ok && Array.isArray(subjectsJson?.subjects)) {
                 // Filter out quicklearn from homepage
                 const filteredSubjects = subjectsJson.subjects.filter((s: Subject) => s.slug !== "quicklearn");
-                // Update localStorage with server subjects
-                localStorage.setItem("atomicSubjects", JSON.stringify(subjectsJson.subjects));
-                setSubjects(filteredSubjects);
+                // Also filter out any placeholder courses (courses with name "New Course" that have no subject data)
+                // But only if they're not currently being prepared
+                const finalFiltered = filteredSubjects.filter((s: Subject) => {
+                  if (s.name === "New Course" && preparingSlug !== s.slug) {
+                    // Check if this course has any actual data
+                    const hasData = loadSubjectData(s.slug);
+                    // If no data and not preparing, it's likely a stale placeholder
+                    return !!hasData;
+                  }
+                  return true;
+                });
+                // Update localStorage with server subjects (filtered)
+                localStorage.setItem("atomicSubjects", JSON.stringify(finalFiltered));
+                setSubjects(finalFiltered);
                 
                 // Sync subject data from server in parallel (non-blocking)
                 // Use Promise.allSettled to fetch all in parallel without blocking
@@ -4014,55 +4025,68 @@ function Home() {
     return () => clearTimeout(timeout);
   }, [renameSubject, settingsModalFor, settingsNameInput]);
 
-  const createCourse = async (name: string, syllabus: string, files: File[], preferredLanguage?: string) => {
+  const createCourse = async (name: string, syllabus: string, files: File[], preferredLanguage?: string, forceSlug?: string) => {
     let effectiveName = name;
     let contextSource: string | null = null;
     const isTextOnlyCourse = files.length === 0;
     try {
       const slugBase = effectiveName.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-") || "subject";
+      // Read fresh list from localStorage (may include placeholder we just added)
       const list = readSubjects();
-      // If preparingSlug exists and matches the slug base, reuse it (for placeholder replacement)
-      let unique = (preparingSlug && preparingSlug.startsWith(slugBase)) ? preparingSlug : slugBase;
-      if (!preparingSlug || !preparingSlug.startsWith(slugBase)) {
-        let n = 1; const set = new Set(list.map((s) => s.slug));
-        while (set.has(unique)) { n++; unique = `${slugBase}-${n}`; }
-        // Clean up placeholder if it exists and doesn't match
-        if (preparingSlug && preparingSlug !== unique) {
-          const cleanedList = list.filter(s => s.slug !== preparingSlug);
-          localStorage.setItem("atomicSubjects", JSON.stringify(cleanedList));
-          setSubjects(prev => prev.filter(s => s.slug !== preparingSlug));
+      
+      // ALWAYS reuse forceSlug or preparingSlug if it exists (it was set by createCourseFromFiles)
+      // This ensures we replace the placeholder instead of creating a duplicate
+      let unique: string;
+      if (forceSlug) {
+        // Explicit slug passed (from createCourseFromFiles) - use it
+        unique = forceSlug;
+      } else if (preparingSlug) {
+        // Reuse the placeholder slug from state - this is the key to preventing duplicates
+        unique = preparingSlug;
+      } else {
+        // No preparing slug, generate a new one
+        unique = slugBase;
+        let n = 1; 
+        const set = new Set(list.map((s) => s.slug));
+        while (set.has(unique)) { 
+          n++; 
+          unique = `${slugBase}-${n}`; 
         }
       }
 
       // Replace placeholder if it exists, otherwise add new
+      // CRITICAL: If we're reusing preparingSlug, the placeholder is already in localStorage and state
+      // We should NOT add it again - just UPDATE the existing entry
       const existingIndex = list.findIndex(s => s.slug === unique);
-      const next = existingIndex >= 0 
-        ? list.map((s, i) => i === existingIndex ? { name: effectiveName, slug: unique } : s)
-        : [{ name: effectiveName, slug: unique }, ...list];
-      localStorage.setItem("atomicSubjects", JSON.stringify(next));
-      setSubjects(prev => {
-        // If slug exists, check if it's a placeholder - if so, replace it
-        const existingIndex = prev.findIndex(s => s.slug === unique);
-        if (existingIndex >= 0) {
-          // Replace placeholder with real course
-          const updated = [...prev];
-          updated[existingIndex] = { name: effectiveName, slug: unique };
-          return updated;
-        }
-        return [{ name: effectiveName, slug: unique }, ...prev];
-      });
+      if (existingIndex >= 0) {
+        // Entry already exists (placeholder) - just update the name in place, don't add a new one
+        // This prevents duplicates
+        const updatedList = list.map(s => s.slug === unique ? { name: effectiveName, slug: unique } : s);
+        localStorage.setItem("atomicSubjects", JSON.stringify(updatedList));
+        // Update state - use functional update to ensure we're working with latest state
+        setSubjects(prev => {
+          // Remove any duplicates first, then update
+          const withoutDuplicates = prev.filter((s, idx, arr) => 
+            arr.findIndex(x => x.slug === s.slug) === idx
+          );
+          return withoutDuplicates.map(s => s.slug === unique ? { name: effectiveName, slug: unique } : s);
+        });
+      } else {
+        // Entry doesn't exist - add new course
+        const next = [{ name: effectiveName, slug: unique }, ...list];
+        localStorage.setItem("atomicSubjects", JSON.stringify(next));
+        setSubjects(prev => {
+          // Make sure we don't have duplicates in state
+          const filtered = prev.filter(s => s.slug !== unique);
+          return [{ name: effectiveName, slug: unique }, ...filtered];
+        });
+      }
+      
+      // Keep preparing state active
       setPreparingSlug(unique);
-      // Persist subject to server if logged in
-      try {
-        const me = await fetch("/api/me").then(r => r.json().catch(() => ({})));
-        if (me?.user) {
-          await fetch("/api/subjects", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: effectiveName, slug: unique }),
-          }).catch(() => {});
-        }
-      } catch {}
+      // DON'T save to server yet - wait until we have the final course name
+      // This prevents creating multiple courses on the server with "New Course" as the name
+      // We'll save it after the AI detects the proper course name (see final update below)
 
       const storedFiles = files.map((f) => ({ name: f.name, type: f.type }));
 
@@ -4082,8 +4106,9 @@ function Home() {
       const effectiveText = files.length > 0 ? combinedText : syllabus;
 
       const normalizedCourseLanguage = normalizeLanguageName(preferredLanguage);
+      // Save initial subject data - we'll update the name later when AI detects it
       const initData: StoredSubjectData = {
-        subject: effectiveName,
+        subject: effectiveName, // Will be updated when AI detects the real name
         files: storedFiles,
         combinedText: effectiveText,
         tree: null,
@@ -4095,7 +4120,17 @@ function Home() {
         course_language_code: languageNameToCode(normalizedCourseLanguage) || undefined,
         examDates: [],
       };
-      saveSubjectData(unique, initData);
+      // DON'T save subject data yet if we're using a placeholder slug (like "new-course")
+      // Wait until we know the final slug to avoid creating "new-course" subject data
+      // We'll save it after the AI detects the proper course name
+      const isPlaceholderSlug = unique.startsWith("new-course") || unique === "subject" || unique === "course";
+      if (!isPlaceholderSlug) {
+        // Only save if it's not a placeholder slug and we don't already have data
+        const existingData = loadSubjectData(unique);
+        if (!existingData) {
+          saveSubjectData(unique, initData);
+        }
+      }
 
       let documents: Array<{ name: string; text: string }> = [];
       try {
@@ -4225,8 +4260,11 @@ function Home() {
                   oldData.subject = effectiveName;
                   saveSubjectData(newUnique, oldData);
                   // Remove old data
-                  localStorage.removeItem(`atomicSubjectData_${unique}`);
+                  localStorage.removeItem(`atomicSubjectData:${unique}`);
                 }
+                
+                // Update unique to the new slug for the rest of the function
+                unique = newUnique;
                 
                 // Update on server if logged in
                 try {
@@ -4253,20 +4291,110 @@ function Home() {
         }
       } catch {}
 
+      // CRITICAL: Update subject data with the final course name
+      // This ensures the course name is correct in subject data, not "New Course"
+      const finalData = loadSubjectData(unique) as StoredSubjectData | null;
+      if (finalData) {
+        // Update the name to the final detected name
+        finalData.subject = effectiveName;
+        saveSubjectData(unique, finalData);
+      } else {
+        // If no data exists yet (shouldn't happen, but handle it), create it now with the correct name
+        const storedFiles = files.map((f) => ({ name: f.name, type: f.type }));
+        const textParts: string[] = [];
+        for (const f of files) {
+          const lower = f.name.toLowerCase();
+          if (f.type.startsWith('text/') || lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.markdown')) {
+            try {
+              const t = await f.text();
+              if (t) textParts.push(`--- ${f.name} ---\n${t}`);
+            } catch {}
+          }
+        }
+        const combinedText = textParts.join("\n\n");
+        const effectiveText = files.length > 0 ? combinedText : syllabus;
+        const normalizedCourseLanguage = normalizeLanguageName(preferredLanguage);
+        const newData: StoredSubjectData = {
+          subject: effectiveName,
+          files: storedFiles,
+          combinedText: effectiveText,
+          tree: null,
+          topics: [],
+          nodes: {},
+          progress: {},
+          course_context: contextSource || syllabus || "",
+          course_language_name: normalizedCourseLanguage || undefined,
+          course_language_code: languageNameToCode(normalizedCourseLanguage) || undefined,
+          examDates: [],
+        };
+        saveSubjectData(unique, newData);
+      }
+      
+      // CRITICAL: Clean up any orphaned subject data with placeholder slugs
+      // This removes any "new-course" entries that might have been created before the final slug was determined
+      if (typeof window !== "undefined") {
+        try {
+          // Always remove subject data for the placeholder slug if it's different from final slug
+          if (forceSlug && forceSlug !== unique) {
+            localStorage.removeItem(`atomicSubjectData:${forceSlug}`);
+          }
+          
+          // Also check preparingSlug if it's different
+          if (preparingSlug && preparingSlug !== unique) {
+            localStorage.removeItem(`atomicSubjectData:${preparingSlug}`);
+          }
+          
+          // Clean up any other placeholder slugs that aren't valid courses
+          const finalList = readSubjects();
+          const validSlugs = new Set(finalList.map(s => s.slug));
+          
+          // Check all localStorage keys for subject data
+          const keysToRemove: string[] = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith("atomicSubjectData:")) {
+              const slug = key.replace("atomicSubjectData:", "");
+              // If this slug is a placeholder pattern and not a valid course, mark it for removal
+              if ((slug.startsWith("new-course") || slug === "subject" || slug === "course") && 
+                  !validSlugs.has(slug) && slug !== unique) {
+                keysToRemove.push(key);
+              }
+            }
+          }
+          // Remove orphaned subject data
+          for (const key of keysToRemove) {
+            localStorage.removeItem(key);
+          }
+        } catch {}
+      }
+      
       // Remove preparing only after naming step is complete
       setPreparingSlug(null);
       
-      // Remove placeholder if it exists and replace with real course
-      setSubjects(prev => {
-        // Remove placeholder with the same slug
-        const withoutPlaceholder = prev.filter(s => s.slug !== unique || !(s as any).isPlaceholder);
-        // Check if the course already exists (not a placeholder)
-        if (withoutPlaceholder.some(s => s.slug === unique)) {
-          return withoutPlaceholder;
+      // Final update: ensure the course exists with the correct name and no duplicates
+      // Read fresh from localStorage to get the most up-to-date state
+      const finalList = readSubjects();
+      // Filter out any entries with this slug (including any stale placeholders)
+      const cleanedFinalList = finalList.filter(s => s.slug !== unique);
+      // Add/update the course with the final name
+      const updatedFinalList = [{ name: effectiveName, slug: unique }, ...cleanedFinalList];
+      localStorage.setItem("atomicSubjects", JSON.stringify(updatedFinalList));
+      
+      // Update state to match - this ensures UI shows the correct course name
+      setSubjects(updatedFinalList);
+      
+      // NOW save to server with the final course name (not "New Course")
+      // This prevents creating multiple courses on the server
+      try {
+        const me = await fetch("/api/me").then(r => r.json().catch(() => ({})));
+        if (me?.user) {
+          await fetch("/api/subjects", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: effectiveName, slug: unique }),
+          }).catch(() => {});
         }
-        // Add the real course
-        return [{ name: effectiveName, slug: unique }, ...withoutPlaceholder];
-      });
+      } catch {}
       
       if (typeof document !== 'undefined') {
         document.dispatchEvent(new CustomEvent('synapse:course-created', {
@@ -4297,97 +4425,8 @@ function Home() {
         } catch {}
       })();
 
-      // Auto-detect and process exam files using AI
-      (async () => {
-        try {
-          if (files.length === 0) return;
-
-          console.log(`Analyzing ${files.length} file(s) to detect exams...`);
-          
-          // Extract first 2000 characters from each file for AI analysis
-          const fileSnippets: Array<{ name: string; preview: string }> = [];
-          for (const file of files) {
-            try {
-              const lower = file.name.toLowerCase();
-              let preview = '';
-              
-              if (lower.endsWith('.pdf') || lower.endsWith('.docx')) {
-                // For PDFs and DOCX, use server-side extraction
-                const form = new FormData();
-                form.append('files', file);
-                const res = await fetch('/api/upload-course-files', { method: 'POST', body: form });
-                const json = await res.json().catch(() => ({}));
-                if (res.ok && json?.ok && Array.isArray(json.docs) && json.docs.length > 0) {
-                  preview = json.docs[0].text || '';
-                }
-              } else if (file.type.startsWith('text/') || lower.endsWith('.txt') || lower.endsWith('.md')) {
-                preview = await file.text();
-              }
-              
-              // Take first 2000 characters
-              if (preview) {
-                preview = preview.slice(0, 2000).trim();
-                if (preview.length > 50) {
-                  fileSnippets.push({ name: file.name, preview });
-                }
-              }
-            } catch (err) {
-              console.warn(`Failed to extract preview from ${file.name}:`, err);
-            }
-          }
-
-          if (fileSnippets.length === 0) return;
-
-          // Use AI to detect which files are exams (keepalive so it continues after navigation)
-          const detectRes = await fetch('/api/detect-exam-files', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fileSnippets }),
-            keepalive: true,
-          });
-
-          if (!detectRes.ok) {
-            console.warn('Failed to detect exam files');
-            return;
-          }
-
-          const detectJson = await detectRes.json().catch(() => ({}));
-          if (!detectJson?.ok || !Array.isArray(detectJson.examFiles)) {
-            return;
-          }
-
-          const examFileNames = new Set(detectJson.examFiles.map((name: string) => name));
-          const examFiles = files.filter(file => examFileNames.has(file.name));
-
-          if (examFiles.length === 0) {
-            console.log('No exam files detected');
-            // Hide the spinner
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('synapse:no-exam-snipe', {
-                detail: { subjectSlug: unique, courseName: effectiveName }
-              }));
-            }
-            return;
-          }
-
-          console.log(`AI detected ${examFiles.length} exam file(s), showing modal to user...`);
-          
-          // Show modal asking user if they want to run exam snipe
-          setDetectedExamFiles(examFiles);
-          setExamSnipeCourseSlug(unique);
-          setExamSnipeModalOpen(true);
-          
-          // Hide the checking spinner since we're showing modal instead
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('synapse:no-exam-snipe', {
-              detail: { subjectSlug: unique, courseName: effectiveName }
-            }));
-          }
-        } catch (err) {
-          console.warn('Failed to auto-create exam snipe:', err);
-          // Don't throw - this is a background process
-        }
-      })();
+      // Note: Exam file detection now happens concurrently in createCourseFromFiles
+      // and the modal is shown after course creation completes
     } catch (error) {
       setPreparingSlug(null);
       
@@ -4484,6 +4523,82 @@ function Home() {
       setPreparingSlug(unique);
     });
     
+    // Start exam file detection concurrently (before course creation)
+    // This runs in parallel with course creation
+    const examDetectionPromise = (async () => {
+      try {
+        if (files.length === 0) return null;
+
+        console.log(`Analyzing ${files.length} file(s) to detect exams...`);
+        
+        // Extract first 2000 characters from each file for AI analysis
+        const fileSnippets: Array<{ name: string; preview: string }> = [];
+        for (const file of files) {
+          try {
+            const lower = file.name.toLowerCase();
+            let preview = '';
+            
+            if (lower.endsWith('.pdf') || lower.endsWith('.docx')) {
+              // For PDFs and DOCX, use server-side extraction
+              const form = new FormData();
+              form.append('files', file);
+              const res = await fetch('/api/upload-course-files', { method: 'POST', body: form });
+              const json = await res.json().catch(() => ({}));
+              if (res.ok && json?.ok && Array.isArray(json.docs) && json.docs.length > 0) {
+                preview = json.docs[0].text || '';
+              }
+            } else if (file.type.startsWith('text/') || lower.endsWith('.txt') || lower.endsWith('.md')) {
+              preview = await file.text();
+            }
+            
+            // Take first 2000 characters
+            if (preview) {
+              preview = preview.slice(0, 2000).trim();
+              if (preview.length > 50) {
+                fileSnippets.push({ name: file.name, preview });
+              }
+            }
+          } catch (err) {
+            console.warn(`Failed to extract preview from ${file.name}:`, err);
+          }
+        }
+
+        if (fileSnippets.length === 0) return null;
+
+        // Use AI to detect which files are exams
+        const detectRes = await fetch('/api/detect-exam-files', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileSnippets }),
+          keepalive: true,
+        });
+
+        if (!detectRes.ok) {
+          console.warn('Failed to detect exam files');
+          return null;
+        }
+
+        const detectJson = await detectRes.json().catch(() => ({}));
+        if (!detectJson?.ok || !Array.isArray(detectJson.examFiles)) {
+          return null;
+        }
+
+        const examFileNames = new Set(detectJson.examFiles.map((name: string) => name));
+        const examFiles = files.filter(file => examFileNames.has(file.name));
+
+        if (examFiles.length === 0) {
+          console.log('No exam files detected');
+          return null;
+        }
+
+        console.log(`AI detected ${examFiles.length} exam file(s)`);
+        return { files: examFiles, courseSlug: unique, courseName: tempName };
+      } catch (err) {
+        console.warn('Failed to auto-detect exam files:', err);
+        return null;
+      }
+    })();
+
     // Now start async work AFTER React has rendered the preparing card
     // Use setTimeout to ensure React has painted the UI
     setTimeout(() => {
@@ -4524,7 +4639,24 @@ function Home() {
 
         if (fileSnippets.length === 0) {
           // No preview available, proceed with course creation
-          await createCourse('New Course', "", files);
+          // Exam detection is running concurrently - we'll check it after course creation
+          await createCourse('New Course', "", files, undefined, unique);
+          
+          // After course creation completes, get the final course slug from subjects list
+          const finalList = readSubjects();
+          let finalSlug = unique;
+          const createdCourse = finalList.find(s => s.slug === unique) || finalList[0];
+          if (createdCourse && createdCourse.name !== "New Course") {
+            finalSlug = createdCourse.slug;
+          }
+          
+          // Check if exam files were detected
+          const examResult = await examDetectionPromise;
+          if (examResult) {
+            setDetectedExamFiles(examResult.files);
+            setExamSnipeCourseSlug(finalSlug);
+            setExamSnipeModalOpen(true);
+          }
           return;
         }
 
@@ -4538,14 +4670,48 @@ function Home() {
 
         if (!detectRes.ok) {
           // Detection failed, proceed with course creation
-          await createCourse('New Course', "", files);
+          // Exam detection is running concurrently - we'll check it after course creation
+          await createCourse('New Course', "", files, undefined, unique);
+          
+          // After course creation completes, get the final course slug from subjects list
+          const finalList = readSubjects();
+          let finalSlug = unique;
+          const createdCourse = finalList.find(s => s.slug === unique) || finalList[0];
+          if (createdCourse && createdCourse.name !== "New Course") {
+            finalSlug = createdCourse.slug;
+          }
+          
+          // Check if exam files were detected
+          const examResult = await examDetectionPromise;
+          if (examResult) {
+            setDetectedExamFiles(examResult.files);
+            setExamSnipeCourseSlug(finalSlug);
+            setExamSnipeModalOpen(true);
+          }
           return;
         }
 
         const detectJson = await detectRes.json().catch(() => ({}));
         if (!detectJson?.ok || !Array.isArray(detectJson.labFiles)) {
           // No lab files detected, proceed with course creation
-          await createCourse('New Course', "", files);
+          // Exam detection is running concurrently - we'll check it after course creation
+          await createCourse('New Course', "", files, undefined, unique);
+          
+          // After course creation completes, get the final course slug from subjects list
+          const finalList = readSubjects();
+          let finalSlug = unique;
+          const createdCourse = finalList.find(s => s.slug === unique) || finalList[0];
+          if (createdCourse && createdCourse.name !== "New Course") {
+            finalSlug = createdCourse.slug;
+          }
+          
+          // Check if exam files were detected
+          const examResult = await examDetectionPromise;
+          if (examResult) {
+            setDetectedExamFiles(examResult.files);
+            setExamSnipeCourseSlug(finalSlug);
+            setExamSnipeModalOpen(true);
+          }
           return;
         }
 
@@ -4566,12 +4732,51 @@ function Home() {
         }
 
         // No lab files detected, proceed with course creation
-        await createCourse('New Course', "", files);
+        // Exam detection is running concurrently - we'll check it after course creation
+        await createCourse('New Course', "", files, undefined, unique);
+        
+        // After course creation completes, get the final course slug from the subjects list
+        // The course might have been renamed by AI, so find it by checking the first course
+        // that's not "New Course" or by matching the placeholder slug
+        const finalList = readSubjects();
+        let finalSlug = unique; // Default to placeholder
+        // Find the course - it should be the first one if it was just created
+        // Or find it by matching the placeholder slug (which might have been updated)
+        const createdCourse = finalList.find(s => s.slug === unique) || finalList[0];
+        if (createdCourse && createdCourse.name !== "New Course") {
+          finalSlug = createdCourse.slug;
+        }
+        
+        // Check if exam files were detected
+        const examResult = await examDetectionPromise;
+        if (examResult) {
+          // Use the final course slug (not the placeholder)
+          setDetectedExamFiles(examResult.files);
+          setExamSnipeCourseSlug(finalSlug);
+          setExamSnipeModalOpen(true);
+        }
       } catch (err) {
         console.warn('Failed to detect lab files:', err);
         // On error, proceed with course creation
         try {
-          await createCourse('New Course', "", files);
+          // Exam detection is running concurrently - we'll check it after course creation
+          await createCourse('New Course', "", files, undefined, unique);
+          
+          // After course creation completes, get the final course slug
+          const finalList = readSubjects();
+          let finalSlug = unique;
+          const createdCourse = finalList.find(s => s.slug === unique) || finalList[0];
+          if (createdCourse && createdCourse.name !== "New Course") {
+            finalSlug = createdCourse.slug;
+          }
+          
+          // Check if exam files were detected
+          const examResult = await examDetectionPromise;
+          if (examResult) {
+            setDetectedExamFiles(examResult.files);
+            setExamSnipeCourseSlug(finalSlug);
+            setExamSnipeModalOpen(true);
+          }
         } catch (createErr) {
           console.error('Failed to auto-create course', createErr);
           // Clear preparing state on error
@@ -4963,11 +5168,14 @@ function Home() {
                       }
                     } catch {}
                     
-                    // Delete from local storage
+                    // Delete from local storage - remove ALL course-related data
                     const next = subjects.filter((t) => t.slug !== s.slug);
                     localStorage.setItem("atomicSubjects", JSON.stringify(next));
-                    try { localStorage.removeItem("atomicSubjectData:" + s.slug); } catch {}
-                    try { localStorage.removeItem("atomicPracticeLog:" + s.slug); } catch {}
+                    // Remove all localStorage entries for this course
+                    try { localStorage.removeItem(`atomicSubjectData:${s.slug}`); } catch {}
+                    try { localStorage.removeItem(`atomicPracticeLog:${s.slug}`); } catch {}
+                    // Also try legacy format just in case
+                    try { localStorage.removeItem(`atomicSubjectData_${s.slug}`); } catch {}
                     setSubjects(next);
                     setMenuOpenFor(null);
                   }}

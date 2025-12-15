@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Modal from "@/components/Modal";
 import { APP_VERSION } from "@/lib/version";
+import Link from "next/link";
 
 type Theme = {
   background: string;
@@ -431,6 +432,19 @@ export default function SettingsModal({
           <span className="font-mono text-[var(--foreground)]/70">{APP_VERSION}</span>
         </p>
       </div>
+
+      {/* Data Management Link for Tester Tier */}
+      {subscriptionLevel === "Tester" && (
+        <div className="mb-6">
+          <Link
+            href="/admin/data"
+            onClick={handleClose}
+            className="block w-full p-3 rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/60 hover:bg-[var(--background)]/80 hover:border-[var(--accent-cyan)]/50 transition-all text-sm text-[var(--foreground)] text-center"
+          >
+            Manage All Data (Courses, Lessons, Exam Snipes)
+          </Link>
+        </div>
+      )}
 
       {/* Preferred Title */}
       {isAuthenticated && (

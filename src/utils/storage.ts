@@ -176,12 +176,15 @@ export function saveSubjectData(slug: string, data: StoredSubjectData) {
     syncSubjectDataToServer(slug, data).catch(() => {});
   } catch (err) {
     try {
+      // If local storage fails (quota), still try to sync the full payload to server.
+      syncSubjectDataToServer(slug, data).catch(() => {});
+
       const slim: StoredSubjectData = { ...data } as any;
       // Drop heavy fields if quota exceeded
       if (Array.isArray(slim.files)) {
         slim.files = slim.files.map((f) => ({ name: f.name, type: f.type }));
       }
-      if (typeof slim.combinedText === 'string' && slim.combinedText.length > 200_000) {
+      if (typeof slim.combinedText === "string" && slim.combinedText.length > 200_000) {
         slim.combinedText = slim.combinedText.slice(0, 200_000);
       }
       // Trim rawLessonJson if present
@@ -202,32 +205,12 @@ export function saveSubjectData(slug: string, data: StoredSubjectData) {
 export async function saveSubjectDataAsync(slug: string, data: StoredSubjectData): Promise<void> {
   if (typeof window === "undefined") return;
   try {
-    console.log("=== saveSubjectDataAsync DEBUG ===");
-    console.log("Saving for slug:", slug);
-    console.log("SurgeLog entries to save:", data?.surgeLog?.map((e: any, idx: number) => ({
-      index: idx,
-      sessionId: e.sessionId,
-      timestamp: e.timestamp,
-      date: new Date(e.timestamp).toISOString()
-    })) || "no surgeLog");
-    
     localStorage.setItem(PREFIX + slug, JSON.stringify(data));
-    
-    // Verify immediately after save
-    const verify = localStorage.getItem(PREFIX + slug);
-    if (verify) {
-      const verifyData = JSON.parse(verify);
-      console.log("Verified after localStorage.setItem:", verifyData?.surgeLog?.map((e: any, idx: number) => ({
-        index: idx,
-        sessionId: e.sessionId,
-        timestamp: e.timestamp,
-        date: new Date(e.timestamp).toISOString()
-      })) || "no surgeLog");
-    }
-    console.log("=== saveSubjectDataAsync DEBUG END ===");
-    
+
     await syncSubjectDataToServer(slug, data);
   } catch (err) {
+    // If local storage fails (quota), still try to sync the full payload to server first.
+    await syncSubjectDataToServer(slug, data).catch(() => {});
     try {
       const slim: StoredSubjectData = { ...data } as any;
       // Drop heavy fields if quota exceeded
@@ -247,8 +230,8 @@ export async function saveSubjectDataAsync(slug: string, data: StoredSubjectData
         }
       }
       localStorage.setItem(PREFIX + slug, JSON.stringify(slim));
-      // Try to sync the slimmed version
-      await syncSubjectDataToServer(slug, slim);
+      // If full sync failed above, the slimmed version is a fallback.
+      await syncSubjectDataToServer(slug, slim).catch(() => {});
     } catch {}
   }
 }

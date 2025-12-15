@@ -63,6 +63,14 @@ function createQuizQuestionId(prefix: string, question: string) {
   return `${prefix}-${Math.abs(hash)}`;
 }
 
+function stableTextHash(input: string): string {
+  let hash = 5381;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) + hash) ^ input.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(16);
+}
+
 function extractSurgeQuizQuestionsFromText(text: string): SurgeQuizQuestion[] {
   const questions: SurgeQuizQuestion[] = [];
   const seen = new Set<string>();
@@ -2830,7 +2838,7 @@ export default function SurgePage() {
       const trimmedLesson = lessonContent?.trim();
       if (!trimmedLesson || !topicName) return;
 
-      const signature = `${sessionId}:${topicName}:${trimmedLesson.length}`;
+      const signature = `${sessionId}:${topicName}:${trimmedLesson.length}:${stableTextHash(trimmedLesson)}`;
       if (lastPersistedLessonSignatureRef.current === signature) {
         return;
       }
@@ -4403,4 +4411,3 @@ export default function SurgePage() {
     </div>
   );
 }
-

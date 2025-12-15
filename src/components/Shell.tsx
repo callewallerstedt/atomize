@@ -6610,6 +6610,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               >
                 Show Onboarding
               </button>
+              {subscriptionLevel === "Tester" && (
+                <button
+                  onClick={() => {
+                    setDevToolsModalOpen(false);
+                    router.push('/admin/data');
+                  }}
+                  className="inline-flex items-center rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-white/30 hover:bg-white/5 transition-colors"
+                >
+                  Data Management
+                </button>
+              )}
             </div>
           </div>
 

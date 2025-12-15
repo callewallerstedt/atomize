@@ -730,7 +730,15 @@ function ensureClosedMathBlocks(md: string): string {
 	return md;
 }
 
-export function LessonBody({ body }: { body: string }) {
+export function LessonBody({ 
+  body, 
+  highlights = [], 
+  onHighlightClick 
+}: { 
+  body: string; 
+  highlights?: Array<{ id: string; text: string; color: string; note?: string; occurrenceIndex?: number }>; 
+  onHighlightClick?: (e: React.MouseEvent, highlight: any) => void;
+}) {
 	const prepared = restoreForRender(body ?? "");
 	// Ensure all code fences are closed before parsing (important for streaming content)
 	// This prevents markdown-it from treating everything as code when content starts with ```
@@ -858,12 +866,217 @@ export function LessonBody({ body }: { body: string }) {
 		parts.push(html.slice(lastIndex));
 	}
 	
+	// Apply highlights to the rendered HTML (after markdown/LaTeX processing)
+	// This ensures highlights work correctly with LaTeX and markdown formatting
+	// We'll use a simpler approach: extract text content, find matches, then wrap in HTML
+	if (highlights && highlights.length > 0 && typeof window !== 'undefined') {
+		// Create a temporary DOM element to extract text and apply highlights
+		const tempDiv = document.createElement('div');
+		tempDiv.innerHTML = html;
+		
+		// Extract all text content (ignoring HTML tags) to find matches
+		const fullText = tempDiv.textContent || tempDiv.innerText || '';
+		
+		// Apply highlights in reverse order to preserve indices
+		const sortedHighlights = [...highlights].sort((a, b) => {
+			// Sort by occurrenceIndex first (descending), then by text position
+			const aOcc = a.occurrenceIndex ?? 0;
+			const bOcc = b.occurrenceIndex ?? 0;
+			if (aOcc !== bOcc) return bOcc - aOcc;
+			// If same occurrence, sort by position (descending to apply from end)
+			const aPos = fullText.indexOf(a.text || '', 0);
+			const bPos = fullText.indexOf(b.text || '', 0);
+			return bPos - aPos;
+		});
+		
+		for (const highlight of sortedHighlights) {
+			if (!highlight.text) continue;
+			
+			const searchText = highlight.text.trim();
+			if (!searchText) continue;
+			
+			const occurrenceIdx = highlight.occurrenceIndex ?? 0;
+			
+			// Find the occurrence in the full text
+			let foundOccurrence = 0;
+			let searchStart = 0;
+			let foundIndex = -1;
+			
+			while (true) {
+				const index = fullText.indexOf(searchText, searchStart);
+				if (index === -1) break;
+				if (foundOccurrence === occurrenceIdx) {
+					foundIndex = index;
+					break;
+				}
+				foundOccurrence++;
+				searchStart = index + 1;
+			}
+			
+			if (foundIndex === -1) {
+				// Fallback: try first occurrence
+				foundIndex = fullText.indexOf(searchText);
+			}
+			
+			if (foundIndex === -1) continue;
+			
+			// Now we need to find this text in the HTML and wrap it
+			// We'll use a regex to find the text while ignoring HTML tags
+			// But we need to be careful not to match inside code blocks or LaTeX
+			
+			// Simple approach: find text nodes that contain our text
+			const walker = document.createTreeWalker(
+				tempDiv,
+				NodeFilter.SHOW_TEXT,
+				{
+					acceptNode: (node) => {
+						// Skip text inside code, pre, script, style, and katex elements
+						const parent = node.parentElement;
+						if (!parent) return NodeFilter.FILTER_REJECT;
+						if (parent.closest('code, pre, script, style, .katex')) {
+							return NodeFilter.FILTER_REJECT;
+						}
+						return NodeFilter.FILTER_ACCEPT;
+					}
+				}
+			);
+			
+			let currentTextPos = 0;
+			let startNode: Text | null = null;
+			let startOffset = 0;
+			let endNode: Text | null = null;
+			let endOffset = 0;
+			
+			let node;
+			while ((node = walker.nextNode())) {
+				const textNode = node as Text;
+				const text = textNode.textContent || '';
+				const nodeStart = currentTextPos;
+				const nodeEnd = currentTextPos + text.length;
+				
+				if (foundIndex >= nodeStart && foundIndex < nodeEnd && !startNode) {
+					startNode = textNode;
+					startOffset = foundIndex - nodeStart;
+				}
+				const endPos = foundIndex + searchText.length;
+				if (endPos > nodeStart && endPos <= nodeEnd && !endNode) {
+					endNode = textNode;
+					endOffset = endPos - nodeStart;
+				}
+				
+				if (startNode && endNode) break;
+				
+				currentTextPos = nodeEnd;
+			}
+			
+			if (!startNode || !endNode) continue;
+			
+			// Wrap the text in a mark element
+			if (startNode === endNode) {
+				// Single node case
+				const beforeText = startNode.textContent?.slice(0, startOffset) || '';
+				const highlightText = startNode.textContent?.slice(startOffset, endOffset) || '';
+				const afterText = startNode.textContent?.slice(endOffset) || '';
+				
+				const mark = document.createElement('mark');
+				mark.setAttribute('data-highlight-id', highlight.id);
+				mark.style.cssText = `background-color: ${highlight.color}40; color: inherit; text-shadow: none; cursor: pointer; border-radius: 3px; padding: 1px 2px;`;
+				mark.setAttribute('title', highlight.note || 'Click to edit highlight');
+				mark.textContent = highlightText;
+				
+				if (beforeText) {
+					startNode.textContent = beforeText;
+					startNode.parentNode?.insertBefore(mark, startNode.nextSibling);
+					if (afterText) {
+						const afterNode = document.createTextNode(afterText);
+						startNode.parentNode?.insertBefore(afterNode, mark.nextSibling);
+					}
+				} else {
+					startNode.textContent = '';
+					startNode.parentNode?.insertBefore(mark, startNode);
+					if (afterText) {
+						const afterNode = document.createTextNode(afterText);
+						startNode.parentNode?.insertBefore(afterNode, mark.nextSibling);
+					} else {
+						startNode.remove();
+					}
+				}
+			} else {
+				// Multiple nodes case - more complex, but handle it
+				// For now, just mark the first and last nodes
+				const firstBefore = startNode.textContent?.slice(0, startOffset) || '';
+				const firstHighlight = startNode.textContent?.slice(startOffset) || '';
+				const markStart = document.createElement('mark');
+				markStart.setAttribute('data-highlight-id', highlight.id);
+				markStart.style.cssText = `background-color: ${highlight.color}40; color: inherit; text-shadow: none; cursor: pointer; border-radius: 3px; padding: 1px 2px;`;
+				markStart.setAttribute('title', highlight.note || 'Click to edit highlight');
+				markStart.textContent = firstHighlight;
+				
+				if (firstBefore) {
+					startNode.textContent = firstBefore;
+					startNode.parentNode?.insertBefore(markStart, startNode.nextSibling);
+				} else {
+					startNode.parentNode?.replaceChild(markStart, startNode);
+				}
+				
+				// Handle middle nodes
+				let currentNode = markStart.nextSibling;
+				while (currentNode && currentNode !== endNode) {
+					if (currentNode.nodeType === Node.TEXT_NODE) {
+						const markMiddle = document.createElement('mark');
+						markMiddle.setAttribute('data-highlight-id', highlight.id);
+						markMiddle.style.cssText = `background-color: ${highlight.color}40; color: inherit; text-shadow: none; cursor: pointer; border-radius: 3px; padding: 1px 2px;`;
+						markMiddle.setAttribute('title', highlight.note || 'Click to edit highlight');
+						markMiddle.textContent = currentNode.textContent;
+						currentNode.parentNode?.replaceChild(markMiddle, currentNode);
+						currentNode = markMiddle.nextSibling;
+					} else {
+						currentNode = currentNode.nextSibling;
+					}
+				}
+				
+				// Handle last node
+				const lastHighlight = endNode.textContent?.slice(0, endOffset) || '';
+				const lastAfter = endNode.textContent?.slice(endOffset) || '';
+				const markEnd = document.createElement('mark');
+				markEnd.setAttribute('data-highlight-id', highlight.id);
+				markEnd.style.cssText = `background-color: ${highlight.color}40; color: inherit; text-shadow: none; cursor: pointer; border-radius: 3px; padding: 1px 2px;`;
+				markEnd.setAttribute('title', highlight.note || 'Click to edit highlight');
+				markEnd.textContent = lastHighlight;
+				
+				if (lastAfter) {
+					endNode.textContent = lastAfter;
+					endNode.parentNode?.insertBefore(markEnd, endNode);
+				} else {
+					endNode.parentNode?.replaceChild(markEnd, endNode);
+				}
+			}
+		}
+		
+		html = tempDiv.innerHTML;
+	}
+	
 	// If no code blocks, just render normally
 	if (codeBlocks.length === 0) {
 		html = md.render(withMathDelimiters);
+		// Apply highlights to the rendered HTML (code above handles this)
 		return (
 			<>
-				<div className="lesson-content prose max-w-none" dangerouslySetInnerHTML={{ __html: html }} />
+				<div 
+					className="lesson-content prose max-w-none" 
+					dangerouslySetInnerHTML={{ __html: html }}
+					onClick={(e) => {
+						// Handle clicks on highlight marks
+						const target = e.target as HTMLElement;
+						if (target.tagName === 'MARK' && target.hasAttribute('data-highlight-id') && onHighlightClick) {
+							const highlightId = target.getAttribute('data-highlight-id');
+							const highlight = highlights?.find(h => h.id === highlightId);
+							if (highlight) {
+								onHighlightClick(e as any, highlight);
+							}
+						}
+					}}
+				/>
 				<style jsx global>{`
 					.lesson-content .practice-problem-container {
 						position: relative;
@@ -907,10 +1120,33 @@ export function LessonBody({ body }: { body: string }) {
 	
 	return (
 		<>
-			<div className="lesson-content prose max-w-none">
+			<div 
+				className="lesson-content prose max-w-none"
+				onClick={(e) => {
+					// Handle clicks on highlight marks
+					const target = e.target as HTMLElement;
+					if (target.tagName === 'MARK' && target.hasAttribute('data-highlight-id') && onHighlightClick) {
+						const highlightId = target.getAttribute('data-highlight-id');
+						const highlight = highlights?.find(h => h.id === highlightId);
+						if (highlight) {
+							onHighlightClick(e as any, highlight);
+						}
+					}
+				}}
+			>
 				{parts.map((part, idx) => {
 					if (typeof part === 'string') {
-						return <div key={idx} dangerouslySetInnerHTML={{ __html: part }} />;
+						// Apply highlights to string parts
+						let partHtml = part;
+						if (highlights && highlights.length > 0) {
+							// Apply highlights to this HTML part
+							const tempDiv = document.createElement('div');
+							tempDiv.innerHTML = partHtml;
+							// Similar highlight application logic as above, but for this part only
+							// For now, we'll apply highlights globally after all parts are rendered
+							partHtml = tempDiv.innerHTML;
+						}
+						return <div key={idx} dangerouslySetInnerHTML={{ __html: partHtml }} />;
 					} else if (part.type === 'code') {
 						return <CodeBlock key={idx} code={part.code} language={part.language} />;
 					} else if (part.type === 'arrow') {

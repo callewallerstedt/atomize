@@ -35,7 +35,14 @@ export default function NodePage({ lessonIndexFromUrl }: { lessonIndexFromUrl?: 
   const params = useParams<{ slug: string; name: string }>();
   const router = useRouter();
   const slug = params.slug;
-  const title = decodeURIComponent(params.name || "");
+  const title = (() => {
+    const raw = params.name || "";
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return raw;
+    }
+  })();
   const [content, setContent] = useState<TopicGeneratedContent | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [lessonLoading, setLessonLoading] = useState<boolean>(false);
@@ -907,58 +914,123 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
         } else {
           setSubscriptionLevel("Free");
         }
-        const meJson = await meRes.json().catch(() => ({}));
-        if (meJson?.user) {
+
+        if (meData?.user) {
           const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, { credentials: "include" });
           const dataJson = await dataRes.json().catch(() => ({}));
           if (dataRes.ok && dataJson?.data) {
-            // Merge server data with any richer local data (preserve locally generated flashcards)
+            // Merge server data with any richer local data (preserve locally generated user state like flashcards/highlights)
             const local = loadSubjectData(slug);
             let merged = dataJson.data as StoredSubjectData;
-            try {
-              if (local && local.nodes && merged?.nodes) {
-                const localNode = local.nodes[title] as any;
-                const serverNode = merged.nodes[title] as any;
-                if (localNode && typeof localNode === "object") {
-                  const outNode = serverNode && typeof serverNode === "object"
-                    ? { ...serverNode }
-                    : { overview: "", symbols: [], lessons: [] as any[] };
-                  const localLessons = Array.isArray(localNode.lessons) ? localNode.lessons : [];
-                  const serverLessons = Array.isArray(outNode.lessons) ? outNode.lessons : [];
-                  const maxLen = Math.max(localLessons.length, serverLessons.length);
-                  const combinedLessons: any[] = new Array(maxLen);
-                  for (let i = 0; i < maxLen; i++) {
-                    const sl = serverLessons[i];
-                    const ll = localLessons[i];
-                    if (sl && ll) {
-                      combinedLessons[i] = {
-                        ...sl,
-                        // If server lacks flashcards but local has them, keep local flashcards
-                        flashcards: Array.isArray(sl.flashcards) && sl.flashcards.length > 0
-                          ? sl.flashcards
-                          : (Array.isArray(ll.flashcards) ? ll.flashcards : undefined),
-                      };
-                    } else if (sl) {
-                      combinedLessons[i] = sl;
-                    } else if (ll) {
-                      combinedLessons[i] = ll;
-                    } else {
-                      combinedLessons[i] = null;
-                    }
+            let needsServerSync = false;
+
+            const isObject = (v: any) => v && typeof v === "object" && !Array.isArray(v);
+
+            const mergeLessons = (serverLessons: any[], localLessons: any[]) => {
+              if (localLessons.length > serverLessons.length) needsServerSync = true;
+              const maxLen = Math.max(serverLessons.length, localLessons.length);
+              const combined: any[] = new Array(maxLen);
+
+              for (let i = 0; i < maxLen; i++) {
+                const sl = serverLessons[i];
+                const ll = localLessons[i];
+
+                if (sl && ll && isObject(sl) && isObject(ll)) {
+                  const out = { ...ll, ...sl };
+
+                  // If server lacks user-generated extras, preserve local versions.
+                  if (!(Array.isArray(sl.flashcards) && sl.flashcards.length > 0) && Array.isArray(ll.flashcards) && ll.flashcards.length > 0) {
+                    out.flashcards = ll.flashcards;
+                    needsServerSync = true;
                   }
-                  outNode.lessons = combinedLessons;
-                  merged = {
-                    ...merged,
-                    nodes: {
-                      ...merged.nodes,
-                      [title]: outNode,
-                    },
-                  };
+                  if (!(Array.isArray(sl.highlights) && sl.highlights.length > 0) && Array.isArray(ll.highlights) && ll.highlights.length > 0) {
+                    out.highlights = ll.highlights;
+                    needsServerSync = true;
+                  }
+                  if (!(Array.isArray(sl.videos) && sl.videos.length > 0) && Array.isArray(ll.videos) && ll.videos.length > 0) {
+                    out.videos = ll.videos;
+                    needsServerSync = true;
+                  }
+                  if (!(Array.isArray(sl.userAnswers) && sl.userAnswers.length > 0) && Array.isArray(ll.userAnswers) && ll.userAnswers.length > 0) {
+                    out.userAnswers = ll.userAnswers;
+                    needsServerSync = true;
+                  }
+                  if (!(sl.quizResults && typeof sl.quizResults === "object") && ll.quizResults && typeof ll.quizResults === "object") {
+                    out.quizResults = ll.quizResults;
+                    needsServerSync = true;
+                  }
+                  if (!(Array.isArray(sl.practiceProblems) && sl.practiceProblems.length > 0) && Array.isArray(ll.practiceProblems) && ll.practiceProblems.length > 0) {
+                    out.practiceProblems = ll.practiceProblems;
+                    needsServerSync = true;
+                  }
+                  if (!(sl.body && typeof sl.body === "string" && sl.body.trim().length > 0) && ll.body && String(ll.body).trim().length > 0) {
+                    out.body = ll.body;
+                    needsServerSync = true;
+                  }
+
+                  combined[i] = out;
+                } else if (sl) {
+                  combined[i] = sl;
+                } else if (ll) {
+                  combined[i] = ll;
+                  needsServerSync = true;
+                } else {
+                  combined[i] = null;
                 }
               }
+
+              return combined;
+            };
+
+            try {
+              if (local && local.nodes && merged?.nodes) {
+                const mergedNodes: Record<string, any> = { ...(merged.nodes as any) };
+
+                for (const nodeName of Object.keys(local.nodes || {})) {
+                  const localNode = (local.nodes as any)[nodeName];
+                  const serverNode = mergedNodes[nodeName];
+
+                  if (!serverNode) {
+                    mergedNodes[nodeName] = localNode;
+                    needsServerSync = true;
+                    continue;
+                  }
+
+                  if (isObject(localNode) && isObject(serverNode)) {
+                    const outNode: any = { ...localNode, ...serverNode };
+
+                    const localLessons = Array.isArray(localNode.lessons) ? localNode.lessons : [];
+                    const serverLessons = Array.isArray(serverNode.lessons) ? serverNode.lessons : [];
+                    outNode.lessons = mergeLessons(serverLessons, localLessons);
+
+                    if (Array.isArray(serverNode.lessonsMeta) || Array.isArray(localNode.lessonsMeta)) {
+                      const localMeta = Array.isArray(localNode.lessonsMeta) ? localNode.lessonsMeta : [];
+                      const serverMeta = Array.isArray(serverNode.lessonsMeta) ? serverNode.lessonsMeta : [];
+                      outNode.lessonsMeta = serverMeta.length >= localMeta.length ? serverMeta : localMeta;
+                    }
+
+                    mergedNodes[nodeName] = outNode;
+                  }
+                }
+
+                merged = { ...merged, nodes: mergedNodes as any };
+              }
             } catch {}
-            localStorage.setItem(`atomicSubjectData:${slug}`, JSON.stringify(merged));
+
+            try {
+              localStorage.setItem(`atomicSubjectData:${slug}`, JSON.stringify(merged));
+            } catch {}
             setSubjectData(merged);
+
+            // Best-effort: if local contained richer data than server, push the merged version back to the DB.
+            if (needsServerSync) {
+              fetch("/api/subject-data", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ slug, data: merged }),
+              }).catch(() => {});
+            }
           }
         }
       } catch {}
@@ -2235,16 +2307,16 @@ function toggleStar(flashcardId: string) {
                       if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
                       const shortenedLesson = json.data || {};
                       const next = preserveExamSnipeMeta({ ...(content as TopicGeneratedContent) });
-                      next.lessons[lessonIdx] = {
-                        ...currentLesson,
-                        body: String(shortenedLesson.body || currentLesson.body),
-                      };
-                      setContent(next);
-                      upsertNodeContent(slug, title, next as any);
-                    } catch (err: any) {
-                      alert(err?.message || "Failed to shorten lesson");
-                    } finally {
-                      setShorteningLesson(false);
+                       next.lessons[lessonIdx] = {
+                         ...currentLesson,
+                         body: String(shortenedLesson.body || currentLesson.body),
+                       };
+                       setContent(next);
+                       await upsertNodeContentAsync(slug, title, next as any);
+                     } catch (err: any) {
+                       alert(err?.message || "Failed to shorten lesson");
+                     } finally {
+                       setShorteningLesson(false);
                     }
                   }}
                   disabled={shorteningLesson || lessonLoading}
@@ -3137,34 +3209,9 @@ function toggleStar(flashcardId: string) {
                           .replace(/^Subject:.*\n/m, '')
                           .replace(/^Topic:.*\n/m, '');
                         
-                        // Apply highlights to the body
-                        // We respect occurrenceIndex to ensure the correct instance is marked
-                        const sortedHighlights = [...lessonHighlights].sort((a, b) => b.startOffset - a.startOffset);
-                        for (const hl of sortedHighlights) {
-                          if (!hl.text) continue;
-                          const occurrenceIdx = hl.occurrenceIndex ?? 0;
-                          let start = -1;
-                          let idx = 0;
-                          while (true) {
-                            start = processedBody.indexOf(hl.text, start + 1);
-                            if (start === -1) break;
-                            if (idx === occurrenceIdx) break;
-                            idx++;
-                          }
-                          if (start === -1) {
-                            // fallback to first occurrence
-                            start = processedBody.indexOf(hl.text);
-                          }
-                          if (start === -1) continue;
-                          const end = start + hl.text.length;
-                          const before = processedBody.slice(0, start);
-                          const highlighted = processedBody.slice(start, end);
-                          const after = processedBody.slice(end);
-                          processedBody = before + `<mark data-highlight-id="${hl.id}" style="background-color: ${hl.color}40; color: inherit; text-shadow: none; cursor: pointer; border-radius: 3px; padding: 1px 2px;" title="${hl.note || 'Click to edit highlight'}">${highlighted}</mark>` + after;
-                        }
-                        
                         processedBody = sanitizeLessonBody(processedBody);
-                        return <LessonBody body={processedBody} />;
+                        // Pass highlights to LessonBody which will apply them to rendered HTML
+                        return <LessonBody body={processedBody} highlights={lessonHighlights} onHighlightClick={handleHighlightMarkClick} />;
                       })()}
                     </div>
                     <style jsx global>{`
@@ -3293,13 +3340,13 @@ function toggleStar(flashcardId: string) {
                                     while (finalNext.rawLessonJson.length <= activeLessonIndex) {
                                       finalNext.rawLessonJson.push(null);
                                     }
-                                    finalNext.rawLessonJson[activeLessonIndex] = accumulated;
-                                    setContent(finalNext);
-                                    upsertNodeContent(slug, title, finalNext as any);
-                                    
-                                    // Generate practice problems after lesson is complete (async, don't block)
-                                    generatePracticeProblemsForLesson(bodyMarkdown, activeLessonIndex);
-                                  }
+                                     finalNext.rawLessonJson[activeLessonIndex] = accumulated;
+                                     setContent(finalNext);
+                                     await upsertNodeContentAsync(slug, title, finalNext as any);
+                                     
+                                     // Generate practice problems after lesson is complete (async, don't block)
+                                     generatePracticeProblemsForLesson(bodyMarkdown, activeLessonIndex);
+                                   }
                                 } catch (err) {
                                   if (!(err instanceof SyntaxError)) {
                                     throw err;
