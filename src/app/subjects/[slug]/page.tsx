@@ -522,10 +522,53 @@ export default function SubjectPage() {
         // Sync lessons from exam snipes to main course
         await syncExamSnipeLessonsToMainCourse(records);
       } else {
-        setExamSnipes([]);
+        // Fallback for shared/offline viewing: read embedded exam snipes from local subject data.
+        const local = loadSubjectData(slug) as any;
+        const embedded = Array.isArray(local?.examSnipes) ? local.examSnipes : [];
+        if (embedded.length) {
+          const records = embedded.map((record: any, idx: number) => ({
+            id: record?.id || record?.slug || `embedded-${idx}`,
+            courseName: record?.courseName || local?.subject || "Untitled Exam Snipe",
+            slug: record?.slug || `embedded-${idx}`,
+            createdAt: record?.createdAt || new Date().toISOString(),
+            fileNames: Array.isArray(record?.fileNames) ? record.fileNames : [],
+            results: record?.results || {},
+          }));
+          setExamSnipes(records.map((r: any) => ({
+            id: r.id,
+            courseName: r.courseName,
+            slug: r.slug,
+            createdAt: r.createdAt,
+            fileNames: r.fileNames,
+          })));
+          await syncExamSnipeLessonsToMainCourse(records);
+        } else {
+          setExamSnipes([]);
+        }
       }
     } catch {
-      setExamSnipes([]);
+      const local = loadSubjectData(slug) as any;
+      const embedded = Array.isArray(local?.examSnipes) ? local.examSnipes : [];
+      if (embedded.length) {
+        const records = embedded.map((record: any, idx: number) => ({
+          id: record?.id || record?.slug || `embedded-${idx}`,
+          courseName: record?.courseName || local?.subject || "Untitled Exam Snipe",
+          slug: record?.slug || `embedded-${idx}`,
+          createdAt: record?.createdAt || new Date().toISOString(),
+          fileNames: Array.isArray(record?.fileNames) ? record.fileNames : [],
+          results: record?.results || {},
+        }));
+        setExamSnipes(records.map((r: any) => ({
+          id: r.id,
+          courseName: r.courseName,
+          slug: r.slug,
+          createdAt: r.createdAt,
+          fileNames: r.fileNames,
+        })));
+        await syncExamSnipeLessonsToMainCourse(records);
+      } else {
+        setExamSnipes([]);
+      }
     } finally {
       setLoadingExamSnipes(false);
       setPageLoading(false); // Mark page as loaded when exam snipes finish loading

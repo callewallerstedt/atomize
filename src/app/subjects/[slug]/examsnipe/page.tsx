@@ -68,6 +68,19 @@ function normalizeCourseName(name: string): string {
   return name.replace(/\s+/g, " ").trim();
 }
 
+function normalizeEmbeddedExamSnipeRecords(slug: string): ExamSnipeRecord[] {
+  const data = loadSubjectData(slug) as any;
+  const embedded = Array.isArray(data?.examSnipes) ? data.examSnipes : [];
+  return embedded.map((record: any, idx: number) => ({
+    id: String(record?.slug || record?.id || `embedded-${idx}`),
+    courseName: String(record?.courseName || data?.subject || "Exam Snipe Course"),
+    slug: String(record?.slug || `embedded-${idx}`),
+    createdAt: String(record?.createdAt || new Date().toISOString()),
+    fileNames: Array.isArray(record?.fileNames) ? record.fileNames.map((n: any) => String(n)) : [],
+    results: (record?.results || {}) as any,
+  }));
+}
+
 function normalizeStringArray(source: any, { allowSentence = false }: { allowSentence?: boolean } = {}): string[] {
   if (Array.isArray(source)) {
     return source
@@ -511,6 +524,22 @@ function CourseExamSnipeInner() {
     if (!slug) return;
 
     (async () => {
+      const loadFromEmbedded = (requestedSlug?: string | null) => {
+        const embeddedRecords = normalizeEmbeddedExamSnipeRecords(slug);
+        if (!embeddedRecords.length) return false;
+
+        const selected = requestedSlug
+          ? embeddedRecords.find((r) => r.slug === requestedSlug) || null
+          : embeddedRecords
+              .slice()
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] || null;
+
+        if (!selected) return false;
+        setExamSnipe(selected);
+        setError(null);
+        return true;
+      };
+
       try {
         setLoading(true);
         setError(null);
@@ -529,6 +558,10 @@ function CourseExamSnipeInner() {
             const record = normalizeHistoryRecord(json.record);
             setExamSnipe(record);
           } else {
+            // When viewing a shared course without an account, fall back to embedded exam snipes.
+            if (res.status === 401 && loadFromEmbedded(examSnipeSlug)) {
+              return;
+            }
             setError("The requested exam snipe analysis was not found.");
           }
         } else {
@@ -543,12 +576,17 @@ function CourseExamSnipeInner() {
             const record = normalizeHistoryRecord(json.history[0]);
             setExamSnipe(record);
           } else {
+            if (res.status === 401 && loadFromEmbedded(null)) {
+              return;
+            }
             setError("No exam snipe analysis found for this course. You can create one by going to the Exam Snipe page.");
           }
         }
       } catch (err: any) {
         console.error("Failed to load exam snipe:", err);
-        setError(err?.message || "Failed to load exam snipe analysis");
+        if (!loadFromEmbedded(null)) {
+          setError(err?.message || "Failed to load exam snipe analysis");
+        }
       } finally {
         setLoading(false);
       }

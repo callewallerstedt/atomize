@@ -2,9 +2,19 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import type { StoredSubjectData } from "@/utils/storage";
+import { randomBytes } from "crypto";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+function toSafeSlug(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
 
 // POST - Save a shared course to the current user's account
 export async function POST(
@@ -44,7 +54,9 @@ export async function POST(
 
     // Generate a unique slug for the new course (add timestamp to avoid conflicts)
     const timestamp = Date.now();
-    const newSlug = `${originalSlug}-shared-${timestamp}`;
+    const rand = randomBytes(3).toString("hex");
+    const base = toSafeSlug(originalSlug || "course") || "course";
+    const newSlug = `${base}-shared-${timestamp}-${rand}`.slice(0, 64);
     // Keep the original course name (don't include "Shared by" in the name)
     const newName = sharedCourse.courseName;
 
@@ -93,7 +105,7 @@ export async function POST(
     for (const examSnipe of examSnipes) {
       try {
         // Generate a unique slug for the exam snipe
-        const examSnipeSlug = `${examSnipe.slug}-shared-${timestamp}`;
+        const examSnipeSlug = `${toSafeSlug(String(examSnipe.slug || "exam")) || "exam"}-shared-${timestamp}-${rand}`.slice(0, 64);
         
         await prisma.examSnipeHistory.upsert({
           where: { userId_slug: { userId: user.id, slug: examSnipeSlug } },
@@ -131,4 +143,3 @@ export async function POST(
     );
   }
 }
-

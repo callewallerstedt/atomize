@@ -44,7 +44,7 @@ export default function SharePage() {
       if (!result.ok) {
         if (result.error === "Unauthorized") {
           alert("Please log in to save this course");
-          router.push("/");
+          router.push("/?redirect=share&shareId=" + shareId);
           return;
         }
         setError(result.error || "Failed to save course");
@@ -55,6 +55,7 @@ export default function SharePage() {
       // Ensure topics are preserved in the course data
       const courseDataToSave = {
         ...courseData.courseData,
+        subject: courseData.courseName,
         // Ensure topics array is preserved
         topics: courseData.courseData.topics || [],
       };
@@ -146,7 +147,13 @@ export default function SharePage() {
     if (!courseData) return;
     
     const tempSlug = `shared-${shareId}`;
-    saveSubjectDataAsync(tempSlug, courseData.courseData).then(() => {
+    const courseDataToSave = {
+      ...courseData.courseData,
+      subject: courseData.courseName,
+      topics: (courseData.courseData as any)?.topics || [],
+    } as StoredSubjectData;
+
+    saveSubjectDataAsync(tempSlug, courseDataToSave).then(() => {
       // Update subjects list temporarily
       if (typeof window !== "undefined") {
         const subjects = JSON.parse(localStorage.getItem("atomicSubjects") || "[]");
@@ -273,14 +280,21 @@ export default function SharePage() {
                 disabled={saving}
                 className="px-6 py-3 rounded-lg border border-[var(--foreground)]/20 text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                No
+                Not now
+              </button>
+              <button
+                onClick={handleJustView}
+                disabled={saving}
+                className="px-6 py-3 rounded-lg border border-[var(--foreground)]/20 text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Just View
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving}
                 className="px-6 py-3 rounded-lg bg-[var(--foreground)]/10 text-[var(--foreground)] hover:bg-[var(--foreground)]/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Yes
+                Save
               </button>
             </div>
           )
@@ -295,4 +309,3 @@ export default function SharePage() {
     </>
   );
 }
-

@@ -905,6 +905,9 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
     // Then fetch from server if authenticated
     (async () => {
       try {
+        // Shared course previews are local-only; never pull/push server state for them.
+        if (slug.startsWith("shared-")) return;
+
         // Check subscription level
         const meRes = await fetch("/api/me", { credentials: "include" });
         const meData = await meRes.json().catch(() => ({}));

@@ -5218,6 +5218,16 @@ function Home() {
                         alert("Please log in to share courses");
                         return;
                       }
+
+                      // Best-effort: ensure the most recent local edits are synced before snapshotting.
+                      try {
+                        const local = loadSubjectData(s.slug);
+                        if (local) {
+                          const { syncSubjectDataToServer } = await import("@/utils/storage");
+                          await syncSubjectDataToServer(s.slug, local);
+                        }
+                      } catch {}
+
                       const response = await fetch("/api/courses/share", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },

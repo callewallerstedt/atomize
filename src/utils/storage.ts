@@ -139,6 +139,8 @@ export function loadSubjectData(slug: string): StoredSubjectData | null {
 // Async function to sync data to server (awaits completion)
 export async function syncSubjectDataToServer(slug: string, data: StoredSubjectData): Promise<void> {
   if (typeof window === "undefined") return;
+  // Local-only preview courses created from share links should never sync to the server.
+  if (slug.startsWith("shared-")) return;
   try {
     const meRes = await fetch("/api/me", { credentials: "include" });
     const meJson = await meRes.json().catch(() => ({}));

@@ -7,6 +7,51 @@ import { randomBytes } from "crypto";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+const MAX_SHARED_COMBINED_TEXT_CHARS = 750_000;
+const MAX_SHARED_SURGE_LOG_ENTRIES = 100;
+const MAX_SHARED_PRACTICE_LOG_ENTRIES = 300;
+
+function capText(input: any, maxChars: number): { value: string; truncated: boolean } {
+  const str = typeof input === "string" ? input : input == null ? "" : String(input);
+  if (str.length <= maxChars) return { value: str, truncated: false };
+  return { value: str.slice(0, maxChars), truncated: true };
+}
+
+function stripFileData(files: any): Array<{ name: string; type?: string }> {
+  if (!Array.isArray(files)) return [];
+  return files
+    .map((f) => ({
+      name: typeof f?.name === "string" ? f.name : String(f?.name || ""),
+      type: typeof f?.type === "string" ? f.type : undefined,
+    }))
+    .filter((f) => f.name.trim().length > 0);
+}
+
+function stripRawLessonJson(nodes: any): any {
+  if (!nodes || typeof nodes !== "object") return nodes;
+  const out: Record<string, any> = Array.isArray(nodes) ? {} : { ...nodes };
+  for (const key of Object.keys(out)) {
+    const node = out[key];
+    if (!node || typeof node !== "object") continue;
+    const nextNode: any = { ...node };
+    if (Array.isArray(nextNode.rawLessonJson) && nextNode.rawLessonJson.length > 0) {
+      nextNode.rawLessonJson = [];
+    }
+    out[key] = nextNode;
+  }
+  return out;
+}
+
+function capArray<T>(value: any, max: number): { value: T[] | undefined; truncated: boolean } {
+  if (!Array.isArray(value)) return { value: undefined, truncated: false };
+  if (value.length <= max) return { value: value as T[], truncated: false };
+  return { value: (value as T[]).slice(-max), truncated: true };
+}
+
+function safeJsonClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 // POST - Create a share link for a course
 export async function POST(req: Request) {
   try {
@@ -40,12 +85,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Subject not found" }, { status: 404 });
     }
 
-    // Get exam snipes linked to this course
+    // Get exam snipes linked to this course (and legacy unlinked records matching the course name).
     const examSnipes = await prisma.examSnipeHistory.findMany({
       where: {
         userId: user.id,
-        subjectSlug: slug,
+        OR: [
+          { subjectSlug: slug },
+          {
+            subjectSlug: null,
+            courseName: { equals: subject.name, mode: "insensitive" },
+          },
+        ],
       },
+      orderBy: { createdAt: "desc" },
       select: {
         slug: true,
         courseName: true,
@@ -55,12 +107,24 @@ export async function POST(req: Request) {
       },
     });
 
-    // Prepare course data for sharing (exclude surgeLog and practiceLogs)
-    const { surgeLog, practiceLogs, ...shareableData } = courseData;
+    // Build a deploy-safe share snapshot that preserves study data but avoids massive payloads.
+    const snapshotBase = safeJsonClone(courseData);
 
-    // Include exam snipes in the shareable data
+    const combined = capText(snapshotBase.combinedText, MAX_SHARED_COMBINED_TEXT_CHARS);
+    snapshotBase.combinedText = combined.value;
+    snapshotBase.files = stripFileData(snapshotBase.files) as any;
+    snapshotBase.nodes = stripRawLessonJson(snapshotBase.nodes) as any;
+
+    const surge = capArray(snapshotBase.surgeLog, MAX_SHARED_SURGE_LOG_ENTRIES);
+    if (surge.value) snapshotBase.surgeLog = surge.value as any;
+
+    const practice = capArray(snapshotBase.practiceLogs, MAX_SHARED_PRACTICE_LOG_ENTRIES);
+    if (practice.value) snapshotBase.practiceLogs = practice.value as any;
+
+    // Include exam snipes in the shareable data (kept for offline viewing and imported on save).
     const shareableDataWithExamSnipes = {
-      ...shareableData,
+      ...snapshotBase,
+      subject: subject.name,
       examSnipes: examSnipes.map(snipe => ({
         slug: snipe.slug,
         courseName: snipe.courseName,
@@ -68,6 +132,19 @@ export async function POST(req: Request) {
         results: snipe.results,
         createdAt: snipe.createdAt.toISOString(),
       })),
+      __sharedCourseMeta: {
+        version: 1,
+        originalSlug: slug,
+        sharedBy: user.username,
+        createdAt: new Date().toISOString(),
+        truncated: {
+          combinedText: combined.truncated,
+          surgeLog: surge.truncated,
+          practiceLogs: practice.truncated,
+          rawLessonJson: true,
+          filesData: true,
+        },
+      },
     };
 
     // Generate unique share ID
@@ -105,6 +182,7 @@ export async function POST(req: Request) {
       ok: true,
       shareId: sharedCourse.shareId,
       shareUrl,
+      truncated: (shareableDataWithExamSnipes as any).__sharedCourseMeta?.truncated || null,
     });
   } catch (err: any) {
     console.error("Error creating share link:", err);
@@ -114,4 +192,3 @@ export async function POST(req: Request) {
     );
   }
 }
-
