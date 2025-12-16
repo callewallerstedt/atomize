@@ -357,16 +357,35 @@ function FileUploadArea({
 function renderPracticeContent(
   content: string,
   onOpenLesson?: (questionText: string) => void,
-  generatingLessonFor?: string | null
+  generatingLessonFor?: string | null,
+  mcAnswers?: Record<string, { selected: "A" | "B" | "C" | "D"; correct?: "A" | "B" | "C" | "D" }>,
+  onSelectMcOption?: (payload: {
+    questionKey: string;
+    questionPrompt: string;
+    choice: "A" | "B" | "C" | "D";
+    correctChoice?: "A" | "B" | "C" | "D";
+  }) => void
 ): React.JSX.Element {
   // Parse ◊ (lozenge) delimiters for practice questions - allows multiline content
   // Also handles incomplete questions (opening ◊ without closing ◊) for streaming
-  const parts: (string | { type: 'question'; content: string })[] = [];
+  const QUESTION_DELIM = "\u25CA";
+  const QUESTION_DELIM_LEN = QUESTION_DELIM.length;
+
+  type PracticePart =
+    | string
+    | {
+        type: "question";
+        content: string;
+        mcOptions?: Array<{ key: "A" | "B" | "C" | "D"; text: string }>;
+        mcCorrectChoice?: "A" | "B" | "C" | "D";
+      };
+
+  const parts: PracticePart[] = [];
   let lastIndex = 0;
   let searchIndex = 0;
 
   while (searchIndex < content.length) {
-    const openIndex = content.indexOf('◊', searchIndex);
+    const openIndex = content.indexOf(QUESTION_DELIM, searchIndex);
     
     if (openIndex === -1) {
       // No more ◊ found, add remaining text
@@ -382,20 +401,133 @@ function renderPracticeContent(
     }
 
     // Look for closing ◊
-    const closeIndex = content.indexOf('◊', openIndex + 1);
+    const closeIndex = content.indexOf(QUESTION_DELIM, openIndex + QUESTION_DELIM_LEN);
     
     if (closeIndex === -1) {
       // No closing ◊ found - treat everything from ◊ to end as question (for streaming)
-      const questionText = content.slice(openIndex + 1).trim();
+      const questionText = content.slice(openIndex + QUESTION_DELIM_LEN).trim();
       parts.push({ type: 'question', content: questionText });
       lastIndex = content.length;
       break;
     } else {
       // Found complete question block
-      const questionText = content.slice(openIndex + 1, closeIndex).trim();
+      const questionText = content.slice(openIndex + QUESTION_DELIM_LEN, closeIndex).trim();
       parts.push({ type: 'question', content: questionText });
-      lastIndex = closeIndex + 1;
-      searchIndex = closeIndex + 1;
+      lastIndex = closeIndex + QUESTION_DELIM_LEN;
+      searchIndex = closeIndex + QUESTION_DELIM_LEN;
+    }
+  }
+
+  const parseMcOptions = (questionText: string) => {
+    const lines = String(questionText || "").split(/\r?\n/);
+    const optionRegex = /^\s*([A-D])\s*[\)\.\:\-]\s*(.+)\s*$/i;
+    const correctRegex = /^\s*(?:correct\s*answer|correct|answer)\s*[:\-]\s*([A-D])\s*$/i;
+    const options: Array<{ key: "A" | "B" | "C" | "D"; text: string }> = [];
+    const promptLines: string[] = [];
+    let correctChoice: ("A" | "B" | "C" | "D") | undefined;
+
+    for (const line of lines) {
+      const correctMatch = line.match(correctRegex);
+      if (correctMatch) {
+        correctChoice = correctMatch[1].toUpperCase() as "A" | "B" | "C" | "D";
+        continue;
+      }
+      const match = line.match(optionRegex);
+      if (match) {
+        const key = match[1].toUpperCase() as "A" | "B" | "C" | "D";
+        const text = match[2] || "";
+        options.push({ key, text });
+      } else {
+        promptLines.push(line);
+      }
+    }
+
+    const byKey = new Map(options.map((o) => [o.key, o]));
+    const ordered: Array<{ key: "A" | "B" | "C" | "D"; text: string }> = (["A", "B", "C", "D"] as const)
+      .map((k) => byKey.get(k))
+      .filter(Boolean) as any;
+
+    const hasAll = ordered.length === 4;
+    return hasAll
+      ? { prompt: promptLines.join("\n").trim(), options: ordered, correctChoice }
+      : null;
+  };
+
+  const extractLeadingMcOptions = (text: string) => {
+    const lines = String(text || "").split(/\r?\n/);
+    const optionRegex = /^\s*([A-D])\s*[\)\.\:\-]\s*(.+)\s*$/i;
+    const correctRegex = /^\s*(?:correct\s*answer|correct|answer)\s*[:\-]\s*([A-D])\s*$/i;
+    const chooseRegex = /^\s*choose\s+your\s+answer\.?\s*$/i;
+
+    const optionsByKey = new Map<"A" | "B" | "C" | "D", string>();
+    let correctChoice: ("A" | "B" | "C" | "D") | undefined;
+    let started = false;
+    let lastConsumedIndex = -1;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      const correctMatch = line.match(correctRegex);
+      if (correctMatch) {
+        correctChoice = correctMatch[1].toUpperCase() as "A" | "B" | "C" | "D";
+        started = true;
+        lastConsumedIndex = i;
+        continue;
+      }
+      const match = line.match(optionRegex);
+      if (match) {
+        started = true;
+        const key = match[1].toUpperCase() as "A" | "B" | "C" | "D";
+        if (!optionsByKey.has(key)) optionsByKey.set(key, match[2] || "");
+        lastConsumedIndex = i;
+        continue;
+      }
+
+      if (!started) {
+        if (trimmed === "") {
+          lastConsumedIndex = i;
+          continue;
+        }
+        return null;
+      }
+
+      if (trimmed === "" || chooseRegex.test(trimmed)) {
+        lastConsumedIndex = i;
+        continue;
+      }
+
+      break;
+    }
+
+    if (optionsByKey.size !== 4) return null;
+
+    const ordered = (["A", "B", "C", "D"] as const).map((k) => ({
+      key: k,
+      text: optionsByKey.get(k) || "",
+    }));
+
+    let remainderLines = lines.slice(lastConsumedIndex + 1);
+    while (remainderLines.length && remainderLines[0].trim() === "") remainderLines.shift();
+    if (remainderLines.length && chooseRegex.test(remainderLines[0].trim())) remainderLines.shift();
+    while (remainderLines.length && remainderLines[0].trim() === "") remainderLines.shift();
+
+    return { options: ordered, remainder: remainderLines.join("\n"), correctChoice };
+  };
+
+  // If the model outputs A) ... B) ... on separate lines AFTER the question block,
+  // merge those options into the preceding question so we can render clickable buttons.
+  if (onSelectMcOption) {
+    for (let i = 0; i < parts.length - 1; i++) {
+      const part = parts[i];
+      if (typeof part === "string" || part.type !== "question") continue;
+      if (parseMcOptions(part.content)) continue;
+      const next = parts[i + 1];
+      if (typeof next !== "string") continue;
+      const extracted = extractLeadingMcOptions(next);
+      if (!extracted) continue;
+      part.mcOptions = extracted.options;
+      if (extracted.correctChoice) part.mcCorrectChoice = extracted.correctChoice;
+      parts[i + 1] = extracted.remainder;
     }
   }
 
@@ -412,6 +544,12 @@ function renderPracticeContent(
           ) : null;
         } else {
           // Question - render with gradient background
+          const mcFromInside = onSelectMcOption ? parseMcOptions(part.content) : null;
+          const mc =
+            onSelectMcOption && part.mcOptions?.length === 4
+              ? { prompt: part.content, options: part.mcOptions, correctChoice: part.mcCorrectChoice }
+              : mcFromInside;
+          const answerState = mcAnswers ? mcAnswers[part.content] : undefined;
           return (
             <div
               key={index}
@@ -447,8 +585,52 @@ function renderPracticeContent(
                 )}
               </div>
               <div className="text-base font-medium leading-relaxed">
-                <LessonBody body={sanitizeLessonBody(part.content)} />
+                <LessonBody body={sanitizeLessonBody(mc?.prompt || part.content)} />
               </div>
+              {mc?.options?.length === 4 ? (
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {mc.options.map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      disabled={Boolean(answerState)}
+                      onClick={() =>
+                        onSelectMcOption?.({
+                          questionKey: part.content,
+                          questionPrompt: mc?.prompt || part.content,
+                          choice: opt.key,
+                          correctChoice: mc?.correctChoice,
+                        })
+                      }
+                      className={[
+                        "w-full rounded-xl border px-3 py-2 text-left text-sm transition-colors",
+                        answerState
+                          ? "cursor-default"
+                          : "hover:bg-[var(--background)]/60",
+                        answerState?.correct === opt.key
+                          ? "border-emerald-400/40 bg-emerald-400/10"
+                          : answerState?.selected === opt.key && answerState?.correct && answerState.selected !== answerState.correct
+                          ? "border-rose-400/40 bg-rose-400/10"
+                          : "border-[var(--foreground)]/15 bg-[var(--background)]/50",
+                        answerState && answerState?.selected !== opt.key && answerState?.correct !== opt.key
+                          ? "opacity-70"
+                          : "",
+                      ].join(" ")}
+                      aria-label={`Choose ${opt.key}`}
+                      title={`Choose ${opt.key}`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <div className="mt-0.5 inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 text-xs font-semibold">
+                          {opt.key}
+                        </div>
+                        <div className="flex-1">
+                          <LessonBody body={sanitizeLessonBody(String(opt.text || ""))} />
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
           );
         }
@@ -740,7 +922,8 @@ function buildPracticeContext(
   data: StoredSubjectData | null,
   practiceLog: PracticeLogEntry[],
   examSnipeData?: string | null,
-  availableExamSnipes?: Array<{ slug: string; courseName: string; createdAt: string }>
+  availableExamSnipes?: Array<{ slug: string; courseName: string; createdAt: string }>,
+  session?: { mode: "mc" | "rapid" | "exam" | "custom" | null; customInstruction?: string }
 ): string {
   if (!data) {
     return [
@@ -755,6 +938,35 @@ function buildPracticeContext(
   const lines: string[] = [];
   const courseName = data.subject || slug;
   const basicTopics = extractBasicTopics(data);
+
+  const modeLabel =
+    session?.mode === "mc"
+      ? "Multiple choice questions"
+      : session?.mode === "rapid"
+      ? "Short rapid fire questions"
+      : session?.mode === "exam"
+      ? "Exam style"
+      : session?.mode === "custom"
+      ? "Custom"
+      : null;
+
+  if (modeLabel) {
+    lines.push(`SESSION MODE: ${modeLabel}`);
+    if (session?.mode === "mc") {
+      lines.push(
+        "MODE RULES: Ask exactly ONE multiple choice question at a time with exactly 4 options labeled A, B, C, D. IMPORTANT: Put the A) B) C) D) option lines INSIDE the question delimiters (use the lozenge character ◊ as the delimiter; do not print options outside the question block). ALSO include a single line inside the delimiters: 'Correct: <A|B|C|D>' (this is for the UI; do not mention it explicitly). After the student answers, reply with only: correct/incorrect + 1-2 sentence explanation, then immediately ask the next question. Do NOT repeat the options after the student answers."
+      );
+    } else if (session?.mode === "rapid") {
+      lines.push("MODE RULES: Ask short rapid-fire questions. One question at a time. Keep feedback brief and move fast.");
+    } else if (session?.mode === "exam") {
+      lines.push(
+        "MODE RULES: Ask an exam-style multi-step problem. Wait for the full solution attempt, then grade /10 and explain what to improve. One problem at a time."
+      );
+    } else if (session?.mode === "custom") {
+      const custom = typeof session.customInstruction === "string" ? session.customInstruction.trim() : "";
+      if (custom) lines.push(`CUSTOM INSTRUCTION: ${custom}`);
+    }
+  }
   const basicTopicBullets =
     basicTopics.length > 0
       ? basicTopics.map((topic) => `• ${topic}`).join("\n")
@@ -1084,7 +1296,6 @@ export default function PracticePage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [initialPromptSent, setInitialPromptSent] = useState(false);
   const [practiceLog, setPracticeLog] = useState<PracticeLogEntry[]>([]);
   const [practiceLogLoaded, setPracticeLogLoaded] = useState(false);
   const [logModalOpen, setLogModalOpen] = useState(false);
@@ -1110,15 +1321,19 @@ export default function PracticePage() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const conversationRef = useRef<Array<Omit<ChatMessage, "hidden">>>([]);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const [mcQuizModalOpen, setMcQuizModalOpen] = useState(false);
-  const [mcQuizTopic, setMcQuizTopic] = useState<string>("");
-  const [mcQuizQuestions, setMcQuizQuestions] = useState<
-    Array<{ question: string; options: string[]; correctAnswer: number; explanation?: string }>
-  >([]);
-  const [mcQuizAnswers, setMcQuizAnswers] = useState<Record<number, number>>({});
-  const [mcQuizSubmitted, setMcQuizSubmitted] = useState(false);
-  const [mcQuizLoading, setMcQuizLoading] = useState(false);
-  const [mcQuizError, setMcQuizError] = useState<string | null>(null);
+  const [practiceStarted, setPracticeStarted] = useState(false);
+  const [practiceModeChoice, setPracticeModeChoice] = useState<
+    "mc" | "rapid" | "exam" | "custom" | null
+  >(null);
+  const [practiceTopicChoice, setPracticeTopicChoice] = useState<string>("");
+  const [practiceCustomInstruction, setPracticeCustomInstruction] = useState<string>("");
+  const [practiceFocusText, setPracticeFocusText] = useState<string>("");
+  const [practiceSetupOpen, setPracticeSetupOpen] = useState(false);
+  const [mcAnswers, setMcAnswers] = useState<
+    Record<string, { selected: "A" | "B" | "C" | "D"; correct?: "A" | "B" | "C" | "D" }>
+  >({});
+  const kickoffMessageRef = useRef<string | null>(null);
+  const [kickoffPending, setKickoffPending] = useState(false);
    
   // QR Code feature state
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
@@ -1139,89 +1354,101 @@ export default function PracticePage() {
     qrImagesRef.current = qrImages;
   }, [qrImages]);
 
-  const mcQuizTopics = useMemo(() => {
+  const availablePracticeTopics = useMemo(() => {
     const fromTopics = Array.isArray(subjectData?.topics)
       ? subjectData.topics.map((t) => (t && typeof t.name === "string" ? t.name : "")).filter(Boolean)
       : [];
     const fromNodes = Object.keys(subjectData?.nodes || {}).filter((key) => key && !key.startsWith("__"));
-    return Array.from(new Set([...fromTopics, ...fromNodes]));
+    const fromContext = subjectData ? extractBasicTopics(subjectData) : [];
+    return Array.from(new Set([...fromTopics, ...fromNodes, ...fromContext]));
   }, [subjectData]);
 
-  useEffect(() => {
-    if (!mcQuizModalOpen) return;
-    if (!mcQuizTopic && mcQuizTopics.length > 0) {
-      setMcQuizTopic(mcQuizTopics[0]);
-    }
-  }, [mcQuizModalOpen, mcQuizTopic, mcQuizTopics]);
+  const examSnipeTopics = useMemo(() => {
+    const text = String(examSnipeData || "").trim();
+    if (!text) return [] as string[];
 
-  const generateMcQuiz = async () => {
-    if (!hasPremiumAccess) {
-      setMcQuizError("Premium access is required to generate an MC quiz.");
-      return;
-    }
+    const lines = text.split(/\r?\n/);
+    const topics: string[] = [];
 
-    const topic = (mcQuizTopic || mcQuizTopics[0] || "").trim();
-    if (!topic) {
-      setMcQuizError("Pick a topic first.");
-      return;
-    }
+    const pushTopic = (raw: string) => {
+      const cleaned = String(raw || "")
+        .replace(/^[\-\*\u2022]+\s*/, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!cleaned) return;
+      if (cleaned.length < 3) return;
+      if (cleaned.length > 80) return;
+      topics.push(cleaned);
+    };
 
-    setMcQuizLoading(true);
-    setMcQuizError(null);
-    try {
-      const node: any = subjectData?.nodes ? (subjectData.nodes as any)[topic] : null;
-      let lessonContent = "";
+    const bulletConcept = /^\s*[-*\u2022]\s*([^\n:]+?)(?::\s*|$)/;
+    const numberedConcept = /^\s*\d+\.\s*([^\n:]+?)(?::\s*|$)/;
+    const header = /^\s*(key\s+concepts|main\s+concepts|concepts)\s*[:\-]?\s*$/i;
 
-      if (node && typeof node === "object" && !Array.isArray(node)) {
-        const lessons = Array.isArray(node.lessons) ? node.lessons : [];
-        for (let i = lessons.length - 1; i >= 0; i--) {
-          const body = lessons[i]?.body;
-          if (typeof body === "string" && body.trim().length > 0) {
-            lessonContent = body;
-            break;
-          }
-        }
-        if (!lessonContent && typeof node.overview === "string" && node.overview.trim().length > 0) {
-          lessonContent = node.overview;
-        }
+    let inConceptSection = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        if (inConceptSection) break;
+        continue;
       }
 
-      if (!lessonContent) {
-        const fallbackParts = [
-          `Topic: ${topic}`,
-          subjectData?.course_context ? `Course context:\n${subjectData.course_context}` : "",
-          subjectData?.combinedText ? `Course materials excerpt:\n${String(subjectData.combinedText).slice(0, 12000)}` : "",
-        ].filter(Boolean);
-        lessonContent = fallbackParts.join("\n\n");
+      if (header.test(trimmed)) {
+        inConceptSection = true;
+        continue;
       }
 
-      const res = await fetch("/api/generate-mc-quiz", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject: subjectData?.subject || slug,
-          topic,
-          lessonContent: sanitizeLessonBody(String(lessonContent || "")),
-          courseContext: subjectData?.course_context || "",
-          languageName: subjectData?.course_language_name || "",
-        }),
+      const m1 = trimmed.match(bulletConcept) || trimmed.match(numberedConcept);
+      if (m1) {
+        if (inConceptSection) pushTopic(m1[1]);
+        continue;
+      }
+
+      if (inConceptSection) break;
+    }
+
+    // Fallback: collect any bullet-style "Concept:" lines if the section header isn't present.
+    if (topics.length === 0) {
+      for (const line of lines) {
+        const trimmed = line.trim();
+        const m = trimmed.match(bulletConcept) || trimmed.match(numberedConcept);
+        if (m) pushTopic(m[1]);
+      }
+    }
+
+    return Array.from(new Set(topics)).slice(0, 12);
+  }, [examSnipeData]);
+
+  const suggestedWeakTopics = useMemo(() => {
+    const byTopic = new Map<string, { sum: number; count: number; lastTs: number }>();
+    for (const entry of practiceLog || []) {
+      const topic = (entry.topic || "").trim();
+      if (!topic) continue;
+      const grade = Number(entry.grade ?? entry.rating ?? 0) || 0;
+      const ts = Number(entry.timestamp ?? 0) || 0;
+      const prev = byTopic.get(topic) || { sum: 0, count: 0, lastTs: 0 };
+      byTopic.set(topic, {
+        sum: prev.sum + grade,
+        count: prev.count + 1,
+        lastTs: Math.max(prev.lastTs, ts),
       });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.ok) {
-        throw new Error(json?.error || `Server error (${res.status})`);
-      }
-      const questions = Array.isArray(json.questions) ? json.questions : [];
-      if (!questions.length) throw new Error("No questions returned.");
-
-      setMcQuizQuestions(questions);
-      setMcQuizAnswers({});
-      setMcQuizSubmitted(false);
-    } catch (err: any) {
-      setMcQuizError(err?.message || "Failed to generate quiz.");
-    } finally {
-      setMcQuizLoading(false);
     }
-  };
+
+    const scored = Array.from(byTopic.entries()).map(([topic, agg]) => ({
+      topic,
+      avg: agg.count ? agg.sum / agg.count : 0,
+      lastTs: agg.lastTs,
+      count: agg.count,
+    }));
+
+    scored.sort((a, b) => (a.avg - b.avg) || (b.lastTs - a.lastTs));
+    const weak = scored.filter((s) => s.count >= 1 && s.avg < 6).map((s) => s.topic);
+    return weak.slice(0, 4);
+  }, [practiceLog]);
+
+  const autoTopicSuggestion = useMemo(() => {
+    return (suggestedWeakTopics[0] || examSnipeTopics[0] || availablePracticeTopics[0] || "").trim();
+  }, [suggestedWeakTopics, examSnipeTopics, availablePracticeTopics]);
 
   const applyPracticeLogUpdates = (updates: PracticeLogEntry[]) => {
     if (!updates.length) return;
@@ -1528,6 +1755,48 @@ export default function PracticePage() {
     }
   };
 
+  const callPracticeLoggerMC = async (question: string, selected: "A" | "B" | "C" | "D", correct: "A" | "B" | "C" | "D") => {
+    const trimmedQuestion = (question || "").trim();
+    if (!trimmedQuestion) return;
+
+    try {
+      const response = await fetch('/api/practice-logger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: trimmedQuestion,
+          answer: `MC selected: ${selected}. Correct: ${correct}. Result: ${selected === correct ? "correct" : "incorrect"}.`,
+          courseSlug: slug,
+          existingLogs: practiceLog,
+          mc: { selected, correct }
+        }),
+      });
+
+      if (!response.ok) {
+        console.error('Failed to log MC practice session:', response.statusText);
+        return;
+      }
+
+      const result = await response.json();
+      if (result.skipped) return;
+
+      if (result.success && result.logEntry) {
+        const logEntry: PracticeLogEntry = result.logEntry;
+        setPracticeLog((prev) => {
+          const next = [...prev, logEntry];
+          try {
+            localStorage.setItem(`${PRACTICE_LOG_PREFIX}${slug}`, JSON.stringify(next));
+          } catch (error) {
+            console.warn("Failed to persist practice log:", error);
+          }
+          return next;
+        });
+      }
+    } catch (error) {
+      console.error('Error calling MC practice logger:', error);
+    }
+  };
+
   // QR Code functions
   const createQrSession = async () => {
     try {
@@ -1748,7 +2017,7 @@ const removeQrImage = (imageId: string) => {
     const handleClickOutside = (event: MouseEvent) => {
       if (showAttachmentMenu) {
         const target = event.target as HTMLElement;
-        if (!target.closest('[data-attachment-dropdown]')) {
+        if (!target.closest('[data-practice-attachment-dropdown]')) {
           setShowAttachmentMenu(false);
         }
       }
@@ -2137,12 +2406,7 @@ const removeQrImage = (imageId: string) => {
 
                     // Remove loading message immediately and automatically have Chad respond
                     setMessages((m) => {
-                      const copy = [...m];
-                      // Remove the loading message immediately
-                      const lastIdx = copy.length - 1;
-                      if (lastIdx >= 0 && copy[lastIdx].isLoading) {
-                        copy.pop();
-                      }
+                      const copy = m.filter((msg) => !msg.isLoading);
                       // Add context as system message (hidden from user, but included in API context)
                       const systemEntry: ChatMessage = { role: "system", content: contextText, hidden: true };
                       const updated: ChatMessage[] = [...copy, systemEntry];
@@ -2160,11 +2424,7 @@ const removeQrImage = (imageId: string) => {
                   } else {
                     // No exam snipe data found
                     setMessages((m) => {
-                      const copy = [...m];
-                      const lastIdx = copy.length - 1;
-                      if (lastIdx >= 0 && copy[lastIdx].isLoading) {
-                        copy.pop();
-                      }
+                      const copy = m.filter((msg) => !msg.isLoading);
                       copy.push({ role: "assistant", content: `No exam snipe data found for "${originalInput}". You may need to run Exam Snipe first for this course.` });
                       return copy;
                     });
@@ -2172,11 +2432,7 @@ const removeQrImage = (imageId: string) => {
                 } else {
                   // Error fetching data
                   setMessages((m) => {
-                    const copy = [...m];
-                    const lastIdx = copy.length - 1;
-                    if (lastIdx >= 0 && copy[lastIdx].isLoading) {
-                      copy.pop();
-                    }
+                    const copy = m.filter((msg) => !msg.isLoading);
                     copy.push({ role: "assistant", content: "Failed to fetch exam snipe data." });
                     return copy;
                   });
@@ -2184,11 +2440,7 @@ const removeQrImage = (imageId: string) => {
               } catch (err) {
                 console.error("Failed to fetch exam snipe data:", err);
                 setMessages((m) => {
-                  const copy = [...m];
-                  const lastIdx = copy.length - 1;
-                  if (lastIdx >= 0 && copy[lastIdx].isLoading) {
-                    copy.pop();
-                  }
+                  const copy = m.filter((msg) => !msg.isLoading);
                   copy.push({ role: "assistant", content: "Error fetching exam snipe data." });
                   return copy;
                 });
@@ -2356,7 +2608,7 @@ Respond with ONLY the slug of the matching entry (e.g., "signals-systems" or "tm
     setExamSnipeMatching(true);
     
     // Show preparing message in chat
-    setMessages([{ role: "assistant", content: "", isLoading: true }]);
+    // Don't inject a loading spinner message into the chat (it can get stuck and duplicate).
     
     (async () => {
       try {
@@ -2419,15 +2671,15 @@ Respond with ONLY the slug of the matching entry (e.g., "signals-systems" or "tm
           // Mark as matched after AI matching completes (whether match found or not)
           setExamSnipeMatching(false);
           setExamSnipeMatched(true);
-          // Remove preparing message
-          setMessages([]);
+          // Ensure any prior loading placeholders are removed
+          setMessages((prev) => prev.filter((m) => !m.isLoading));
         } else {
           setExamSnipeData(null);
           // Still mark as matched even if no exam snipe entries exist
           setExamSnipeMatching(false);
           setExamSnipeMatched(true);
-          // Remove preparing message
-          setMessages([]);
+          // Ensure any prior loading placeholders are removed
+          setMessages((prev) => prev.filter((m) => !m.isLoading));
         }
       } catch (err) {
         console.error("Failed to fetch exam snipe data for initial context:", err);
@@ -2435,11 +2687,11 @@ Respond with ONLY the slug of the matching entry (e.g., "signals-systems" or "tm
         // Mark as matched even on error so initial prompt can proceed
         setExamSnipeMatching(false);
         setExamSnipeMatched(true);
-        // Remove preparing message
-        setMessages([]);
+        // Ensure any prior loading placeholders are removed
+        setMessages((prev) => prev.filter((m) => !m.isLoading));
       }
     })();
-  }, [slug, subjectData]);
+  }, [slug, subjectData, practiceStarted]);
 
   // Load all available exam snipes for Chad's context
   useEffect(() => {
@@ -2604,22 +2856,20 @@ Respond with ONLY the slug of the matching entry (e.g., "signals-systems" or "tm
 useEffect(() => {
   conversationRef.current = [];
   setMessages([]);
-  setInitialPromptSent(false);
   setError(null);
   setExamSnipeMatched(false);
   setExamSnipeMatching(false);
   setExamSnipeData(null);
+  setPracticeStarted(false);
+  setPracticeModeChoice(null);
+  setPracticeTopicChoice("");
+  setPracticeCustomInstruction("");
+  setPracticeFocusText("");
+  setPracticeSetupOpen(false);
+  setMcAnswers({});
+  kickoffMessageRef.current = null;
+  setKickoffPending(false);
 }, [slug]);
-
-useEffect(() => {
-  // Wait for exam snipe matching to complete before sending initial prompt
-  if (!initialPromptSent && !loadingSubject && !sending && practiceLogLoaded && examSnipeMatched && !examSnipeMatching) {
-    setInitialPromptSent(true);
-    setTimeout(() => {
-      void sendMessage("", { suppressUser: true, omitFromHistory: true });
-    }, 150);
-  }
-}, [subjectData, loadingSubject, initialPromptSent, sending, practiceLogLoaded, examSnipeMatched, examSnipeMatching]);
 
   useEffect(() => {
     if (!messagesEndRef.current) return;
@@ -2627,8 +2877,12 @@ useEffect(() => {
   }, [messages, sending]);
 
 const practiceContext = useMemo(
-  () => buildPracticeContext(slug, subjectData, practiceLog, examSnipeData, availableExamSnipes),
-  [slug, subjectData, practiceLog, examSnipeData, availableExamSnipes]
+  () =>
+    buildPracticeContext(slug, subjectData, practiceLog, examSnipeData, availableExamSnipes, {
+      mode: practiceModeChoice,
+      customInstruction: practiceCustomInstruction,
+    }),
+  [slug, subjectData, practiceLog, examSnipeData, availableExamSnipes, practiceModeChoice, practiceCustomInstruction]
 );
 
 async function sendMessage(
@@ -2650,6 +2904,11 @@ async function sendMessage(
 
   if (sending) return;
   if (!omitFromHistory && !hasUserText && imagesToSend.length === 0) return;
+
+  if (!omitFromHistory && (hasUserText || imagesToSend.length > 0)) {
+    if (!practiceStarted) setPracticeStarted(true);
+    if (practiceSetupOpen) setPracticeSetupOpen(false);
+  }
 
   if (!suppressUser && !textOverride) {
     setInput("");
@@ -2905,6 +3164,17 @@ async function sendMessage(
     setSending(false);
   }
 }
+
+  useEffect(() => {
+    if (!kickoffPending) return;
+    if (!practiceStarted) return;
+    if (sending) return;
+    const kickoff = kickoffMessageRef.current;
+    if (!kickoff) return;
+    setKickoffPending(false);
+    kickoffMessageRef.current = null;
+    void sendMessage(kickoff, { suppressUser: true });
+  }, [kickoffPending, practiceStarted, sending, practiceContext]);
 
   const handleDifficultyAdjustment = (direction: "up" | "down") => {
     if (sending) return;
@@ -3244,17 +3514,6 @@ Respond with ONLY the specific topic name, no explanation.`;
               Practice Log
             </button>
             <button
-              onClick={() => {
-                setMcQuizError(null);
-                setMcQuizModalOpen(true);
-              }}
-              disabled={!hasPremiumAccess}
-              className="inline-flex items-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-2.5 py-1 text-[11px] font-medium text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
-              title={hasPremiumAccess ? "Quick multiple choice quiz" : "Premium required"}
-            >
-              MC Quiz
-            </button>
-            <button
               onClick={() => setRawLogModalOpen(true)}
               className="inline-flex items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-2 py-1 text-[10px] font-medium text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors whitespace-nowrap"
             >
@@ -3309,12 +3568,201 @@ Respond with ONLY the specific topic name, no explanation.`;
       )}
 
       <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 py-6 sm:px-6 min-h-0">
-        <div className="flex-1 min-h-0 space-y-4 overflow-y-auto rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-4">
-          {messages.length === 0 && (
-            <div className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/80 px-4 py-6 text-sm text-[var(--foreground)]/70">
-              Chad will lead a focused practice session for this course. Get
-              ready to answer questions, solve problems, and explain concepts
-              out loud.
+        <div className="flex-1 min-h-0 space-y-4 overflow-y-auto rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-4 pb-32">
+          {!practiceStarted && messages.length === 0 && (
+            <div className="space-y-3">
+              <div className="rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/80 px-4 py-4 text-sm text-[var(--foreground)]/80">
+                Pick a practice mode to start, or just type what you want to study.
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {[
+                  {
+                    key: "mc" as const,
+                    title: "Multiple choice questions",
+                    desc: "4 options (A-D), then explanation.",
+                  },
+                  {
+                    key: "rapid" as const,
+                    title: "Short rapid fire questions",
+                    desc: "Quick, short answers and fast feedback.",
+                  },
+                  {
+                    key: "exam" as const,
+                    title: "Exam style",
+                    desc: "Longer multi-step problems with grading.",
+                  },
+                  {
+                    key: "custom" as const,
+                    title: "Custom",
+                    desc: "Tell Chad how to mix question types.",
+                  },
+                ].map((card) => (
+                  <button
+                    key={card.key}
+                    type="button"
+                    onClick={() => {
+                      setPracticeModeChoice(card.key);
+                      setPracticeSetupOpen(true);
+                      setPracticeTopicChoice("");
+                    }}
+                    className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4 text-left hover:bg-[var(--background)]/60 transition-colors"
+                  >
+                    <div className="text-sm font-semibold text-[var(--foreground)]">{card.title}</div>
+                    <div className="mt-1 text-xs text-[var(--foreground)]/60">{card.desc}</div>
+                  </button>
+                ))}
+              </div>
+
+              {practiceSetupOpen && practiceModeChoice && (
+                <div className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-[var(--foreground)]">Before we start</div>
+                      <div className="mt-1 text-xs text-[var(--foreground)]/60">
+                        Want a specific topic, or should Chad pick something you've struggled with (from your practice log)?
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPracticeSetupOpen(false)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--foreground)]/15 bg-[var(--background)]/70 text-[var(--foreground)]/70 hover:bg-[var(--background)]/60 hover:text-[var(--foreground)] transition-colors"
+                      aria-label="Close"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M18 6L6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {suggestedWeakTopics.length > 0 ? (
+                    <div className="mt-3 rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/60 px-3 py-2 text-xs text-[var(--foreground)]/70">
+                      Suggested weak topics: {suggestedWeakTopics.join(", ")}
+                    </div>
+                  ) : null}
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="sm:col-span-1">
+                      <div className="text-xs font-medium text-[var(--foreground)]/70 mb-1">Topic</div>
+                      <select
+                        value={practiceTopicChoice}
+                        onChange={(e) => setPracticeTopicChoice(e.target.value)}
+                        className="w-full rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 px-3 py-2 text-sm text-[var(--foreground)] outline-none"
+                      >
+                        <option value="">
+                          {autoTopicSuggestion ? `Auto (suggestion: ${autoTopicSuggestion})` : "Auto"}
+                        </option>
+                        {examSnipeTopics.length > 0 ? (
+                          <optgroup label="Exam snipe">
+                            {examSnipeTopics
+                              .filter((t) => t && !suggestedWeakTopics.includes(t))
+                              .map((t) => (
+                                <option key={t} value={t}>
+                                  {t}
+                                </option>
+                              ))}
+                          </optgroup>
+                        ) : null}
+                        {suggestedWeakTopics.length > 0 ? (
+                          <optgroup label="Suggested (weak areas)">
+                            {suggestedWeakTopics.map((t) => (
+                              <option key={t} value={t}>
+                                {t}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : null}
+                        {availablePracticeTopics.length > 0 ? (
+                          <optgroup label="All topics">
+                            {availablePracticeTopics
+                              .filter((t) => t && !examSnipeTopics.includes(t))
+                              .map((t) => (
+                                <option key={t} value={t}>
+                                  {t}
+                                </option>
+                              ))}
+                          </optgroup>
+                        ) : null}
+                      </select>
+                    </div>
+
+                    <div className="sm:col-span-1">
+                      <div className="text-xs font-medium text-[var(--foreground)]/70 mb-1">Start</div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const mode = practiceModeChoice;
+                          const topic = (practiceTopicChoice || "").trim();
+                          const courseName = subjectData?.subject || slug;
+                          const modeLabel =
+                            mode === "mc"
+                              ? "Multiple choice questions"
+                              : mode === "rapid"
+                              ? "Short rapid fire questions"
+                              : mode === "exam"
+                              ? "Exam style"
+                              : "Custom";
+
+                          const kickoff = [
+                            `Start a practice session now.`,
+                            `Mode: ${modeLabel}.`,
+                            topic ? `Topic: ${topic}.` : `Topic: choose from my weak areas in the practice log (or fundamentals if none).`,
+                            practiceFocusText.trim() ? `Focus: ${practiceFocusText.trim()}` : "",
+                            mode === "custom" && practiceCustomInstruction.trim()
+                              ? `Custom instruction: ${practiceCustomInstruction.trim()}`
+                              : "",
+                            "",
+                            `Rules:`,
+                            `- Ask ONE question at a time and wait for my answer.`,
+                              mode === "mc"
+                              ? `- Use multiple choice with exactly 4 options labeled A, B, C, D. Put the A) B) C) D) option lines INSIDE the question delimiters (use the lozenge character ◊ as the delimiter; do not print options outside the question block). ALSO include a single line inside the delimiters: 'Correct: <A|B|C|D>' (for the UI; do not mention it explicitly). After I answer, reply with only: correct/incorrect + 1-2 sentence explanation, then immediately ask the next question. Do NOT repeat the options after I answer.`
+                              : mode === "rapid"
+                              ? `- Keep questions short and rapid. Give brief feedback, then move on.`
+                              : mode === "exam"
+                              ? `- Ask an exam-style problem (multi-step). Wait for my full solution attempt before grading. Then grade /10 and explain what to improve.`
+                              : `- Follow the custom instruction closely.`,
+                            "",
+                            `You are Chad. Be direct and start immediately with the first question once the topic is chosen.`,
+                            `Course: ${courseName} (slug: ${slug}).`,
+                          ]
+                            .filter(Boolean)
+                            .join("\n");
+
+                          setPracticeStarted(true);
+                          setPracticeSetupOpen(false);
+                          kickoffMessageRef.current = kickoff;
+                          setKickoffPending(true);
+                        }}
+                        disabled={false}
+                        className="w-full inline-flex h-10 items-center justify-center rounded-xl border border-[var(--foreground)]/15 bg-[var(--foreground)]/10 px-4 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--foreground)]/15 transition-colors"
+                      >
+                        Start
+                      </button>
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <div className="text-xs font-medium text-[var(--foreground)]/70 mb-1">What should Chad quiz you on?</div>
+                      <textarea
+                        value={practiceFocusText}
+                        onChange={(e) => setPracticeFocusText(e.target.value)}
+                        placeholder="Example: Do Laplace transforms with convolution + initial value theorem, and don't waste time on basics."
+                        className="w-full min-h-[70px] rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 px-3 py-2 text-sm text-[var(--foreground)] outline-none resize-none"
+                      />
+                    </div>
+
+                    {practiceModeChoice === "custom" ? (
+                      <div className="sm:col-span-2">
+                        <div className="text-xs font-medium text-[var(--foreground)]/70 mb-1">Custom instruction</div>
+                        <textarea
+                          value={practiceCustomInstruction}
+                          onChange={(e) => setPracticeCustomInstruction(e.target.value)}
+                          placeholder="Example: Mix 2 rapid-fire, then 1 exam-style, repeat. Keep explanations short unless I ask."
+                          className="w-full min-h-[80px] rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 px-3 py-2 text-sm text-[var(--foreground)] outline-none resize-none"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -3322,7 +3770,9 @@ Respond with ONLY the specific topic name, no explanation.`;
             if (msg.hidden || msg.role === "system") return null;
             const isUser = msg.role === "user";
             const isAssistant = msg.role === "assistant";
-            const showSpinner = (isAssistant && sending && msg.content.trim() === "") || (isAssistant && msg.isLoading);
+            const showSpinner =
+              (isAssistant && sending && msg.content.trim() === "") ||
+              (isAssistant && msg.isLoading && (examSnipeMatching || fetchingContext));
             const isPreparing = isAssistant && msg.isLoading && examSnipeMatching;
             const imageAttachments = (msg.attachments || []).filter((att) => {
               if (!att) return false;
@@ -3382,7 +3832,34 @@ Respond with ONLY the specific topic name, no explanation.`;
                     ) : (
                       <>
                         <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
-                          {renderPracticeContent(msg.content || "", handleOpenLesson, generatingLessonFor)}
+                          {renderPracticeContent(
+                            msg.content || "",
+                            handleOpenLesson,
+                            generatingLessonFor,
+                            mcAnswers,
+                            (payload) => {
+                              if (sending) return;
+                              setMcAnswers((prev) => ({
+                                ...prev,
+                                [payload.questionKey]: {
+                                  selected: payload.choice,
+                                  correct: payload.correctChoice,
+                                },
+                              }));
+                              if (payload.correctChoice) {
+                                void callPracticeLoggerMC(payload.questionPrompt, payload.choice, payload.correctChoice);
+                              }
+                              void sendMessage(
+                                [
+                                  `My answer: ${payload.choice}`,
+                                  "",
+                                  "Reply with only: correct/incorrect + 1-2 sentences why. Then immediately ask the next question.",
+                                  "Do NOT repeat the options or restate the full question.",
+                                ].join("\n"),
+                                { suppressUser: true }
+                              );
+                            }
+                          )}
                         </div>
                         {/* Render UI elements */}
                         {msg.uiElements && msg.uiElements.length > 0 && (
@@ -3433,12 +3910,13 @@ Respond with ONLY the specific topic name, no explanation.`;
           <div ref={messagesEndRef} />
         </div>
 
+        <div className="sticky bottom-0 z-20 mt-4 border-t border-[var(--foreground)]/10 bg-[var(--background)] pt-3 pb-4">
         <form
           onSubmit={(e) => {
             e.preventDefault();
             void sendMessage();
           }}
-          className="mt-4 sticky bottom-4 z-20"
+          className="space-y-2"
         >
           {qrPollingActive && qrSessionId ? (
             <div className="mb-2 flex items-center justify-between rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 px-3 py-2 text-xs text-[var(--foreground)]/80">
@@ -3497,91 +3975,105 @@ Respond with ONLY the specific topic name, no explanation.`;
           <div
             className={`chat-input-container flex items-center gap-2 pl-0 pr-2 py-2 border ${
               isAttachmentDragActive ? "border-[var(--accent-cyan)]" : "border-[var(--foreground)]/10"
-            } rounded-full`}
+            } overflow-visible`}
             style={{
-              backgroundColor: "rgba(255,255,255,0.08)",
               boxShadow: "none",
+              borderRadius: "1.5rem",
             }}
             onDragEnter={handleAttachmentDragOver}
             onDragOver={handleAttachmentDragOver}
             onDragLeave={handleAttachmentDragLeave}
             onDrop={handleAttachmentDrop}
           >
-            <div className="relative" data-attachment-dropdown style={{ pointerEvents: "auto" }}>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setShowAttachmentMenu((prev) => !prev);
-                }}
-                className="chat-attach-button inline-flex items-center justify-center rounded-full bg-transparent text-[var(--foreground)] transition-colors w-8 h-8 focus-visible:outline-none"
-                style={{ border: "0", boxShadow: "none" }}
-                aria-label="More options"
-                title="More options"
+            <div className="flex-1 relative min-w-0 flex items-center">
+              <div
+                className="absolute left-1.5 top-1/2 -translate-y-1/2 z-30"
+                data-practice-attachment-dropdown
+                style={{ pointerEvents: "auto" }}
               >
-                +
-              </button>
-              {showAttachmentMenu && (
-                <div
-                  className="absolute left-0 bottom-full mb-2 w-48 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/95 shadow-lg overflow-hidden z-30"
-                  data-attachment-dropdown
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setShowAttachmentMenu((prev) => !prev);
+                  }}
+                  className="chat-attach-button inline-flex items-center justify-center rounded-full bg-transparent text-[var(--foreground)] transition-colors w-8 h-8 focus-visible:outline-none"
+                  style={{ border: "0", boxShadow: "none" }}
+                  aria-label="Add attachment"
+                  title="Add attachment"
                 >
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      openAttachmentPicker();
-                      setShowAttachmentMenu(false);
-                    }}
-                    className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors"
+                  +
+                </button>
+                {showAttachmentMenu && (
+                  <div
+                    className="absolute left-0 bottom-full mb-2 w-48 rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/95 shadow-lg overflow-hidden z-50"
+                    data-practice-attachment-dropdown
                   >
-                    Upload image
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void createQrSession();
-                      setShowAttachmentMenu(false);
-                    }}
-                    className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors border-t border-[var(--foreground)]/10"
-                  >
-                    Answer with phone
-                  </button>
-                </div>
-              )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openAttachmentPicker();
+                        setShowAttachmentMenu(false);
+                      }}
+                      className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors"
+                    >
+                      Upload image
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void createQrSession();
+                        setShowAttachmentMenu(false);
+                      }}
+                      className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors border-t border-[var(--foreground)]/10"
+                    >
+                      Answer with phone
+                    </button>
+                  </div>
+                )}
+              </div>
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void sendMessage();
+                  }
+                }}
+                onPaste={async (event) => {
+                  const files = Array.from(event.clipboardData?.files || []).filter((file) =>
+                    file.type.startsWith("image/")
+                  );
+                  if (files.length) {
+                    event.preventDefault();
+                    await addImagesFromFiles(files);
+                  }
+                }}
+                placeholder="Chat with Chad..."
+                rows={1}
+                className="w-full bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden pl-10 pr-4 self-center"
+                style={{
+                  boxShadow: "none",
+                  minHeight: "1.5rem",
+                  lineHeight: "1.5rem",
+                  backgroundColor: "transparent",
+                  paddingTop: 4,
+                  paddingBottom: 4,
+                  transform: "translateY(-2px)",
+                }}
+              />
             </div>
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void sendMessage();
-                }
-              }}
-              onPaste={async (event) => {
-                const files = Array.from(event.clipboardData?.files || []).filter((file) =>
-                  file.type.startsWith("image/")
-                );
-                if (files.length) {
-                  event.preventDefault();
-                  await addImagesFromFiles(files);
-                }
-              }}
-              placeholder="Respond with your work, explain your reasoning, or ask for a different drill..."
-              rows={1}
-              className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden pl-2 pr-4"
-              style={{ minHeight: "1.5rem", lineHeight: "1.5rem" }}
-            />
             <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => handleDifficultyAdjustment("down")}
                 disabled={sending}
-                className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full border border-[var(--foreground)]/12 text-[var(--foreground)]"
+                className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10 text-[var(--foreground)]"
                 style={{ boxShadow: "none" }}
                 aria-label="Lower difficulty"
                 title="Lower difficulty"
@@ -3594,38 +4086,41 @@ Respond with ONLY the specific topic name, no explanation.`;
                 type="button"
                 onClick={() => handleDifficultyAdjustment("up")}
                 disabled={sending}
-                className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full border border-[var(--foreground)]/12 text-[var(--foreground)]"
+                className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10 text-[var(--foreground)]"
                 style={{ boxShadow: "none" }}
                 aria-label="Raise difficulty"
                 title="Raise difficulty"
               >
-                +
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+              <button
+                type="submit"
+                disabled={sending || (!input.trim() && qrImages.length === 0)}
+                className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full border border-[var(--foreground)]/10 text-[var(--foreground)]"
+                style={{ boxShadow: "none" }}
+              >
+                {sending ? (
+                  <GlowSpinner size={16} ariaLabel="Sending message" idSuffix="practice-send" />
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M5 12h14M12 5l7 7-7 7" />
+                  </svg>
+                )}
               </button>
             </div>
-            <button
-              type="submit"
-              disabled={sending || (!input.trim() && qrImages.length === 0)}
-              className="unified-button transition-colors disabled:opacity-50 flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full border border-[var(--foreground)]/12 text-[var(--foreground)]"
-              style={{ boxShadow: "none" }}
-            >
-              {sending ? (
-                <GlowSpinner size={16} ariaLabel="Sending message" idSuffix="practice-send" />
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M5 12h14M12 5l7 7-7 7" />
-                </svg>
-              )}
-            </button>
-            <input
-              ref={attachmentInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={handleAttachmentInputChange}
-            />
           </div>
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={handleAttachmentInputChange}
+          />
         </form>
+        </div>
 
       {error && (
         <div className="mt-3 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 text-xs text-red-200">
@@ -3633,172 +4128,6 @@ Respond with ONLY the specific topic name, no explanation.`;
         </div>
       )}
       </div>
-
-      {/* MC Quiz Modal */}
-      {mcQuizModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6">
-          <div className="w-full max-w-2xl rounded-2xl border border-[var(--foreground)]/30 bg-[var(--background)]/95 p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-xl font-semibold text-[var(--foreground)]">MC Quiz</h2>
-                <p className="text-xs text-[var(--foreground)]/60">Pick a topic and drill 4 multiple choice questions.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setMcQuizModalOpen(false)}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--foreground)]/15 bg-[var(--background)]/70 text-[var(--foreground)]/70 hover:bg-[var(--background)]/60 hover:text-[var(--foreground)] transition-colors"
-                aria-label="Close"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {!hasPremiumAccess ? (
-              <div className="rounded-xl border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">
-                Premium access is required to generate MC quizzes.
-              </div>
-            ) : null}
-
-            <div className="space-y-4">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                <div className="flex-1">
-                  <div className="text-xs font-medium text-[var(--foreground)]/70 mb-1">Topic</div>
-                  <select
-                    value={mcQuizTopic}
-                    onChange={(e) => setMcQuizTopic(e.target.value)}
-                    className="w-full rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 px-3 py-2 text-sm text-[var(--foreground)] outline-none"
-                  >
-                    {mcQuizTopics.length === 0 ? (
-                      <option value="">No topics found</option>
-                    ) : (
-                      mcQuizTopics.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void generateMcQuiz()}
-                    disabled={!hasPremiumAccess || mcQuizLoading || mcQuizTopics.length === 0}
-                    className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 px-4 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    {mcQuizLoading ? "Generating..." : "Generate"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMcQuizQuestions([]);
-                      setMcQuizAnswers({});
-                      setMcQuizSubmitted(false);
-                      setMcQuizError(null);
-                    }}
-                    className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 px-4 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors"
-                  >
-                    Reset
-                  </button>
-                </div>
-              </div>
-
-              {mcQuizError ? (
-                <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-200">
-                  {mcQuizError}
-                </div>
-              ) : null}
-
-              {mcQuizQuestions.length > 0 ? (
-                <div className="max-h-[60vh] overflow-y-auto space-y-5 rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4">
-                  {mcQuizQuestions.map((q, qi) => {
-                    const selected = mcQuizAnswers[qi];
-                    const correct = selected === q.correctAnswer;
-                    const correctOptionText = String(q.options?.[q.correctAnswer] ?? "");
-                    const explanation = typeof q.explanation === "string" && q.explanation.trim().length > 0
-                      ? q.explanation
-                      : `**Correct answer:** ${correctOptionText}`;
-
-                    return (
-                      <div key={qi} className="space-y-3 rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/60 p-4">
-                        <div className="text-sm font-medium text-[var(--foreground)]">
-                          <span className="mr-1">{qi + 1}.</span>{" "}
-                          <LessonBody body={sanitizeLessonBody(String(q.question || ""))} />
-                        </div>
-                        <div className="space-y-2">
-                          {(q.options || []).map((option, oi) => {
-                            const isSelected = selected === oi;
-                            const isCorrect = oi === q.correctAnswer;
-                            const showResult = mcQuizSubmitted;
-                            const cls = showResult
-                              ? isCorrect
-                                ? "border-green-500/40 bg-green-500/10"
-                                : isSelected
-                                  ? "border-red-500/40 bg-red-500/10"
-                                  : "border-[var(--foreground)]/10 opacity-70"
-                              : isSelected
-                                ? "border-[var(--foreground)]/40 bg-[var(--background)]/50"
-                                : "border-[var(--foreground)]/15 bg-[var(--background)]/40 hover:bg-[var(--background)]/50";
-
-                            return (
-                              <button
-                                key={oi}
-                                type="button"
-                                disabled={mcQuizSubmitted}
-                                onClick={() => {
-                                  setMcQuizAnswers((prev) => ({ ...prev, [qi]: oi }));
-                                }}
-                                className={`w-full text-left rounded-xl border px-3 py-2 text-sm text-[var(--foreground)] transition-colors disabled:cursor-not-allowed ${cls}`}
-                              >
-                                <LessonBody body={sanitizeLessonBody(String(option || ""))} />
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {mcQuizSubmitted ? (
-                          <div
-                            className={`rounded-xl border px-3 py-2 text-sm ${
-                              correct ? "border-green-500/30 bg-green-500/10 text-green-200" : "border-red-500/30 bg-red-500/10 text-red-200"
-                            }`}
-                          >
-                            <div className="text-xs font-semibold mb-1">
-                              {correct ? "Correct" : "Incorrect"}
-                            </div>
-                            <LessonBody body={sanitizeLessonBody(String(explanation || ""))} />
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-
-              {mcQuizQuestions.length > 0 ? (
-                <div className="flex items-center justify-between gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setMcQuizSubmitted(true)}
-                    disabled={Object.keys(mcQuizAnswers).length !== mcQuizQuestions.length || mcQuizSubmitted}
-                    className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--foreground)]/15 bg-[var(--foreground)]/10 px-4 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--foreground)]/15 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    Submit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void generateMcQuiz()}
-                    disabled={!hasPremiumAccess || mcQuizLoading}
-                    className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 px-4 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                  >
-                    Generate new
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* QR Code Modal */}
       {showQrModal && (

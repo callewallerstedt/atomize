@@ -7,10 +7,70 @@ const openai = new OpenAI({
 
 export async function POST(request: NextRequest) {
   try {
-    const { question, answer, courseSlug, existingLogs } = await request.json();
+    const { question, answer, courseSlug, existingLogs, mc } = await request.json();
 
     if (!question || !answer || !courseSlug) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    const parseMcChoice = (value: any) => {
+      const str = String(value || "").trim().toUpperCase();
+      return ["A", "B", "C", "D"].includes(str) ? (str as "A" | "B" | "C" | "D") : null;
+    };
+
+    // MC fast-path: the UI already knows correctness, so log deterministically (no classifier needed).
+    if (mc && typeof mc === "object") {
+      const selected = parseMcChoice((mc as any).selected);
+      const correct = parseMcChoice((mc as any).correct);
+      if (selected && correct) {
+        const isCorrect = selected === correct;
+
+        const existingLogsContext = existingLogs && existingLogs.length > 0
+          ? `\n\nEXISTING PRACTICE LOGS (use consistent topic names if similar questions exist):\n${JSON.stringify(existingLogs.slice(-20), null, 2)}`
+          : '\n\nNo previous practice logs. This is the first question.';
+
+        let topic = "General";
+        try {
+          const topicPrompt = `Given the practice question, return ONLY valid JSON: {"topic":"string"}.\n\nQuestion: "${question}"\nCourse slug: "${courseSlug}"\n${existingLogsContext}\n\nCRITICAL: If similar questions on the same topic already exist in existing logs, use the EXACT SAME topic name.`;
+
+          const topicCompletion = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: 'You extract a concise topic label for a practice question. Return ONLY valid JSON with no additional text.' },
+              { role: 'user', content: topicPrompt }
+            ],
+            temperature: 0.2,
+            response_format: { type: 'json_object' }
+          });
+
+          const topicText = topicCompletion.choices[0]?.message?.content;
+          if (topicText) {
+            const parsed = JSON.parse(topicText);
+            if (typeof parsed?.topic === "string" && parsed.topic.trim()) {
+              topic = parsed.topic.trim();
+            }
+          }
+        } catch (e) {
+          // If topic extraction fails, fall back to "General"
+        }
+
+        const logEntry = {
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          timestamp: Date.now(),
+          topic,
+          question,
+          answer: `MC selected: ${selected}`,
+          assessment: isCorrect ? "Correct multiple-choice answer." : `Incorrect multiple-choice answer. Correct: ${correct}.`,
+          grade: isCorrect ? 10 : 3,
+          result: isCorrect ? "correct" : "incorrect",
+          questions: 1
+        };
+
+        return NextResponse.json({
+          success: true,
+          logEntry
+        });
+      }
     }
 
     // First, check if the user's message is actually an answer attempt
