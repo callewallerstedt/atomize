@@ -3375,6 +3375,7 @@ function Home() {
   
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string>("");
+  const [shareTruncated, setShareTruncated] = useState<Record<string, boolean> | null>(null);
   const [copiedToClipboard, setCopiedToClipboard] = useState(false);
   
   const [examSnipeModalOpen, setExamSnipeModalOpen] = useState(false);
@@ -5238,6 +5239,7 @@ function Home() {
                       const result = await response.json();
                       if (result.ok && result.shareUrl) {
                         setShareUrl(result.shareUrl);
+                        setShareTruncated(result.truncated && typeof result.truncated === "object" ? result.truncated : null);
                         setShareModalOpen(true);
                         setCopiedToClipboard(false);
                       } else {
@@ -5371,6 +5373,7 @@ function Home() {
         onClose={() => {
           setShareModalOpen(false);
           setCopiedToClipboard(false);
+          setShareTruncated(null);
         }}
         title="Share Course"
         footer={
@@ -5393,6 +5396,7 @@ function Home() {
               onClick={() => {
                 setShareModalOpen(false);
                 setCopiedToClipboard(false);
+                setShareTruncated(null);
               }}
               className="px-4 py-2 rounded-lg border border-[var(--foreground)]/20 text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
             >
@@ -5405,6 +5409,16 @@ function Home() {
           <p className="text-sm text-[var(--foreground)]/70">
             Share this link with others to let them save this course:
           </p>
+          {shareTruncated && Object.values(shareTruncated).some(Boolean) ? (
+            <div className="rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-100">
+              This share is truncated due to size limits:{" "}
+              {Object.entries(shareTruncated)
+                .filter(([, v]) => v)
+                .map(([k]) => k)
+                .join(", ")}
+              .
+            </div>
+          ) : null}
           <div className="flex items-center gap-2 p-3 rounded-lg bg-[var(--foreground)]/5 border border-[var(--foreground)]/10">
             <input
               type="text"

@@ -112,6 +112,7 @@ export type StoredSubjectData = {
   nodes: StoredSubjectNodeContent;
   progress?: { [topicName: string]: { totalLessons: number; completedLessons: number } };
   practiceLogs?: any[]; // New detailed practice logging
+  practiceLogsClearedAt?: number; // timestamp marker to support safe cross-device clears
   course_context?: string;
   course_language_code?: string; // e.g., 'en', 'sv'
   course_language_name?: string; // e.g., 'English', 'Svenska'

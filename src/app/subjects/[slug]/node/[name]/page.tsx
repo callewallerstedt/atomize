@@ -3773,6 +3773,17 @@ function toggleStar(flashcardId: string) {
                                 </label>
                               ))}
                             </div>
+                            {mcResults?.[qi]?.explanation ? (
+                              <div
+                                className={`rounded-lg border px-3 py-2 text-sm ${
+                                  mcResults[qi].correct
+                                    ? "border-green-500/30 bg-green-500/10 text-green-200"
+                                    : "border-red-500/30 bg-red-500/10 text-red-200"
+                                }`}
+                              >
+                                <LessonBody body={sanitizeLessonBody(String(mcResults[qi].explanation || ""))} />
+                              </div>
+                            ) : null}
                           </div>
                         ))}
                         <div className="flex gap-3 justify-center">
@@ -3782,11 +3793,15 @@ function toggleStar(flashcardId: string) {
                                 const results: { [key: number]: { correct: boolean; explanation: string } } = {};
                                 mcQuestions.forEach((q, qi) => {
                                   const correct = mcAnswers[qi] === q.correctAnswer;
+                                  const correctOptionText = String(q.options?.[q.correctAnswer] ?? "");
+                                  const generatedExplanation =
+                                    typeof (q as any)?.explanation === "string" ? String((q as any).explanation).trim() : "";
+                                  const explanation = correct
+                                    ? (generatedExplanation || "Great job! You got it right.")
+                                    : (`**Correct answer:** ${correctOptionText}\n\n${generatedExplanation || "Review this concept and try again."}`).trim();
                                   results[qi] = {
                                     correct,
-                                    explanation: correct 
-                                      ? "Great job! You got it right." 
-                                      : `The correct answer is: ${q.options[q.correctAnswer]}`
+                                    explanation,
                                   };
                                 });
                                 setMcResults(results);

@@ -213,6 +213,54 @@ function mergeSurgeLog(existingValue: any, incomingValue: any): any[] | undefine
   return merged;
 }
 
+const MAX_PRACTICE_LOG_ENTRIES = 1500;
+
+function mergePracticeLogs(existingValue: any, incomingValue: any): any[] {
+  const existing = Array.isArray(existingValue) ? existingValue : [];
+  const incoming = Array.isArray(incomingValue) ? incomingValue : [];
+  if (!incoming.length) return existing;
+  if (!existing.length) return incoming;
+
+  const toKey = (e: any) => (e?.id != null ? String(e.id) : "");
+  const tsOf = (e: any) => Number(e?.timestamp ?? 0) || 0;
+  const sizeOf = (e: any) => {
+    const q = typeof e?.question === "string" ? e.question.length : 0;
+    const a = typeof e?.answer === "string" ? e.answer.length : 0;
+    const r = typeof e?.result === "string" ? e.result.length : 0;
+    return q + a + r;
+  };
+
+  const chooseBetter = (a: any, b: any) => {
+    const aTs = tsOf(a);
+    const bTs = tsOf(b);
+    if (aTs !== bTs) return aTs > bTs ? a : b;
+    const aSize = sizeOf(a);
+    const bSize = sizeOf(b);
+    if (aSize !== bSize) return aSize > bSize ? a : b;
+    return b;
+  };
+
+  const byId = new Map<string, any>();
+  for (const e of existing) {
+    const k = toKey(e);
+    if (!k) continue;
+    byId.set(k, e);
+  }
+  for (const e of incoming) {
+    const k = toKey(e);
+    if (!k) continue;
+    const prev = byId.get(k);
+    byId.set(k, prev ? chooseBetter(prev, e) : e);
+  }
+
+  const merged = Array.from(byId.values());
+  merged.sort((a, b) => tsOf(a) - tsOf(b));
+  if (merged.length > MAX_PRACTICE_LOG_ENTRIES) {
+    return merged.slice(-MAX_PRACTICE_LOG_ENTRIES);
+  }
+  return merged;
+}
+
 function mergeSubjectData(existingData: any, incomingData: any): any {
   if (!isPlainObject(existingData) || !isPlainObject(incomingData)) return incomingData ?? existingData;
 
@@ -235,6 +283,22 @@ function mergeSubjectData(existingData: any, incomingData: any): any {
 
   const surgeLog = mergeSurgeLog(existingData.surgeLog, incomingData.surgeLog);
   if (surgeLog) merged.surgeLog = surgeLog;
+
+  // Merge practice logs cross-device. To prevent accidental wipes, only clear when `practiceLogsClearedAt` increases.
+  const existingClearedAt = Number(existingData?.practiceLogsClearedAt ?? 0) || 0;
+  const incomingClearedAt = Number(incomingData?.practiceLogsClearedAt ?? 0) || 0;
+  const clearedAt = Math.max(existingClearedAt, incomingClearedAt);
+  const shouldConsiderPracticeLogs =
+    "practiceLogs" in incomingData ||
+    "practiceLogs" in existingData ||
+    existingClearedAt > 0 ||
+    incomingClearedAt > 0;
+
+  if (shouldConsiderPracticeLogs) {
+    const effectiveExisting = incomingClearedAt > existingClearedAt ? [] : existingData.practiceLogs;
+    merged.practiceLogs = mergePracticeLogs(effectiveExisting, incomingData.practiceLogs);
+    if (clearedAt > 0) merged.practiceLogsClearedAt = clearedAt;
+  }
 
   if (isPlainObject(existingData.tree) || isPlainObject(incomingData.tree)) {
     const existingTree = isPlainObject(existingData.tree) ? existingData.tree : {};

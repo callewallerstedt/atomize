@@ -47,7 +47,8 @@ export async function POST(req: Request) {
       "    {",
       '      "question": "Question text (can include Markdown and KaTeX math)",',
       '      "options": ["Option A (can include Markdown and KaTeX)", "Option B", "Option C", "Option D"],',
-      '      "correctAnswer": 0',
+      '      "correctAnswer": 0,',
+      '      "explanation": "Explain why the correct answer is correct and why common misconceptions are wrong (can include Markdown and KaTeX)"',
       "    }",
       "  ]",
       "}",
@@ -103,14 +104,23 @@ export async function POST(req: Request) {
     }
 
     // Validate each question
-    const validQuestions = data.questions.filter((q: any) => 
-      q.question &&
-      Array.isArray(q.options) &&
-      q.options.length === 4 &&
-      typeof q.correctAnswer === "number" &&
-      q.correctAnswer >= 0 &&
-      q.correctAnswer < 4
-    );
+    const validQuestions = data.questions
+      .filter((q: any) => 
+        q.question &&
+        Array.isArray(q.options) &&
+        q.options.length === 4 &&
+        typeof q.correctAnswer === "number" &&
+        q.correctAnswer >= 0 &&
+        q.correctAnswer < 4
+      )
+      .map((q: any) => ({
+        question: String(q.question || ""),
+        options: Array.isArray(q.options) ? q.options.map((o: any) => String(o ?? "")) : [],
+        correctAnswer: Number(q.correctAnswer),
+        explanation: typeof q.explanation === "string" && q.explanation.trim().length > 0
+          ? q.explanation
+          : `Correct answer: ${Array.isArray(q.options) ? String(q.options?.[q.correctAnswer] ?? "") : ""}`.trim(),
+      }));
 
     if (validQuestions.length === 0) {
       return NextResponse.json(
@@ -132,4 +142,3 @@ export async function POST(req: Request) {
     );
   }
 }
-

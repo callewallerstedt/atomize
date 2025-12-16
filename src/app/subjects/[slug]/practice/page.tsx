@@ -9,6 +9,7 @@ import GlowSpinner from "@/components/GlowSpinner";
 import {
   loadSubjectData,
   saveSubjectData,
+  saveSubjectDataAsync,
   StoredSubjectData,
   TopicGeneratedContent,
   TopicGeneratedLesson,
@@ -19,6 +20,16 @@ type ChatMessage = {
   content: string;
   hidden?: boolean;
   isLoading?: boolean;
+  attachments?: Array<{
+    type: "image" | "file";
+    data?: string;
+    url?: string;
+    name?: string;
+    size?: number;
+    extension?: string;
+    content?: string;
+    mimeType?: string;
+  }>;
   uiElements?: Array<{
     type: 'button' | 'file_upload';
     id: string;
@@ -731,9 +742,6 @@ function buildPracticeContext(
   examSnipeData?: string | null,
   availableExamSnipes?: Array<{ slug: string; courseName: string; createdAt: string }>
 ): string {
-  // Debug: log practice log state
-  console.log("[buildPracticeContext] practiceLog length:", practiceLog.length, "entries:", practiceLog);
-  
   if (!data) {
     return [
       `PRACTICE MODE ACTIVE`,
@@ -941,14 +949,9 @@ function buildPracticeContext(
 
   if (practiceLog.length > 0) {
     const fullLogs = formatFullPracticeLogs(practiceLog);
-    console.log("[buildPracticeContext] formatFullPracticeLogs result length:", fullLogs?.length || 0);
-    console.log("[buildPracticeContext] formatFullPracticeLogs preview:", fullLogs?.substring(0, 500) || "EMPTY");
     if (fullLogs) {
       lines.push(fullLogs);
-      console.log("[buildPracticeContext] Added full logs to context, total lines so far:", lines.length);
     } else {
-      // Debug: log if formatFullPracticeLogs returned empty despite having entries
-      console.warn("formatFullPracticeLogs returned empty for", practiceLog.length, "entries");
       lines.push(
         `PRACTICE LOG DATA: ${practiceLog.length} entries found but formatting failed. Raw count: ${practiceLog.length}`
       );
@@ -1015,30 +1018,13 @@ function buildPracticeContext(
   
   if (baseContext.length > maxBaseContext) {
     baseContext = baseContext.slice(0, maxBaseContext);
-    console.warn("[buildPracticeContext] Truncated base context to make room for practice logs");
   }
   
   // Combine base context with practice logs
   const finalContext = practiceLogsContent 
     ? `${baseContext}\n\n${practiceLogsContent}`.slice(0, MAX_CONTEXT_CHARS)
     : baseContext.slice(0, MAX_CONTEXT_CHARS);
-  
-  // Debug: verify practice logs are in final context
-  const hasPracticeLogs = finalContext.includes("COMPLETE PRACTICE LOG HISTORY");
-  console.log("[buildPracticeContext] Final context length:", finalContext.length);
-  console.log("[buildPracticeContext] Base context length:", baseContext.length);
-  console.log("[buildPracticeContext] Practice logs length:", practiceLogsContent.length);
-  console.log("[buildPracticeContext] Contains practice logs:", hasPracticeLogs);
-  if (hasPracticeLogs) {
-    const logStartIndex = finalContext.indexOf("COMPLETE PRACTICE LOG HISTORY");
-    console.log("[buildPracticeContext] Practice logs start at index:", logStartIndex);
-    console.log("[buildPracticeContext] Practice logs preview:", finalContext.substring(logStartIndex, logStartIndex + 1000));
-  } else if (practiceLogsContent) {
-    console.error("[buildPracticeContext] ERROR: Practice logs were formatted but NOT found in final context!");
-    console.log("[buildPracticeContext] Practice logs content length:", practiceLogsContent.length);
-    console.log("[buildPracticeContext] Context preview (last 2000 chars):", finalContext.substring(Math.max(0, finalContext.length - 2000)));
-  }
-  
+
   return finalContext;
 }
 
@@ -1123,7 +1109,17 @@ export default function PracticePage() {
     subscriptionLevel === "mylittlepwettybebe";
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const conversationRef = useRef<Array<Omit<ChatMessage, "hidden">>>([]);
-  
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [mcQuizModalOpen, setMcQuizModalOpen] = useState(false);
+  const [mcQuizTopic, setMcQuizTopic] = useState<string>("");
+  const [mcQuizQuestions, setMcQuizQuestions] = useState<
+    Array<{ question: string; options: string[]; correctAnswer: number; explanation?: string }>
+  >([]);
+  const [mcQuizAnswers, setMcQuizAnswers] = useState<Record<number, number>>({});
+  const [mcQuizSubmitted, setMcQuizSubmitted] = useState(false);
+  const [mcQuizLoading, setMcQuizLoading] = useState(false);
+  const [mcQuizError, setMcQuizError] = useState<string | null>(null);
+   
   // QR Code feature state
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
@@ -1131,9 +1127,101 @@ export default function PracticePage() {
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
   const [qrImages, setQrImages] = useState<Array<{ id: string; data: string }>>([]);
+  const qrImagesRef = useRef<Array<{ id: string; data: string }>>([]);
+  const [qrInfoMessage, setQrInfoMessage] = useState<string | null>(null);
+  const [qrPollingActive, setQrPollingActive] = useState(false);
   const [isAttachmentDragActive, setIsAttachmentDragActive] = useState(false);
   const qrPollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const practiceLogSyncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    qrImagesRef.current = qrImages;
+  }, [qrImages]);
+
+  const mcQuizTopics = useMemo(() => {
+    const fromTopics = Array.isArray(subjectData?.topics)
+      ? subjectData.topics.map((t) => (t && typeof t.name === "string" ? t.name : "")).filter(Boolean)
+      : [];
+    const fromNodes = Object.keys(subjectData?.nodes || {}).filter((key) => key && !key.startsWith("__"));
+    return Array.from(new Set([...fromTopics, ...fromNodes]));
+  }, [subjectData]);
+
+  useEffect(() => {
+    if (!mcQuizModalOpen) return;
+    if (!mcQuizTopic && mcQuizTopics.length > 0) {
+      setMcQuizTopic(mcQuizTopics[0]);
+    }
+  }, [mcQuizModalOpen, mcQuizTopic, mcQuizTopics]);
+
+  const generateMcQuiz = async () => {
+    if (!hasPremiumAccess) {
+      setMcQuizError("Premium access is required to generate an MC quiz.");
+      return;
+    }
+
+    const topic = (mcQuizTopic || mcQuizTopics[0] || "").trim();
+    if (!topic) {
+      setMcQuizError("Pick a topic first.");
+      return;
+    }
+
+    setMcQuizLoading(true);
+    setMcQuizError(null);
+    try {
+      const node: any = subjectData?.nodes ? (subjectData.nodes as any)[topic] : null;
+      let lessonContent = "";
+
+      if (node && typeof node === "object" && !Array.isArray(node)) {
+        const lessons = Array.isArray(node.lessons) ? node.lessons : [];
+        for (let i = lessons.length - 1; i >= 0; i--) {
+          const body = lessons[i]?.body;
+          if (typeof body === "string" && body.trim().length > 0) {
+            lessonContent = body;
+            break;
+          }
+        }
+        if (!lessonContent && typeof node.overview === "string" && node.overview.trim().length > 0) {
+          lessonContent = node.overview;
+        }
+      }
+
+      if (!lessonContent) {
+        const fallbackParts = [
+          `Topic: ${topic}`,
+          subjectData?.course_context ? `Course context:\n${subjectData.course_context}` : "",
+          subjectData?.combinedText ? `Course materials excerpt:\n${String(subjectData.combinedText).slice(0, 12000)}` : "",
+        ].filter(Boolean);
+        lessonContent = fallbackParts.join("\n\n");
+      }
+
+      const res = await fetch("/api/generate-mc-quiz", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: subjectData?.subject || slug,
+          topic,
+          lessonContent: sanitizeLessonBody(String(lessonContent || "")),
+          courseContext: subjectData?.course_context || "",
+          languageName: subjectData?.course_language_name || "",
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || `Server error (${res.status})`);
+      }
+      const questions = Array.isArray(json.questions) ? json.questions : [];
+      if (!questions.length) throw new Error("No questions returned.");
+
+      setMcQuizQuestions(questions);
+      setMcQuizAnswers({});
+      setMcQuizSubmitted(false);
+    } catch (err: any) {
+      setMcQuizError(err?.message || "Failed to generate quiz.");
+    } finally {
+      setMcQuizLoading(false);
+    }
+  };
 
   const applyPracticeLogUpdates = (updates: PracticeLogEntry[]) => {
     if (!updates.length) return;
@@ -1146,12 +1234,10 @@ export default function PracticePage() {
             const parsed = JSON.parse(stored);
             if (Array.isArray(parsed) && parsed.length === 0 && prev.length > 0) {
               // localStorage was cleared but state wasn't - respect the clear
-              console.log("Practice logs were cleared, ignoring update");
               return [];
             }
           } else if (prev.length > 0) {
             // localStorage was removed but state wasn't - respect the clear
-            console.log("Practice logs were cleared, ignoring update");
             return [];
           }
         } catch (err) {
@@ -1220,7 +1306,13 @@ export default function PracticePage() {
     setMessages((prev) => [...prev, ...uiMessages]);
 
     // Add all messages to conversation
-    conversation.push(...messages.map(m => ({ role: m.role, content: m.content })));
+    conversation.push(
+      ...messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        attachments: m.attachments,
+      }))
+    );
     conversation.push({ role: "assistant", content: "" });
 
     const historyForApi = conversation.slice(0, -1);
@@ -1228,19 +1320,6 @@ export default function PracticePage() {
     try {
       setSending(true);
       setError(null);
-
-      // Debug: verify context being sent
-      const contextHasLogs = practiceContext.includes("COMPLETE PRACTICE LOG HISTORY");
-      console.log("[sendMessage] practiceContext length:", practiceContext.length);
-      console.log("[sendMessage] Context contains practice logs:", contextHasLogs);
-      if (contextHasLogs) {
-        const logIndex = practiceContext.indexOf("COMPLETE PRACTICE LOG HISTORY");
-        console.log("[sendMessage] Practice logs start at index:", logIndex);
-        console.log("[sendMessage] Practice logs preview in context:", practiceContext.substring(logIndex, logIndex + 500));
-      } else {
-        console.warn("[sendMessage] WARNING: practiceContext does NOT contain practice logs!");
-        console.log("[sendMessage] Context preview (last 1000 chars):", practiceContext.substring(Math.max(0, practiceContext.length - 1000)));
-      }
 
       const res = await fetch("/api/chat/stream", {
         method: "POST",
@@ -1250,6 +1329,7 @@ export default function PracticePage() {
           messages: historyForApi.map((m) => ({
             role: m.role,
             content: m.content,
+            attachments: m.attachments,
           })),
           path: typeof window !== "undefined" ? window.location.pathname : `/subjects/${slug}/practice`,
         }),
@@ -1426,7 +1506,6 @@ export default function PracticePage() {
       
       // Handle skipped logs (not an answer attempt)
       if (result.skipped) {
-        console.log("⏭️ Practice log skipped:", result.reason);
         return;
       }
       
@@ -1443,7 +1522,6 @@ export default function PracticePage() {
           return next;
         });
 
-        console.log("📝 Practice log recorded:", logEntry);
       }
     } catch (error) {
       console.error('Error calling practice logger:', error);
@@ -1453,7 +1531,11 @@ export default function PracticePage() {
   // QR Code functions
   const createQrSession = async () => {
     try {
+      // Start a fresh session (only one active poller at a time).
+      stopPollingForImages();
       setError(null);
+      setQrInfoMessage(null);
+      setQrCodeDataUrl(null);
       const response = await fetch("/api/qr-session/create", {
         method: "POST",
       });
@@ -1488,8 +1570,7 @@ export default function PracticePage() {
         setQrCodeDataUrl(qrData.qrDataUrl);
       } catch (qrError) {
         console.error("Error generating QR code:", qrError);
-        setError("Failed to generate QR code");
-        return;
+        setQrInfoMessage("Couldn't generate the QR image. Use the link below on your phone instead.");
       }
       
       setShowQrModal(true);
@@ -1501,11 +1582,25 @@ export default function PracticePage() {
     }
   };
 
+  function stopPollingForImages() {
+    if (qrPollIntervalRef.current) {
+      clearInterval(qrPollIntervalRef.current);
+      qrPollIntervalRef.current = null;
+    }
+    setQrPollingActive(false);
+    setQrSessionId(null);
+    setQrUrl(null);
+    setQrCodeDataUrl(null);
+    setQrInfoMessage(null);
+  }
+
   const startPollingForImages = (sessionId: string) => {
     // Clear any existing polling
     if (qrPollIntervalRef.current) {
       clearInterval(qrPollIntervalRef.current);
     }
+    setQrPollingActive(true);
+    setQrInfoMessage((prev) => prev || "Waiting for photos from your phone...");
 
     // Poll every 1 second
     qrPollIntervalRef.current = setInterval(async () => {
@@ -1518,26 +1613,20 @@ export default function PracticePage() {
               clearInterval(qrPollIntervalRef.current);
               qrPollIntervalRef.current = null;
             }
+            setQrPollingActive(false);
+            setQrInfoMessage('Phone session expired. Tap "Answer with phone" to generate a new QR.');
             return;
           }
           return;
         }
         const data = await response.json();
         if (data.images && data.images.length > 0) {
-          const newImages = data.images.filter(
-            (img: { id: string; data: string }) =>
-              !qrImages.some((existing) => existing.id === img.id)
-          );
+          const existingIds = new Set(qrImagesRef.current.map((img) => img.id));
+          const newImages = data.images.filter((img: { id: string; data: string }) => !existingIds.has(img.id));
           if (newImages.length > 0) {
             setQrImages((prev) => [...prev, ...newImages]);
-            insertImagesIntoInput();
-            // Close modal when images are received
-            setShowQrModal(false);
-            // Stop polling
-            if (qrPollIntervalRef.current) {
-              clearInterval(qrPollIntervalRef.current);
-              qrPollIntervalRef.current = null;
-            }
+            focusComposer();
+            setQrInfoMessage(`Received ${newImages.length} image${newImages.length === 1 ? "" : "s"} from your phone.`);
           }
         }
       } catch (error) {
@@ -1546,22 +1635,13 @@ export default function PracticePage() {
     }, 1000);
   };
 
-  const insertImagesIntoInput = () => {
-  // Focus the textarea so the user can continue typing after images are added
-  const textarea = document.querySelector(
-    'textarea[placeholder*="Respond with your work"]'
-  ) as HTMLTextAreaElement;
-  if (textarea) {
+  const focusComposer = () => {
     setTimeout(() => {
-      textarea.focus();
+      textareaRef.current?.focus();
     }, 0);
-  }
-};
+  };
 
 const ATTACHMENT_TILE_SIZE = 36;
-
-const attachmentsToMarkdown = (images: Array<{ id: string; data: string }>) =>
-  images.map((img) => `![photo](${img.data})`).join("\n");
 
 const removeQrImage = (imageId: string) => {
   setQrImages((prev) => prev.filter((img) => img.id !== imageId));
@@ -1589,7 +1669,7 @@ const removeQrImage = (imageId: string) => {
         }))
       );
       setQrImages((prev) => [...prev, ...processed]);
-      insertImagesIntoInput();
+      focusComposer();
     } catch (attachmentError) {
       console.error("Error processing attachments:", attachmentError);
       setError("Failed to add image. Please try again.");
@@ -2124,14 +2204,59 @@ const removeQrImage = (imageId: string) => {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    try {
-      const data = loadSubjectData(slug);
-      setSubjectData(data);
-    } catch (err) {
-      console.error("Failed to load subject data for practice:", err);
-    } finally {
-      setLoadingSubject(false);
-    }
+    let cancelled = false;
+
+    (async () => {
+      setLoadingSubject(true);
+      try {
+        const local = loadSubjectData(slug);
+        if (!cancelled) setSubjectData(local);
+
+        // Shared course previews are local-only; never pull/push server state for them.
+        if (slug.startsWith("shared-")) return;
+
+        const meRes = await fetch("/api/me", { credentials: "include" });
+        const meJson = await meRes.json().catch(() => ({}));
+        if (!meJson?.user) return;
+
+        let merged: StoredSubjectData | null = null;
+
+        if (local) {
+          // Let the server merge local + DB state (prevents shallow merge data loss).
+          const putRes = await fetch("/api/subject-data", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ slug, data: local }),
+          });
+          const putJson = await putRes.json().catch(() => ({}));
+          if (putRes.ok && putJson?.data) {
+            merged = putJson.data as StoredSubjectData;
+          }
+        } else {
+          const getRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, { credentials: "include" });
+          const getJson = await getRes.json().catch(() => ({}));
+          if (getRes.ok && getJson?.data) {
+            merged = getJson.data as StoredSubjectData;
+          }
+        }
+
+        if (merged) {
+          try {
+            localStorage.setItem(`atomicSubjectData:${slug}`, JSON.stringify(merged));
+          } catch {}
+          if (!cancelled) setSubjectData(merged);
+        }
+      } catch (err) {
+        console.warn("Failed to load server subject data for practice:", err);
+      } finally {
+        if (!cancelled) setLoadingSubject(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [slug]);
 
   // AI function to match exam snipe entry to course - returns the slug of the matching entry
@@ -2331,7 +2456,6 @@ Respond with ONLY the slug of the matching entry (e.g., "signals-systems" or "tm
             createdAt: record.createdAt,
           }));
           setAvailableExamSnipes(examSnipes);
-          console.log(`Loaded ${examSnipes.length} exam snipes for Chad's context`);
         }
       } catch (err) {
         console.error("Failed to load exam snipes for context:", err);
@@ -2342,74 +2466,39 @@ Respond with ONLY the slug of the matching entry (e.g., "signals-systems" or "tm
   useEffect(() => {
     if (typeof window === "undefined") return;
     setPracticeLogLoaded(false);
-    try {
-      const stored = localStorage.getItem(`${PRACTICE_LOG_PREFIX}${slug}`);
-      if (!stored) {
-        setPracticeLog([]);
-        setPracticeLogLoaded(true);
-        return;
+
+    const normalizeEntry = (entry: any): PracticeLogEntry | null => {
+      if (!entry || typeof entry !== "object") return null;
+      return {
+        id: typeof entry.id === "string" ? entry.id : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        timestamp: typeof entry.timestamp === "number" ? entry.timestamp : Date.now(),
+        topic: typeof entry.topic === "string" ? entry.topic : "General Practice",
+        question: typeof entry.question === "string" ? entry.question : entry.result || "No question recorded",
+        answer: typeof entry.answer === "string" ? entry.answer : "No answer recorded",
+        assessment: typeof entry.assessment === "string" ? entry.assessment : "Legacy entry",
+        grade: typeof entry.grade === "number" ? entry.grade : (typeof entry.rating === "number" ? entry.rating : 5),
+        // Legacy fields
+        skill: typeof entry.skill === "string" ? entry.skill : undefined,
+        rating: typeof entry.rating === "number" ? entry.rating : undefined,
+        strengths: Array.isArray(entry.strengths) ? entry.strengths.filter((item: any) => typeof item === "string") : undefined,
+        weaknesses: Array.isArray(entry.weaknesses) ? entry.weaknesses.filter((item: any) => typeof item === "string") : undefined,
+        recommendation: typeof entry.recommendation === "string" ? entry.recommendation : undefined,
+        confidence: typeof entry.confidence === "number" ? entry.confidence : undefined,
+        difficulty: typeof entry.difficulty === "string" ? entry.difficulty : undefined,
+        raw: typeof entry.raw === "string" ? entry.raw : undefined,
+        result: typeof entry.result === "string" ? entry.result : undefined,
+        questions: typeof entry.questions === "number" ? entry.questions : undefined,
+      };
+    };
+
+    const normalizeAnyToEntries = (value: any): PracticeLogEntry[] => {
+      if (Array.isArray(value)) {
+        return value.map(normalizeEntry).filter(Boolean) as PracticeLogEntry[];
       }
-      try {
-        const parsed = JSON.parse(stored);
-        console.log("[Practice Log Load] Parsed from localStorage:", parsed?.length || 0, "entries");
-        if (Array.isArray(parsed)) {
-          const mapped = parsed
-            .filter((entry) => entry && typeof entry === "object")
-            .map((entry: any) => ({
-                id:
-                  typeof entry.id === "string"
-                    ? entry.id
-                    : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-                timestamp:
-                  typeof entry.timestamp === "number"
-                    ? entry.timestamp
-                    : Date.now(),
-                topic: typeof entry.topic === "string" ? entry.topic : "General Practice",
-                question: typeof entry.question === "string" ? entry.question : entry.result || "No question recorded",
-                answer: typeof entry.answer === "string" ? entry.answer : "No answer recorded",
-                assessment: typeof entry.assessment === "string" ? entry.assessment : "Legacy entry",
-                grade: typeof entry.grade === "number" ? entry.grade : (typeof entry.rating === "number" ? entry.rating : 5),
-                // Legacy fields
-                skill: typeof entry.skill === "string" ? entry.skill : undefined,
-                rating: typeof entry.rating === "number" ? entry.rating : undefined,
-                strengths: Array.isArray(entry.strengths)
-                  ? entry.strengths.filter((item: any) => typeof item === "string")
-                  : undefined,
-                weaknesses: Array.isArray(entry.weaknesses)
-                  ? entry.weaknesses.filter((item: any) => typeof item === "string")
-                  : undefined,
-                recommendation: typeof entry.recommendation === "string" ? entry.recommendation : undefined,
-                confidence: typeof entry.confidence === "number" ? entry.confidence : undefined,
-                difficulty: typeof entry.difficulty === "string" ? entry.difficulty : undefined,
-                raw: typeof entry.raw === "string" ? entry.raw : undefined,
-                result: typeof entry.result === "string" ? entry.result : undefined,
-                questions: typeof entry.questions === "number" ? entry.questions : undefined,
-              }));
-          console.log("[Practice Log Load] Mapped entries:", mapped.length);
-          setPracticeLog(mapped);
-        } else if (typeof parsed === "string") {
-          setPracticeLog([
-            {
-              id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-              timestamp: Date.now(),
-              topic: "Legacy entry",
-              question: "Legacy question",
-              answer: parsed.slice(0, 120),
-              assessment: "Legacy entry",
-              grade: 5,
-              result: parsed.slice(0, 120),
-            },
-          ]);
-        } else {
-          setPracticeLog([]);
-        }
-      } catch {
-        const normalized = stored.trim();
-        if (!normalized) {
-          setPracticeLog([]);
-          return;
-        }
-        setPracticeLog([
+      if (typeof value === "string") {
+        const normalized = value.trim();
+        if (!normalized) return [];
+        return [
           {
             id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
             timestamp: Date.now(),
@@ -2420,15 +2509,97 @@ Respond with ONLY the slug of the matching entry (e.g., "signals-systems" or "tm
             grade: 5,
             result: normalized.slice(0, 200),
           },
-        ]);
+        ];
       }
+      return [];
+    };
+
+    try {
+      let stored: string | null = null;
+      try {
+        stored = localStorage.getItem(`${PRACTICE_LOG_PREFIX}${slug}`);
+      } catch {}
+
+      let localParsed: any = null;
+      if (stored) {
+        try {
+          localParsed = JSON.parse(stored);
+        } catch {
+          localParsed = stored;
+        }
+      }
+
+      const localEntries = normalizeAnyToEntries(localParsed);
+      const subjectEntries = normalizeAnyToEntries((subjectData as any)?.practiceLogs);
+
+      const byId = new Map<string, PracticeLogEntry>();
+      const chooseBetter = (a: PracticeLogEntry, b: PracticeLogEntry) => (b.timestamp > a.timestamp ? b : a);
+
+      for (const e of subjectEntries) {
+        byId.set(e.id, e);
+      }
+      for (const e of localEntries) {
+        const prev = byId.get(e.id);
+        byId.set(e.id, prev ? chooseBetter(prev, e) : e);
+      }
+
+      const merged = Array.from(byId.values()).sort((a, b) => a.timestamp - b.timestamp);
+      setPracticeLog(merged);
+      try {
+        localStorage.setItem(`${PRACTICE_LOG_PREFIX}${slug}`, JSON.stringify(merged));
+      } catch {}
     } catch (err) {
       console.error("Failed to load practice log:", err);
       setPracticeLog([]);
     } finally {
       setPracticeLogLoaded(true);
     }
-  }, [slug]);
+  }, [slug, subjectData]);
+
+  // Persist practice logs into SubjectData so they sync cross-device and get included in share snapshots.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!practiceLogLoaded) return;
+    if (slug.startsWith("shared-")) return;
+
+    if (practiceLogSyncTimeoutRef.current) {
+      clearTimeout(practiceLogSyncTimeoutRef.current);
+    }
+
+    practiceLogSyncTimeoutRef.current = setTimeout(() => {
+      (async () => {
+        try {
+          const existing =
+            loadSubjectData(slug) ||
+            ({
+              subject: slug,
+              files: [],
+              combinedText: "",
+              topics: [],
+              nodes: {},
+              examDates: [],
+            } as StoredSubjectData);
+
+          const next: StoredSubjectData = {
+            ...existing,
+            practiceLogs: practiceLog,
+            practiceLogsClearedAt: (existing as any).practiceLogsClearedAt,
+          };
+
+          await saveSubjectDataAsync(slug, next);
+        } catch (err) {
+          console.warn("Failed to sync practice logs:", err);
+        }
+      })();
+    }, 1200);
+
+    return () => {
+      if (practiceLogSyncTimeoutRef.current) {
+        clearTimeout(practiceLogSyncTimeoutRef.current);
+        practiceLogSyncTimeoutRef.current = null;
+      }
+    };
+  }, [slug, practiceLog, practiceLogLoaded]);
 
 useEffect(() => {
   conversationRef.current = [];
@@ -2470,14 +2641,15 @@ async function sendMessage(
   const text = rawText ?? "";
   const trimmedText = text.trim();
   const hasUserText = trimmedText.length > 0;
-  const hasAttachedImages = qrImages.length > 0;
-  const attachmentMarkdown = hasAttachedImages ? attachmentsToMarkdown(qrImages) : "";
-  const messagePayload = [hasUserText ? trimmedText : null, attachmentMarkdown ? attachmentMarkdown : null]
-    .filter(Boolean)
-    .join(hasUserText && attachmentMarkdown ? "\n\n" : "");
+  const imagesToSend = qrImages.length > 0 ? [...qrImages] : [];
+  const attachments =
+    imagesToSend.length > 0
+      ? imagesToSend.map((img) => ({ type: "image" as const, data: img.data }))
+      : undefined;
+  const messageText = hasUserText ? trimmedText : "";
 
   if (sending) return;
-  if (!omitFromHistory && !hasUserText && !hasAttachedImages) return;
+  if (!omitFromHistory && !hasUserText && imagesToSend.length === 0) return;
 
   if (!suppressUser && !textOverride) {
     setInput("");
@@ -2488,10 +2660,10 @@ async function sendMessage(
   const conversation = conversationRef.current;
   const uiMessages: ChatMessage[] = [];
 
-  if (!omitFromHistory && (hasUserText || hasAttachedImages)) {
-    conversation.push({ role: "user", content: messagePayload || "" });
+  if (!omitFromHistory && (hasUserText || imagesToSend.length > 0)) {
+    conversation.push({ role: "user", content: messageText, attachments });
     if (!suppressUser) {
-      uiMessages.push({ role: "user", content: messagePayload || "" });
+      uiMessages.push({ role: "user", content: messageText, attachments });
     }
 
     // Log the question-answer pair by finding the most recent question in conversation
@@ -2541,19 +2713,6 @@ async function sendMessage(
       setSending(true);
       setError(null);
 
-      // Debug: verify context being sent
-      const contextHasLogs = practiceContext.includes("COMPLETE PRACTICE LOG HISTORY");
-      console.log("[sendMessage] practiceContext length:", practiceContext.length);
-      console.log("[sendMessage] Context contains practice logs:", contextHasLogs);
-      if (contextHasLogs) {
-        const logIndex = practiceContext.indexOf("COMPLETE PRACTICE LOG HISTORY");
-        console.log("[sendMessage] Practice logs start at index:", logIndex);
-        console.log("[sendMessage] Practice logs preview in context:", practiceContext.substring(logIndex, logIndex + 500));
-      } else {
-        console.warn("[sendMessage] WARNING: practiceContext does NOT contain practice logs!");
-        console.log("[sendMessage] Context preview (last 1000 chars):", practiceContext.substring(Math.max(0, practiceContext.length - 1000)));
-      }
-
       const res = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2562,6 +2721,7 @@ async function sendMessage(
           messages: historyForApi.map((m) => ({
             role: m.role,
             content: m.content,
+            attachments: m.attachments,
           })),
           path:
             typeof window !== "undefined"
@@ -2997,7 +3157,7 @@ Respond with ONLY the specific topic name, no explanation.`;
         rawLessonJson: [typeof json.raw === 'string' ? json.raw : JSON.stringify(lessonData)],
       } as any;
 
-      saveSubjectData(slug, updatedData);
+      await saveSubjectDataAsync(slug, updatedData);
       setSubjectData(updatedData);
 
       return true;
@@ -3084,6 +3244,17 @@ Respond with ONLY the specific topic name, no explanation.`;
               Practice Log
             </button>
             <button
+              onClick={() => {
+                setMcQuizError(null);
+                setMcQuizModalOpen(true);
+              }}
+              disabled={!hasPremiumAccess}
+              className="inline-flex items-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-2.5 py-1 text-[11px] font-medium text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
+              title={hasPremiumAccess ? "Quick multiple choice quiz" : "Premium required"}
+            >
+              MC Quiz
+            </button>
+            <button
               onClick={() => setRawLogModalOpen(true)}
               className="inline-flex items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-2 py-1 text-[10px] font-medium text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors whitespace-nowrap"
             >
@@ -3091,48 +3262,35 @@ Respond with ONLY the specific topic name, no explanation.`;
             </button>
             <button
               onClick={() => {
-                if (confirm('Are you sure you want to clear all practice logs? This cannot be undone.')) {
-                  try {
-                    // Explicitly set empty array instead of just removing, to prevent any race conditions
-                    localStorage.setItem(`${PRACTICE_LOG_PREFIX}${slug}`, JSON.stringify([]));
-                  } catch (error) {
-                    console.warn("Failed to clear practice logs from storage:", error);
-                  }
-                  const subjectData = loadSubjectData(slug);
-                  if (subjectData) {
-                    saveSubjectData(slug, {
-                      ...subjectData,
-                      practiceLogs: []
-                    });
-                  }
-                  // Clear state immediately and verify it stays cleared
-                  setPracticeLog([]);
-                  // Verify localStorage is actually empty after a brief delay
-                  setTimeout(() => {
-                    const stored = localStorage.getItem(`${PRACTICE_LOG_PREFIX}${slug}`);
-                    if (stored) {
-                      try {
-                        const parsed = JSON.parse(stored);
-                        if (Array.isArray(parsed) && parsed.length === 0) {
-                          // Good, it's empty
-                          setPracticeLog([]);
-                        } else if (Array.isArray(parsed) && parsed.length > 0) {
-                          // Something restored it, clear again
-                          console.warn("Practice logs were restored, clearing again");
-                          localStorage.setItem(`${PRACTICE_LOG_PREFIX}${slug}`, JSON.stringify([]));
-                          setPracticeLog([]);
-                        }
-                      } catch {
-                        // Invalid data, clear it
-                        localStorage.setItem(`${PRACTICE_LOG_PREFIX}${slug}`, JSON.stringify([]));
-                        setPracticeLog([]);
-                      }
-                    } else {
-                      // No data, ensure state is empty
-                      setPracticeLog([]);
-                    }
-                  }, 100);
+                if (!confirm("Are you sure you want to clear all practice logs? This cannot be undone.")) return;
+                const clearedAt = Date.now();
+                setPracticeLog([]);
+                try {
+                  localStorage.setItem(`${PRACTICE_LOG_PREFIX}${slug}`, JSON.stringify([]));
+                } catch (error) {
+                  console.warn("Failed to clear practice logs from storage:", error);
                 }
+                void (async () => {
+                  try {
+                    const existing =
+                      loadSubjectData(slug) ||
+                      ({
+                        subject: slug,
+                        files: [],
+                        combinedText: "",
+                        topics: [],
+                        nodes: {},
+                        examDates: [],
+                      } as StoredSubjectData);
+                    await saveSubjectDataAsync(slug, {
+                      ...existing,
+                      practiceLogs: [],
+                      practiceLogsClearedAt: clearedAt,
+                    });
+                  } catch (error) {
+                    console.warn("Failed to clear practice logs on server:", error);
+                  }
+                })();
               }}
               className="inline-flex items-center justify-center rounded-full border border-red-500/40 bg-red-500/10 px-2 py-1 text-[10px] font-medium text-red-400 hover:bg-red-500/20 transition-colors whitespace-nowrap"
               title="Clear all practice logs"
@@ -3145,7 +3303,7 @@ Respond with ONLY the specific topic name, no explanation.`;
 
       {!subjectData && (
         <div className="mx-auto mt-6 w-full max-w-2xl rounded-xl border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">
-          We couldn’t find local data for this course. Open the course page once
+          We couldn't find local data for this course. Open the course page once
           to analyze materials, then come back to practice.
         </div>
       )}
@@ -3166,6 +3324,13 @@ Respond with ONLY the specific topic name, no explanation.`;
             const isAssistant = msg.role === "assistant";
             const showSpinner = (isAssistant && sending && msg.content.trim() === "") || (isAssistant && msg.isLoading);
             const isPreparing = isAssistant && msg.isLoading && examSnipeMatching;
+            const imageAttachments = (msg.attachments || []).filter((att) => {
+              if (!att) return false;
+              if (att.type === "image") return true;
+              const data = typeof att.data === "string" ? att.data : "";
+              const url = typeof att.url === "string" ? att.url : "";
+              return data.startsWith("data:image") || url.startsWith("data:image");
+            });
             return (
               <div
                 key={`${msg.role}-${idx}`}
@@ -3178,6 +3343,26 @@ Respond with ONLY the specific topic name, no explanation.`;
                     {msg.content ? (
                       <div className="text-sm text-[var(--foreground)]/90 leading-relaxed">
                         {msg.content}
+                      </div>
+                    ) : null}
+                    {imageAttachments.length > 0 ? (
+                      <div className={`${msg.content ? "mt-2" : ""} grid grid-cols-2 gap-2`}>
+                        {imageAttachments.map((att, attIdx) => {
+                          const src = (att.url || att.data || "") as string;
+                          if (!src) return null;
+                          return (
+                            <a
+                              key={`${idx}-att-${attIdx}`}
+                              href={src}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block overflow-hidden rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/40"
+                              title="Open image"
+                            >
+                              <img src={src} alt={`Attachment ${attIdx + 1}`} className="h-auto w-full object-cover" />
+                            </a>
+                          );
+                        })}
                       </div>
                     ) : null}
                   </div>
@@ -3255,6 +3440,30 @@ Respond with ONLY the specific topic name, no explanation.`;
           }}
           className="mt-4 sticky bottom-4 z-20"
         >
+          {qrPollingActive && qrSessionId ? (
+            <div className="mb-2 flex items-center justify-between rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 px-3 py-2 text-xs text-[var(--foreground)]/80">
+              <div>Phone session active</div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowQrModal(true)}
+                  className="inline-flex h-8 items-center justify-center rounded-lg border border-[var(--foreground)]/15 bg-[var(--background)]/60 px-2 text-[11px] text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
+                >
+                  Show
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopPollingForImages();
+                    setQrInfoMessage("Phone session stopped.");
+                  }}
+                  className="inline-flex h-8 items-center justify-center rounded-lg border border-red-500/30 bg-red-500/10 px-2 text-[11px] text-red-200 hover:bg-red-500/20 transition-colors"
+                >
+                  Stop
+                </button>
+              </div>
+            </div>
+          ) : null}
           {qrImages.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1.5">
               {qrImages.map((image) => (
@@ -3277,7 +3486,9 @@ Respond with ONLY the specific topic name, no explanation.`;
                     className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center hover:bg-red-600 shadow-lg"
                     aria-label="Remove image"
                   >
-                    ×
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
                   </button>
                 </div>
               ))}
@@ -3342,6 +3553,7 @@ Respond with ONLY the specific topic name, no explanation.`;
               )}
             </div>
             <textarea
+              ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -3359,7 +3571,7 @@ Respond with ONLY the specific topic name, no explanation.`;
                   await addImagesFromFiles(files);
                 }
               }}
-              placeholder="Respond with your work, explain your reasoning, or ask for a different drill…"
+              placeholder="Respond with your work, explain your reasoning, or ask for a different drill..."
               rows={1}
               className="flex-1 bg-transparent border-none outline-none text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden pl-2 pr-4"
               style={{ minHeight: "1.5rem", lineHeight: "1.5rem" }}
@@ -3374,7 +3586,9 @@ Respond with ONLY the specific topic name, no explanation.`;
                 aria-label="Lower difficulty"
                 title="Lower difficulty"
               >
-                –
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 12h14" />
+                </svg>
               </button>
               <button
                 type="button"
@@ -3413,24 +3627,186 @@ Respond with ONLY the specific topic name, no explanation.`;
           </div>
         </form>
 
-        {error && (
-          <div className="mt-3 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 text-xs text-red-200">
-            {error}
-          </div>
-        )}
+      {error && (
+        <div className="mt-3 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 text-xs text-red-200">
+          {error}
+        </div>
+      )}
       </div>
 
+      {/* MC Quiz Modal */}
+      {mcQuizModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6">
+          <div className="w-full max-w-2xl rounded-2xl border border-[var(--foreground)]/30 bg-[var(--background)]/95 p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-semibold text-[var(--foreground)]">MC Quiz</h2>
+                <p className="text-xs text-[var(--foreground)]/60">Pick a topic and drill 4 multiple choice questions.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMcQuizModalOpen(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--foreground)]/15 bg-[var(--background)]/70 text-[var(--foreground)]/70 hover:bg-[var(--background)]/60 hover:text-[var(--foreground)] transition-colors"
+                aria-label="Close"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {!hasPremiumAccess ? (
+              <div className="rounded-xl border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">
+                Premium access is required to generate MC quizzes.
+              </div>
+            ) : null}
+
+            <div className="space-y-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div className="flex-1">
+                  <div className="text-xs font-medium text-[var(--foreground)]/70 mb-1">Topic</div>
+                  <select
+                    value={mcQuizTopic}
+                    onChange={(e) => setMcQuizTopic(e.target.value)}
+                    className="w-full rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 px-3 py-2 text-sm text-[var(--foreground)] outline-none"
+                  >
+                    {mcQuizTopics.length === 0 ? (
+                      <option value="">No topics found</option>
+                    ) : (
+                      mcQuizTopics.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void generateMcQuiz()}
+                    disabled={!hasPremiumAccess || mcQuizLoading || mcQuizTopics.length === 0}
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 px-4 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {mcQuizLoading ? "Generating..." : "Generate"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMcQuizQuestions([]);
+                      setMcQuizAnswers({});
+                      setMcQuizSubmitted(false);
+                      setMcQuizError(null);
+                    }}
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 px-4 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+
+              {mcQuizError ? (
+                <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-200">
+                  {mcQuizError}
+                </div>
+              ) : null}
+
+              {mcQuizQuestions.length > 0 ? (
+                <div className="max-h-[60vh] overflow-y-auto space-y-5 rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4">
+                  {mcQuizQuestions.map((q, qi) => {
+                    const selected = mcQuizAnswers[qi];
+                    const correct = selected === q.correctAnswer;
+                    const correctOptionText = String(q.options?.[q.correctAnswer] ?? "");
+                    const explanation = typeof q.explanation === "string" && q.explanation.trim().length > 0
+                      ? q.explanation
+                      : `**Correct answer:** ${correctOptionText}`;
+
+                    return (
+                      <div key={qi} className="space-y-3 rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/60 p-4">
+                        <div className="text-sm font-medium text-[var(--foreground)]">
+                          <span className="mr-1">{qi + 1}.</span>{" "}
+                          <LessonBody body={sanitizeLessonBody(String(q.question || ""))} />
+                        </div>
+                        <div className="space-y-2">
+                          {(q.options || []).map((option, oi) => {
+                            const isSelected = selected === oi;
+                            const isCorrect = oi === q.correctAnswer;
+                            const showResult = mcQuizSubmitted;
+                            const cls = showResult
+                              ? isCorrect
+                                ? "border-green-500/40 bg-green-500/10"
+                                : isSelected
+                                  ? "border-red-500/40 bg-red-500/10"
+                                  : "border-[var(--foreground)]/10 opacity-70"
+                              : isSelected
+                                ? "border-[var(--foreground)]/40 bg-[var(--background)]/50"
+                                : "border-[var(--foreground)]/15 bg-[var(--background)]/40 hover:bg-[var(--background)]/50";
+
+                            return (
+                              <button
+                                key={oi}
+                                type="button"
+                                disabled={mcQuizSubmitted}
+                                onClick={() => {
+                                  setMcQuizAnswers((prev) => ({ ...prev, [qi]: oi }));
+                                }}
+                                className={`w-full text-left rounded-xl border px-3 py-2 text-sm text-[var(--foreground)] transition-colors disabled:cursor-not-allowed ${cls}`}
+                              >
+                                <LessonBody body={sanitizeLessonBody(String(option || ""))} />
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {mcQuizSubmitted ? (
+                          <div
+                            className={`rounded-xl border px-3 py-2 text-sm ${
+                              correct ? "border-green-500/30 bg-green-500/10 text-green-200" : "border-red-500/30 bg-red-500/10 text-red-200"
+                            }`}
+                          >
+                            <div className="text-xs font-semibold mb-1">
+                              {correct ? "Correct" : "Incorrect"}
+                            </div>
+                            <LessonBody body={sanitizeLessonBody(String(explanation || ""))} />
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              {mcQuizQuestions.length > 0 ? (
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setMcQuizSubmitted(true)}
+                    disabled={Object.keys(mcQuizAnswers).length !== mcQuizQuestions.length || mcQuizSubmitted}
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--foreground)]/15 bg-[var(--foreground)]/10 px-4 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--foreground)]/15 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Submit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void generateMcQuiz()}
+                    disabled={!hasPremiumAccess || mcQuizLoading}
+                    className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 px-4 text-sm text-[var(--foreground)] hover:bg-[var(--background)]/60 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    Generate new
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* QR Code Modal */}
-      {showQrModal && qrUrl && (
+      {showQrModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               setShowQrModal(false);
-              if (qrPollIntervalRef.current) {
-                clearInterval(qrPollIntervalRef.current);
-                qrPollIntervalRef.current = null;
-              }
             }
           }}
         >
@@ -3440,16 +3816,14 @@ Respond with ONLY the specific topic name, no explanation.`;
                 Answer with Phone
               </h2>
               <button
-                onClick={() => {
-                  setShowQrModal(false);
-                  if (qrPollIntervalRef.current) {
-                    clearInterval(qrPollIntervalRef.current);
-                    qrPollIntervalRef.current = null;
-                  }
-                }}
-                className="text-[var(--foreground)]/60 hover:text-[var(--foreground)] transition-colors"
+                type="button"
+                onClick={() => setShowQrModal(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--foreground)]/15 bg-[var(--background)]/70 text-[var(--foreground)]/70 hover:bg-[var(--background)]/60 hover:text-[var(--foreground)] transition-colors"
+                aria-label="Close"
               >
-                ×
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
               </button>
             </div>
             <div className="space-y-4">
@@ -3457,6 +3831,11 @@ Respond with ONLY the specific topic name, no explanation.`;
                 Scan this QR code with your phone to open the camera. Take photos
                 of your work, and they will automatically appear in the text field.
               </p>
+              {qrInfoMessage ? (
+                <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 px-3 py-2 text-xs text-[var(--foreground)]/80">
+                  {qrInfoMessage}
+                </div>
+              ) : null}
               <div className="flex justify-center p-4 bg-white rounded-lg">
                 {qrCodeDataUrl ? (
                   <img src={qrCodeDataUrl} alt="QR Code" className="w-64 h-64" />
@@ -3466,9 +3845,57 @@ Respond with ONLY the specific topic name, no explanation.`;
                   </div>
                 )}
               </div>
-              <p className="text-xs text-[var(--foreground)]/50 text-center">
-                Waiting for images...
-              </p>
+              {qrUrl ? (
+                <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-3">
+                  <div className="text-[11px] font-medium text-[var(--foreground)]/70">Or open this link on your phone</div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={qrUrl}
+                      readOnly
+                      className="flex-1 rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/60 px-2 py-1.5 text-xs text-[var(--foreground)] outline-none"
+                      onClick={(e) => (e.target as HTMLInputElement).select()}
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(qrUrl);
+                          setQrInfoMessage("Link copied.");
+                        } catch {
+                          setQrInfoMessage("Couldn't copy. Select the link and copy manually.");
+                        }
+                      }}
+                      className="inline-flex h-9 items-center justify-center rounded-lg border border-[var(--foreground)]/15 bg-[var(--background)]/60 px-3 text-xs text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              <div className="flex items-center justify-between text-xs text-[var(--foreground)]/60">
+                <div>{qrPollingActive ? "Listening for photos..." : "Session stopped."}</div>
+                <div>{qrImages.length} image{qrImages.length === 1 ? "" : "s"} ready</div>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopPollingForImages();
+                    setQrInfoMessage("Phone session stopped.");
+                  }}
+                  className="inline-flex h-9 items-center justify-center rounded-lg border border-red-500/30 bg-red-500/10 px-3 text-xs text-red-200 hover:bg-red-500/20 transition-colors"
+                >
+                  Stop session
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowQrModal(false)}
+                  className="inline-flex h-9 items-center justify-center rounded-lg border border-[var(--foreground)]/15 bg-[var(--background)]/60 px-3 text-xs text-[var(--foreground)] hover:bg-[var(--background)]/50 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -3491,7 +3918,9 @@ Respond with ONLY the specific topic name, no explanation.`;
                 className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors"
                 aria-label="Close practice log"
               >
-                ×
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
               </button>
             </div>
             <div className="mt-4 max-h-[60vh] overflow-y-auto rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 p-4 text-sm leading-relaxed text-[var(--foreground)] space-y-2">
@@ -3705,7 +4134,9 @@ Respond with ONLY the specific topic name, no explanation.`;
                 className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--foreground)]/20 bg-[var(--background)]/80 hover:bg-[var(--background)]/70 transition-colors"
                 aria-label="Close raw logs"
               >
-                ×
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
               </button>
             </div>
             <div className="max-h-[60vh] overflow-y-auto p-6">
@@ -3768,5 +4199,3 @@ Respond with ONLY the specific topic name, no explanation.`;
     </div>
   );
 }
-
-

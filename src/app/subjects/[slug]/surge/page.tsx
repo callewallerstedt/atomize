@@ -929,12 +929,26 @@ export default function SurgePage() {
         if (meJson?.user) {
           // Pull latest course data from DB and merge with local (preserve any in-progress local state).
           try {
-            const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, { credentials: "include" });
-            const dataJson = await dataRes.json().catch(() => ({}));
-            if (dataRes.ok && dataJson?.data) {
-              const serverData = dataJson.data as StoredSubjectData;
-              const local = loadSubjectData(slug);
-              const merged = mergeServerAndLocal(serverData, local);
+            const local = loadSubjectData(slug);
+            let merged: StoredSubjectData | null = null;
+
+            if (local) {
+              // Let the server do the deep merge to avoid client-side shallow merge data loss.
+              const putRes = await fetch("/api/subject-data", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ slug, data: local }),
+              });
+              const putJson = await putRes.json().catch(() => ({}));
+              if (putRes.ok && putJson?.data) merged = putJson.data as StoredSubjectData;
+            } else {
+              const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, { credentials: "include" });
+              const dataJson = await dataRes.json().catch(() => ({}));
+              if (dataRes.ok && dataJson?.data) merged = dataJson.data as StoredSubjectData;
+            }
+
+            if (merged) {
               try {
                 localStorage.setItem(`atomicSubjectData:${slug}`, JSON.stringify(merged));
               } catch {}
