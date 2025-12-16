@@ -41,26 +41,42 @@ export default function SharePage() {
       
       const result = await response.json();
       
-      if (!result.ok) {
-        if (result.error === "Unauthorized") {
-          alert("Please log in to save this course");
-          router.push("/?redirect=share&shareId=" + shareId);
+        if (!result.ok) {
+          if (result.error === "Unauthorized") {
+            alert("Please log in to save this course");
+            router.push("/?redirect=share&shareId=" + shareId + "&autoSave=true");
+            return;
+          }
+          setError(result.error || "Failed to save course");
+          setSaving(false);
           return;
-        }
-        setError(result.error || "Failed to save course");
-        setSaving(false);
-        return;
       }
 
-      // Ensure topics are preserved in the course data
-      const courseDataToSave = {
-        ...courseData.courseData,
-        subject: courseData.courseName,
-        // Ensure topics array is preserved
-        topics: courseData.courseData.topics || [],
-      };
-      
-      // Save to local storage as well
+      // Save the server-side imported copy locally (avoids re-uploading embedded exam snipes and keeps slug rewrites).
+      let courseDataToSave: StoredSubjectData | null = null;
+      try {
+        const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(result.slug)}`, { credentials: "include" });
+        const dataJson = await dataRes.json().catch(() => ({}));
+        if (dataRes.ok && dataJson?.ok && dataJson.data) {
+          courseDataToSave = dataJson.data as StoredSubjectData;
+        }
+      } catch {}
+
+      if (!courseDataToSave) {
+        const { examSnipes: _embeddedExamSnipes, ...rest } = courseData.courseData as any;
+        courseDataToSave = {
+          ...(rest as StoredSubjectData),
+          subject: courseData.courseName,
+          topics: courseData.courseData.topics || [],
+        };
+      } else {
+        courseDataToSave = {
+          ...courseDataToSave,
+          subject: courseData.courseName,
+          topics: courseDataToSave.topics || [],
+        };
+      }
+
       await saveSubjectDataAsync(result.slug, courseDataToSave);
       
       // Update subjects list
@@ -139,7 +155,7 @@ export default function SharePage() {
   };
 
   const handleLoginAndSave = () => {
-    router.push("/?redirect=share&shareId=" + shareId);
+    router.push("/?redirect=share&shareId=" + shareId + "&autoSave=true");
   };
 
   const handleJustView = () => {

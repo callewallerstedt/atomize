@@ -9,7 +9,7 @@ import { usePathname, useRouter } from "next/navigation";
 import SettingsModal from "@/components/SettingsModal";
 import Modal from "@/components/Modal";
 import GlowSpinner from "@/components/GlowSpinner";
-import type { StoredSubjectData } from "@/utils/storage";
+import { updateSurgeLogEntryTimestampAsync, type StoredSubjectData } from "@/utils/storage";
 
 // Generate stable dots that don't change on re-render
 function generateDots(count: number) {
@@ -5910,7 +5910,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                                     type="date"
                                     value={editingDateValue}
                                     onChange={(e) => setEditingDateValue(e.target.value)}
-                                    onBlur={() => {
+                                    onBlur={async () => {
                                       if (editingDateValue) {
                                         // Parse date string (YYYY-MM-DD) and create UTC date at midnight
                                         const [year, month, day] = editingDateValue.split('-').map(Number);
@@ -5919,85 +5919,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                                         if (slugMatch) {
                                           const slug = slugMatch[1];
                                           try {
-                                            const stored = localStorage.getItem(`atomicSubjectData:${slug}`);
-                                            if (stored) {
-                                              const data = JSON.parse(stored);
-                                              const surgeLog = data?.surgeLog || [];
-                                              // Update ALL entries with this sessionId (in case there are duplicates)
-                                              let updated = false;
-                                              surgeLog.forEach((e: any, idx: number) => {
-                                                if (e.sessionId === latestItem.entry.sessionId) {
-                                                  surgeLog[idx].timestamp = newTimestamp;
-                                                  updated = true;
-                                                }
-                                              });
-                                              
-                                              if (updated) {
-                                                console.log("=== DATE UPDATE DEBUG START ===");
-                                                console.log("Editing sessionId:", latestItem.entry.sessionId);
-                                                console.log("New timestamp:", newTimestamp, "New date:", new Date(newTimestamp).toISOString());
-                                                console.log("1. Before save - surgeLog entries:", JSON.stringify(surgeLog.map((e: any) => ({
-                                                  sessionId: e.sessionId,
-                                                  timestamp: e.timestamp,
-                                                  date: new Date(e.timestamp).toISOString()
-                                                })), null, 2));
-                                                
-                                                localStorage.setItem(`atomicSubjectData:${slug}`, JSON.stringify(data));
-                                                
-                                                // Verify the save by reading it back immediately
-                                                const verify = localStorage.getItem(`atomicSubjectData:${slug}`);
-                                                if (verify) {
-                                                  const verifyData = JSON.parse(verify);
-                                                  console.log("2. After save - localStorage contains:", JSON.stringify(verifyData?.surgeLog?.map((e: any) => ({
-                                                    sessionId: e.sessionId,
-                                                    timestamp: e.timestamp,
-                                                    date: new Date(e.timestamp).toISOString()
-                                                  })), null, 2));
-                                                  
-                                                  const verifyEntry = verifyData?.surgeLog?.find((e: any) => e.sessionId === latestItem.entry.sessionId);
-                                                  console.log("3. Verified entry:", {
-                                                    sessionId: latestItem.entry.sessionId,
-                                                    newTimestamp,
-                                                    newDate: new Date(newTimestamp).toISOString(),
-                                                    verifiedTimestamp: verifyEntry?.timestamp,
-                                                    verifiedDate: verifyEntry ? new Date(verifyEntry.timestamp).toISOString() : "not found",
-                                                    match: verifyEntry?.timestamp === newTimestamp
-                                                  });
-                                                  
-                                                  // Also check all entries to see if any were affected
-                                                  const allEntries = verifyData?.surgeLog || [];
-                                                  console.log("4. All entries after save:", JSON.stringify(allEntries.map((e: any, idx: number) => ({
-                                                    index: idx,
-                                                    sessionId: e.sessionId,
-                                                    timestamp: e.timestamp,
-                                                    date: new Date(e.timestamp).toISOString(),
-                                                    isEdited: e.sessionId === latestItem.entry.sessionId
-                                                  })), null, 2));
-                                                  
-                                                  // Check what getLastSurgeSession would return
-                                                  const latest = allEntries.reduce((latest: any, entry: any) => {
-                                                    return entry.timestamp > latest.timestamp ? entry : latest;
-                                                  }, allEntries[0]);
-                                                  console.log("5. What getLastSurgeSession would return:", {
-                                                    sessionId: latest?.sessionId,
-                                                    timestamp: latest?.timestamp,
-                                                    date: latest ? new Date(latest.timestamp).toISOString() : "none",
-                                                    isEdited: latest?.sessionId === latestItem.entry.sessionId
-                                                  });
-                                                } else {
-                                                  console.error("5. Failed to read back from localStorage!");
-                                                }
-                                                
-                                                console.log("=== DATE UPDATE DEBUG END ===");
-                                                
-                                                // Dispatch event to notify surge page to reload lastSurge
-                                                window.dispatchEvent(new CustomEvent('surgeLogDateUpdated', { detail: { slug } }));
-                                                // Force a re-render by incrementing the refresh key
-                                                setSurgeLogRefreshKey(prev => prev + 1);
-                                              } else {
-                                                console.error("Failed to find entry with sessionId:", latestItem.entry.sessionId);
-                                              }
-                                            }
+                                            await updateSurgeLogEntryTimestampAsync(slug, latestItem.entry.sessionId, newTimestamp);
+                                            window.dispatchEvent(new CustomEvent('surgeLogDateUpdated', { detail: { slug } }));
+                                            setSurgeLogRefreshKey((prev) => prev + 1);
                                           } catch (e) {
                                             console.error("Failed to update date:", e);
                                           }
@@ -6157,43 +6081,23 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                                                             type="date"
                                                             value={editingDateValue}
                                                             onChange={(e) => setEditingDateValue(e.target.value)}
-                                                            onBlur={() => {
-                                                              if (editingDateValue) {
-                                                                // Parse date string (YYYY-MM-DD) and create UTC date at midnight
-                                        const [year, month, day] = editingDateValue.split('-').map(Number);
-                                        const newTimestamp = new Date(Date.UTC(year, month - 1, day)).getTime();
-                                                                const slugMatch = pathname?.match(/\/subjects\/([^\/]+)\/surge/);
-                                                                if (slugMatch) {
-                                                                  const slug = slugMatch[1];
-                                                                  try {
-                                                                    const stored = localStorage.getItem(`atomicSubjectData:${slug}`);
-                                                                    if (stored) {
-                                                                      const data = JSON.parse(stored);
-                                                                      const surgeLog = data?.surgeLog || [];
-                                                                      // Update ALL entries with this sessionId
-                                                                      let updated = false;
-                                                                      surgeLog.forEach((e: any, idx: number) => {
-                                                                        if (e.sessionId === item.entry.sessionId) {
-                                                                          surgeLog[idx].timestamp = newTimestamp;
-                                                                          updated = true;
-                                                                        }
-                                                                      });
-                                                                      
-                                                                      if (updated) {
-                                                                        localStorage.setItem(`atomicSubjectData:${slug}`, JSON.stringify(data));
-                                                                        // Dispatch event to notify surge page to reload lastSurge
-                                                                        window.dispatchEvent(new CustomEvent('surgeLogDateUpdated', { detail: { slug } }));
-                                                                        // Force a re-render by incrementing the refresh key
-                                                                        setSurgeLogRefreshKey(prev => prev + 1);
-                                                                      }
-                                                                    }
-                                                                  } catch (e) {
-                                                                    console.error("Failed to update date:", e);
-                                                                  }
+                                                            onBlur={async () => {
+                                                              if (!editingDateValue) return;
+                                                              const [year, month, day] = editingDateValue.split('-').map(Number);
+                                                              const newTimestamp = new Date(Date.UTC(year, month - 1, day)).getTime();
+                                                              const slugMatch = pathname?.match(/\/subjects\/([^\/]+)\/surge/);
+                                                              if (slugMatch) {
+                                                                const slug = slugMatch[1];
+                                                                try {
+                                                                  await updateSurgeLogEntryTimestampAsync(slug, item.entry.sessionId, newTimestamp);
+                                                                  window.dispatchEvent(new CustomEvent('surgeLogDateUpdated', { detail: { slug } }));
+                                                                  setSurgeLogRefreshKey(prev => prev + 1);
+                                                                } catch (e) {
+                                                                  console.error("Failed to update date:", e);
                                                                 }
-                                                                setEditingDate(null);
-                                                                setEditingDateValue("");
                                                               }
+                                                              setEditingDate(null);
+                                                              setEditingDateValue("");
                                                             }}
                                                             onKeyDown={(e) => {
                                                               if (e.key === "Enter") {
@@ -6371,43 +6275,23 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                                                             type="date"
                                                             value={editingDateValue}
                                                             onChange={(e) => setEditingDateValue(e.target.value)}
-                                                            onBlur={() => {
-                                                              if (editingDateValue) {
-                                                                // Parse date string (YYYY-MM-DD) and create UTC date at midnight
-                                        const [year, month, day] = editingDateValue.split('-').map(Number);
-                                        const newTimestamp = new Date(Date.UTC(year, month - 1, day)).getTime();
-                                                                const slugMatch = pathname?.match(/\/subjects\/([^\/]+)\/surge/);
-                                                                if (slugMatch) {
-                                                                  const slug = slugMatch[1];
-                                                                  try {
-                                                                    const stored = localStorage.getItem(`atomicSubjectData:${slug}`);
-                                                                    if (stored) {
-                                                                      const data = JSON.parse(stored);
-                                                                      const surgeLog = data?.surgeLog || [];
-                                                                      // Update ALL entries with this sessionId
-                                                                      let updated = false;
-                                                                      surgeLog.forEach((e: any, idx: number) => {
-                                                                        if (e.sessionId === item.entry.sessionId) {
-                                                                          surgeLog[idx].timestamp = newTimestamp;
-                                                                          updated = true;
-                                                                        }
-                                                                      });
-                                                                      
-                                                                      if (updated) {
-                                                                        localStorage.setItem(`atomicSubjectData:${slug}`, JSON.stringify(data));
-                                                                        // Dispatch event to notify surge page to reload lastSurge
-                                                                        window.dispatchEvent(new CustomEvent('surgeLogDateUpdated', { detail: { slug } }));
-                                                                        // Force a re-render by incrementing the refresh key
-                                                                        setSurgeLogRefreshKey(prev => prev + 1);
-                                                                      }
-                                                                    }
-                                                                  } catch (e) {
-                                                                    console.error("Failed to update date:", e);
-                                                                  }
+                                                            onBlur={async () => {
+                                                              if (!editingDateValue) return;
+                                                              const [year, month, day] = editingDateValue.split('-').map(Number);
+                                                              const newTimestamp = new Date(Date.UTC(year, month - 1, day)).getTime();
+                                                              const slugMatch = pathname?.match(/\/subjects\/([^\/]+)\/surge/);
+                                                              if (slugMatch) {
+                                                                const slug = slugMatch[1];
+                                                                try {
+                                                                  await updateSurgeLogEntryTimestampAsync(slug, item.entry.sessionId, newTimestamp);
+                                                                  window.dispatchEvent(new CustomEvent('surgeLogDateUpdated', { detail: { slug } }));
+                                                                  setSurgeLogRefreshKey(prev => prev + 1);
+                                                                } catch (e) {
+                                                                  console.error("Failed to update date:", e);
                                                                 }
-                                                                setEditingDate(null);
-                                                                setEditingDateValue("");
                                                               }
+                                                              setEditingDate(null);
+                                                              setEditingDateValue("");
                                                             }}
                                                             onKeyDown={(e) => {
                                                               if (e.key === "Enter") {

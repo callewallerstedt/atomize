@@ -22,6 +22,7 @@ import {
   getSurgeLog,
   addSurgeLogEntryAsync,
   updateOrAddSurgeLogEntryAsync,
+  markReviewedTopicsAsync,
   saveSubjectDataAsync,
   SurgeLogEntry,
 } from "@/utils/storage";
@@ -808,6 +809,7 @@ export default function SurgePage() {
   const [examSnipeLoaded, setExamSnipeLoaded] = useState(false);
   const [showLessonCard, setShowLessonCard] = useState(false);
   const [videoModalOpen, setVideoModalOpen] = useState(false);
+  const [reviewTopicChoice, setReviewTopicChoice] = useState<string>("");
 
   const scrollLessonToTop = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -842,6 +844,68 @@ export default function SurgePage() {
 
   // Load course data, practice logs, exam snipe, and last surge
   useEffect(() => {
+    let cancelled = false;
+
+    const mergeReviewedTopics = (serverValue: any, localValue: any) => {
+      const server = serverValue && typeof serverValue === "object" ? serverValue : {};
+      const local = localValue && typeof localValue === "object" ? localValue : {};
+      const out: Record<string, number> = { ...server } as any;
+      for (const [key, value] of Object.entries(local)) {
+        const ts = Number(value);
+        if (!Number.isFinite(ts)) continue;
+        const prev = Number((out as any)[key]);
+        (out as any)[key] = Number.isFinite(prev) ? Math.max(prev, ts) : ts;
+      }
+      return out;
+    };
+
+    const mergeSurgeLog = (serverLog: any, localLog: any) => {
+      const server = Array.isArray(serverLog) ? serverLog : [];
+      const local = Array.isArray(localLog) ? localLog : [];
+      if (!server.length) return local;
+      if (!local.length) return server;
+
+      const byId = new Map<string, any>();
+      const keyOf = (e: any) => (e?.sessionId != null ? String(e.sessionId) : "");
+      const updatedAtOf = (e: any) => Number(e?.updatedAt ?? 0) || 0;
+
+      const chooseBetter = (a: any, b: any) => {
+        const aUpdated = updatedAtOf(a);
+        const bUpdated = updatedAtOf(b);
+        if (aUpdated !== bUpdated) return aUpdated > bUpdated ? a : b;
+        const aQuiz = Array.isArray(a?.quizResults) ? a.quizResults.length : 0;
+        const bQuiz = Array.isArray(b?.quizResults) ? b.quizResults.length : 0;
+        if (aQuiz !== bQuiz) return aQuiz > bQuiz ? a : b;
+        const aLesson = typeof a?.newTopicLesson === "string" ? a.newTopicLesson.length : 0;
+        const bLesson = typeof b?.newTopicLesson === "string" ? b.newTopicLesson.length : 0;
+        if (aLesson !== bLesson) return aLesson > bLesson ? a : b;
+        return b;
+      };
+
+      for (const e of server) {
+        const k = keyOf(e);
+        if (!k) continue;
+        byId.set(k, e);
+      }
+      for (const e of local) {
+        const k = keyOf(e);
+        if (!k) continue;
+        const prev = byId.get(k);
+        byId.set(k, prev ? chooseBetter(prev, e) : e);
+      }
+
+      return Array.from(byId.values()).sort((a, b) => Number(a?.timestamp ?? 0) - Number(b?.timestamp ?? 0));
+    };
+
+    const mergeServerAndLocal = (serverData: StoredSubjectData, localData: StoredSubjectData | null) => {
+      if (!localData) return serverData;
+      const merged: StoredSubjectData = { ...(serverData as any) };
+      merged.nodes = { ...(serverData.nodes || {}), ...(localData.nodes || {}) };
+      (merged as any).reviewedTopics = mergeReviewedTopics((serverData as any).reviewedTopics, (localData as any).reviewedTopics);
+      (merged as any).surgeLog = mergeSurgeLog((serverData as any).surgeLog, (localData as any).surgeLog);
+      return merged;
+    };
+
     const loaded = loadSubjectData(slug);
     setData(loaded);
     setDataLoaded(true);
@@ -857,12 +921,30 @@ export default function SurgePage() {
       console.warn("Failed to load practice logs:", e);
     }
 
-    // Load exam snipe data
+    // Load server subject data (for cross-device surge logs) and exam snipe data
     (async () => {
       try {
         const meRes = await fetch("/api/me", { credentials: "include" });
         const meJson = await meRes.json().catch(() => ({}));
         if (meJson?.user) {
+          // Pull latest course data from DB and merge with local (preserve any in-progress local state).
+          try {
+            const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(slug)}`, { credentials: "include" });
+            const dataJson = await dataRes.json().catch(() => ({}));
+            if (dataRes.ok && dataJson?.data) {
+              const serverData = dataJson.data as StoredSubjectData;
+              const local = loadSubjectData(slug);
+              const merged = mergeServerAndLocal(serverData, local);
+              try {
+                localStorage.setItem(`atomicSubjectData:${slug}`, JSON.stringify(merged));
+              } catch {}
+              if (!cancelled) {
+                setData(merged);
+                setLastSurge(getLastSurgeSession(slug));
+              }
+            }
+          } catch {}
+
           // Try fetching by subjectSlug first
           const examRes = await fetch(`/api/exam-snipe/history?subjectSlug=${encodeURIComponent(slug)}`, {
             credentials: "include",
@@ -881,38 +963,15 @@ export default function SurgePage() {
             }
           }
         }
-        setExamSnipeLoaded(true);
+        if (!cancelled) setExamSnipeLoaded(true);
       } catch (e) {
         console.warn("Failed to load exam snipe:", e);
-        setExamSnipeLoaded(true); // Mark as loaded even if failed (no exam snipe available)
+        if (!cancelled) setExamSnipeLoaded(true); // Mark as loaded even if failed (no exam snipe available)
       }
     })();
 
     // Load last surge session
     const last = getLastSurgeSession(slug);
-    const allEntries = (() => {
-      try {
-        const stored = localStorage.getItem(`atomicSubjectData:${slug}`);
-        if (stored) {
-          const data = JSON.parse(stored);
-          return (data?.surgeLog || []).map((e: any) => ({
-            sessionId: e.sessionId,
-            timestamp: e.timestamp,
-            date: new Date(e.timestamp).toISOString()
-          }));
-        }
-      } catch {}
-      return [];
-    })();
-    
-    console.log("=== LOADED LAST SURGE DEBUG ===");
-    console.log("Selected lastSurge:", {
-      sessionId: last?.sessionId,
-      timestamp: last?.timestamp,
-      date: last ? new Date(last.timestamp).toISOString() : "none"
-    });
-    console.log("All entries in localStorage:", JSON.stringify(allEntries, null, 2));
-    console.log("=== LOADED LAST SURGE DEBUG END ===");
     setLastSurge(last);
 
     // Reset user-set phase flag when slug changes (new course)
@@ -920,92 +979,16 @@ export default function SurgePage() {
     initialPhaseSetRef.current = false;
 
     // Always start with review phase
-    let initialPhase: "learn" | "repeat" = "repeat";
-    
-    // Calculate today's date in UTC for logging purposes
-    const today = new Date();
-    const todayYear = today.getUTCFullYear();
-    const todayMonth = today.getUTCMonth();
-    const todayDay = today.getUTCDate();
-    const todayDateUTC = new Date(Date.UTC(todayYear, todayMonth, todayDay));
-    
-    // Also check the last session for logging purposes
-    if (last) {
-      const lastDate = new Date(last.timestamp);
-      const lastYear = lastDate.getUTCFullYear();
-      const lastMonth = lastDate.getUTCMonth();
-      const lastDay = lastDate.getUTCDate();
-      const lastDateUTC = new Date(Date.UTC(lastYear, lastMonth, lastDay));
-      const daysDiff = Math.floor((todayDateUTC.getTime() - lastDateUTC.getTime()) / (1000 * 60 * 60 * 24));
-      
-      // Get all surge log entries for logging
-      const allSurgeLogs = getSurgeLog(slug);
-      
-      console.log("Phase determination:", {
-        hasLast: !!last,
-        lastSessionId: last.sessionId,
-        lastTimestamp: last.timestamp,
-        lastDate: new Date(last.timestamp).toISOString(),
-        daysDiff,
-        initialPhase,
-        allEntries: allSurgeLogs.map(e => ({
-          sessionId: e.sessionId,
-          timestamp: e.timestamp,
-          date: new Date(e.timestamp).toISOString(),
-          daysDiff: Math.floor((todayDateUTC.getTime() - new Date(Date.UTC(
-            new Date(e.timestamp).getUTCFullYear(),
-            new Date(e.timestamp).getUTCMonth(),
-            new Date(e.timestamp).getUTCDate()
-          )).getTime()) / (1000 * 60 * 60 * 24))
-        }))
-      });
-    }
-    
-    // Mark that initial phase has been set BEFORE setting the phase
-    // This prevents the second useEffect from overriding it
+    const initialPhase: "learn" | "repeat" = "repeat";
+
+    // Mark that initial phase has been set BEFORE setting the phase.
+    // This prevents the second useEffect from overriding it.
     initialPhaseSetRef.current = true;
-    
-    // Set phase after ref is set
     setPhase(initialPhase);
-    
-    // Debug logging with more details
-    if (last) {
-      const lastDate = new Date(last.timestamp);
-      const today = new Date();
-      
-      // Use UTC dates for calculation (same as above)
-      const lastYear = lastDate.getUTCFullYear();
-      const lastMonth = lastDate.getUTCMonth();
-      const lastDay = lastDate.getUTCDate();
-      
-      const todayYear = today.getUTCFullYear();
-      const todayMonth = today.getUTCMonth();
-      const todayDay = today.getUTCDate();
-      
-      const lastDateUTC = new Date(Date.UTC(lastYear, lastMonth, lastDay));
-      const todayDateUTC = new Date(Date.UTC(todayYear, todayMonth, todayDay));
-      const daysDiff = Math.floor((todayDateUTC.getTime() - lastDateUTC.getTime()) / (1000 * 60 * 60 * 24));
-      
-      console.log("Initial phase determination:", {
-        hasLast: !!last,
-        lastTimestamp: last.timestamp,
-        lastDateISO: lastDate.toISOString(),
-        lastDateLocal: lastDate.toLocaleDateString(),
-        lastDateUTC: lastDateUTC.toISOString(),
-        todayISO: today.toISOString(),
-        todayLocal: today.toLocaleDateString(),
-        todayDateUTC: todayDateUTC.toISOString(),
-        daysDiff,
-        initialPhase,
-        timestampDiff: today.getTime() - last.timestamp,
-        hoursDiff: (today.getTime() - last.timestamp) / (1000 * 60 * 60)
-      });
-    } else {
-      console.log("Initial phase determination:", {
-        hasLast: false,
-        initialPhase
-      });
-    }
+
+    return () => {
+      cancelled = true;
+    };
   }, [slug]);
 
   // Listen for date updates from SurgeLog modal and reload lastSurge
@@ -1179,73 +1162,14 @@ export default function SurgePage() {
     }
   }, [surgeContext, phase, lastSurge, currentTopic, dataLoaded, examSnipeLoaded]);
 
-  // Track if user clicked Start button for review
-  const reviewStartRequested = useRef(false);
-  
   // Ensure we're mounted before rendering client-only content
   useEffect(() => {
     setIsMounted(true);
   }, []);
   
-  // Trigger quiz generation when quiz phase starts (but only if user clicked Start)
+  // Trigger quiz generation when quiz phase starts
   useEffect(() => {
     if (
-      phase === "repeat" &&
-      quizQuestions.length === 0 &&
-      !quizLoading &&
-      !sending &&
-      reviewStartRequested.current
-    ) {
-      // Reset the flag immediately to prevent re-triggering
-      reviewStartRequested.current = false;
-      
-      // Get all surge log entries and extract all unique topics
-      const allSurgeLogs = getSurgeLog(slug);
-      
-      if (allSurgeLogs.length === 0) {
-        return; // No surge logs, don't generate questions
-      }
-      
-      // Get the course/subject name to filter it out
-      const courseName = data?.subject || "";
-      
-      // Extract all unique topics from all surge log entries
-      const allTopics = new Set<string>();
-      allSurgeLogs.forEach(entry => {
-        // Add topics from repeatedTopics
-        if (entry.repeatedTopics && Array.isArray(entry.repeatedTopics)) {
-          entry.repeatedTopics.forEach(rt => {
-            if (rt?.topic && rt.topic !== courseName) {
-              allTopics.add(rt.topic);
-            }
-          });
-        }
-        // Add newTopic (but not if it's the course name)
-        if (entry.newTopic && entry.newTopic !== courseName) {
-          allTopics.add(entry.newTopic);
-        }
-        // Add topics from quizResults (but not if it's the course name)
-        if (entry.quizResults && Array.isArray(entry.quizResults)) {
-          entry.quizResults.forEach(result => {
-            if (result.topic && result.topic !== courseName) {
-              allTopics.add(result.topic);
-            }
-          });
-        }
-      });
-      
-      const topicsToReview = Array.from(allTopics);
-      
-      // Only generate review questions if there are topics to review
-      if (topicsToReview.length > 0) {
-        setQuizQuestions([]);
-        setQuizResponses({});
-        setCurrentQuizIndex(0);
-        setShortAnswer("");
-        harderQuestionsRequested.current = false;
-        requestReviewQuestions();
-      }
-    } else if (
       phase === "quiz" &&
       quizQuestions.length === 0 &&
       !quizLoading &&
@@ -1279,10 +1203,9 @@ export default function SurgePage() {
     return lastAssistant?.content || "";
   };
 
-  async function requestReviewQuestions() {
+  async function requestReviewQuestions(options?: { forcedTopics?: string[] }) {
     // Prevent multiple simultaneous calls
     if (quizLoading) {
-      console.log("Review questions already being generated, skipping duplicate call");
       return;
     }
     
@@ -1328,10 +1251,17 @@ export default function SurgePage() {
         }
       });
       
-      // Filter out already reviewed topics
+      const forcedTopics = Array.isArray(options?.forcedTopics)
+        ? Array.from(new Set(options!.forcedTopics.map((t) => String(t || "").trim()).filter(Boolean)))
+        : [];
+
+      // Filter out already reviewed topics unless the user explicitly picked a topic
       const currentDataForQuestions = loadSubjectData(slug);
       const reviewedTopicsForQuestions = currentDataForQuestions?.reviewedTopics || {};
-      const topicsToReview = Array.from(allTopics).filter(topic => !reviewedTopicsForQuestions[topic]);
+      const topicsToReview =
+        forcedTopics.length > 0
+          ? forcedTopics
+          : Array.from(allTopics).filter((topic) => !reviewedTopicsForQuestions[topic]);
       
       // If no topics to review, don't try to generate questions
       if (topicsToReview.length === 0) {
@@ -1395,15 +1325,12 @@ export default function SurgePage() {
         }
         
         const mcPayload = await mcRes.json();
-        console.log("MC response payload:", { ok: mcPayload?.ok, hasRaw: !!mcPayload?.raw, stage: mcPayload?.stage, rawLength: mcPayload?.raw?.length });
         const mcRaw = mcPayload?.raw || "";
         if (!mcRaw) {
           console.error("No raw data in MC response, payload:", mcPayload);
           throw new Error("No raw data in MC response");
         }
-        console.log("MC raw data (first 500 chars):", mcRaw.substring(0, 500));
         const mcQuestions = parseQuizJson(mcRaw, "mc");
-        console.log("Parsed MC questions:", mcQuestions.length, mcQuestions.map(q => ({ id: q.id, question: q.question.substring(0, 50), type: q.type, stage: q.stage, hasOptions: !!q.options })));
         
         // Filter out duplicates from MC questions
         const uniqueMcQuestions = mcQuestions.filter(q => {
@@ -1455,15 +1382,12 @@ export default function SurgePage() {
         }
         
         const harderPayload = await harderRes.json();
-        console.log("Harder response payload:", { ok: harderPayload?.ok, hasRaw: !!harderPayload?.raw, stage: harderPayload?.stage, rawLength: harderPayload?.raw?.length });
         const harderRaw = harderPayload?.raw || "";
         if (!harderRaw) {
           console.error("No raw data in harder response, payload:", harderPayload);
           throw new Error("No raw data in harder response");
         }
-        console.log("Harder raw data (first 500 chars):", harderRaw.substring(0, 500));
         const harderQuestions = parseQuizJson(harderRaw, "harder");
-        console.log("Parsed harder questions:", harderQuestions.length, harderQuestions.map(q => ({ id: q.id, question: q.question.substring(0, 50), type: q.type, stage: q.stage, hasModelAnswer: !!q.modelAnswer })));
         
         // Filter out duplicates from harder questions
         const uniqueHarderQuestions = harderQuestions.filter(q => {
@@ -1512,13 +1436,6 @@ export default function SurgePage() {
 
       // Set as review questions - keep their original type but mark stage as review
       // This allows the UI to display them correctly (MC vs short answer)
-      console.log("Review questions generated:", {
-        totalQuestions: finalQuestions.length,
-        mcCount: finalQuestions.filter(q => q.type === "mc").length,
-        shortCount: finalQuestions.filter(q => q.type === "short").length,
-        topics: [...new Set(finalQuestions.map(q => (q as any).topic))]
-      });
-      
       // Set as review questions - keep their original type but mark stage as review
       // This allows the UI to display them correctly (MC vs short answer)
       const reviewQuestions = finalQuestions.map(q => ({ 
@@ -1532,20 +1449,12 @@ export default function SurgePage() {
       setCurrentQuizIndex(0);
       setQuizLoading(false);
       setQuizInfoMessage(null);
-      
-      // Reset the flag to prevent re-triggering
-      reviewStartRequested.current = false;
-      
-      console.log("Review questions set in state:", reviewQuestions.length);
     } catch (err: any) {
       console.error("Failed to fetch review questions:", err);
       setError(err?.message || "Chad couldn't generate the review questions. Please try again.");
       setQuizFailureMessage("Chad couldn't generate the review. Try again?");
       setQuizLoading(false);
       setQuizInfoMessage(null);
-      
-      // Reset the flag even on error to allow retry
-      reviewStartRequested.current = false;
     }
   }
 
@@ -1597,7 +1506,6 @@ export default function SurgePage() {
       
       // If we requested MC but got short/harder questions, use them as harder questions
       if (stage === "mc" && newQuestions.length > 0 && (newQuestions[0]?.type === "short" || newQuestions[0]?.stage === "harder")) {
-        console.log("Received short answer questions when MC was requested. Using them as harder questions.");
         actualStage = "harder";
         // Update the stage on all questions
         newQuestions = newQuestions.map(q => ({ ...q, stage: "harder" }));
@@ -1884,7 +1792,7 @@ export default function SurgePage() {
     );
   };
 
-  const handleNextQuestion = () => {
+  const handleNextQuestion = async () => {
     const currentQ = quizQuestions[currentQuizIndex];
     if (!currentQ) return;
     const response = quizResponses[currentQ.id];
@@ -1906,19 +1814,11 @@ export default function SurgePage() {
           }
         });
         
-        // Save reviewed topics to subject data
         if (reviewedTopicsSet.size > 0) {
-          const currentData = loadSubjectData(slug);
-          if (currentData) {
-            const reviewedTopics = currentData.reviewedTopics || {};
-            const now = Date.now();
-            reviewedTopicsSet.forEach(topic => {
-              reviewedTopics[topic] = now;
-            });
-            currentData.reviewedTopics = reviewedTopics;
-            saveSubjectDataAsync(slug, currentData).catch(err => {
-              console.error("Failed to save reviewed topics:", err);
-            });
+          try {
+            await markReviewedTopicsAsync(slug, Array.from(reviewedTopicsSet));
+          } catch (err) {
+            console.error("Failed to save reviewed topics:", err);
           }
         }
         
@@ -2588,6 +2488,7 @@ export default function SurgePage() {
         : "";
       const statusLabel = isComplete ? "" : " (In Progress)";
       const summary = `Last Surge session reviewed: ${repeatedTopicsList}. New topic introduced: ${currentTopic || dataToSave.newTopic}. Quiz results: ${dataToSave.quizResults.length} questions with average score ${quizAvg}/10.` + stageNote;
+      const now = Date.now();
 
       // CRITICAL: Load fresh data ONCE from localStorage to get the latest edited timestamps
       // This ensures we don't overwrite dates that were edited in the modal
@@ -2599,18 +2500,13 @@ export default function SurgePage() {
         const existingEntry = currentData.surgeLog.find(e => e.sessionId === sessionId);
         if (existingEntry) {
           existingTimestamp = existingEntry.timestamp;
-          console.log("Found existing entry for current session:", {
-            sessionId,
-            existingTimestamp,
-            existingDate: new Date(existingTimestamp).toISOString(),
-            willPreserve: true
-          });
         }
       }
       
       const entry: SurgeLogEntry = {
         sessionId,
-        timestamp: existingTimestamp || Date.now(), // Use existing timestamp if available (may have been edited)
+        timestamp: existingTimestamp || now, // Use existing timestamp if available (may have been edited)
+        updatedAt: now,
         repeatedTopics: dataToSave.repeatedTopics,
         newTopic: currentTopic || dataToSave.newTopic,
         newTopicLesson: dataToSave.newTopicLesson || lastAssistantMessage,
@@ -2620,15 +2516,12 @@ export default function SurgePage() {
         summary: summary + statusLabel,
       };
 
-      console.log("Saving surge session entry:", {
-        sessionId: entry.sessionId,
-        timestamp: entry.timestamp,
-        timestampDate: new Date(entry.timestamp).toISOString(),
-        newTopic: entry.newTopic,
-        quizResultsCount: entry.quizResults.length,
-        isComplete,
-      });
+      await updateOrAddSurgeLogEntryAsync(slug, entry);
+      setLastSurge(getLastSurgeSession(slug));
+      setData(loadSubjectData(slug));
+      return;
 
+      /*
       if (currentData) {
         if (!currentData.surgeLog) {
           currentData.surgeLog = [];
@@ -2824,6 +2717,7 @@ export default function SurgePage() {
         await saveSubjectDataAsync(slug, newData);
         console.log("Created new subject data with surge session");
       }
+      */
     } catch (e) {
       console.error("Failed to save surge session:", e);
     }
@@ -3472,40 +3366,39 @@ export default function SurgePage() {
                               ))}
                             </div>
                           )}
-                          {notReviewedTopics.length > 0 ? (
-                            <button
-                              onClick={async () => {
-                                // Prevent multiple clicks
-                                if (quizLoading || reviewStartRequested.current) {
-                                  console.log("Already generating review questions, please wait...");
-                                  return;
-                                }
-                                
-                                // Set flag immediately to prevent duplicate calls
-                                reviewStartRequested.current = true;
-                                
-                                // Reset quiz state
-                                setQuizQuestions([]);
-                                setQuizResponses({});
-                                setCurrentQuizIndex(0);
-                                setShortAnswer("");
-                                harderQuestionsRequested.current = false;
-                                
-                                // Call the function directly - it has guards to prevent multiple calls
-                                await requestReviewQuestions();
-                              }}
-                              className="btn-grey rounded-lg font-medium"
-                              style={{ 
-                                paddingLeft: '3rem',
-                                paddingRight: '3rem',
-                                paddingTop: '1.125rem',
-                                paddingBottom: '1.125rem',
-                                fontSize: '1.125rem'
-                              }}
+
+                          <div className="mb-6 flex flex-col items-center gap-2">
+                            <div className="text-sm text-[var(--foreground)]/70">Review a specific topic</div>
+                            <select
+                              value={reviewTopicChoice}
+                              onChange={(e) => setReviewTopicChoice(e.target.value)}
+                              className="w-full max-w-md rounded-lg border border-[var(--foreground)]/20 bg-[var(--background)]/70 px-3 py-2 text-sm text-[var(--foreground)]"
                             >
-                              Start
-                            </button>
-                          ) : (
+                              <option value="">
+                                {notReviewedTopics.length > 0 ? "All unreviewed topics" : "Pick a topic..."}
+                              </option>
+                              {notReviewedTopics.length > 0 && (
+                                <optgroup label="Needs review">
+                                  {notReviewedTopics.map((topic) => (
+                                    <option key={topic} value={topic}>
+                                      {topic}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                              {reviewedTopicsList.length > 0 && (
+                                <optgroup label="Reviewed">
+                                  {reviewedTopicsList.map((topic) => (
+                                    <option key={topic} value={topic}>
+                                      {topic}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              )}
+                            </select>
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-center gap-3">
                             <button
                               onClick={() => {
                                 setPhase("learn");
@@ -3522,18 +3415,42 @@ export default function SurgePage() {
                                 setCurrentQuestion("");
                                 topicSuggestionTriggered.current = false;
                               }}
-                              className="btn-grey rounded-lg font-medium"
-                              style={{ 
-                                paddingLeft: '3rem',
-                                paddingRight: '3rem',
-                                paddingTop: '1.125rem',
-                                paddingBottom: '1.125rem',
-                                fontSize: '1.125rem'
-                              }}
+                              className="inline-flex h-10 items-center rounded-full border border-white/15 bg-white/5 px-6 text-sm font-semibold text-white/90 hover:bg-white/10 transition-colors"
                             >
                               Continue
                             </button>
-                          )}
+
+                            <button
+                              onClick={async () => {
+                                if (quizLoading) return;
+
+                                setQuizQuestions([]);
+                                setQuizResponses({});
+                                setCurrentQuizIndex(0);
+                                setShortAnswer("");
+                                harderQuestionsRequested.current = false;
+
+                                const forcedTopics =
+                                  reviewTopicChoice
+                                    ? [reviewTopicChoice]
+                                    : notReviewedTopics.length === 0
+                                      ? topicsToReview
+                                      : undefined;
+
+                                await requestReviewQuestions(forcedTopics ? { forcedTopics } : undefined);
+                              }}
+                              className="btn-grey rounded-lg font-medium"
+                              style={{
+                                paddingLeft: "3rem",
+                                paddingRight: "3rem",
+                                paddingTop: "1.125rem",
+                                paddingBottom: "1.125rem",
+                                fontSize: "1.125rem",
+                              }}
+                            >
+                              {reviewTopicChoice ? "Review selected" : notReviewedTopics.length > 0 ? "Start" : "Review again"}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -3599,6 +3516,24 @@ export default function SurgePage() {
                               ? "Correct!"
                               : "Not quite"}
                           </div>
+                          <div className="text-xs text-[var(--foreground)]/70 space-y-1">
+                            <div>
+                              <span className="font-semibold text-[var(--foreground)]/80">Your answer:</span>{" "}
+                              {currentResponse.answer || "—"}
+                              {userIdx >= 0 && Array.isArray(currentQ.options) && currentQ.options[userIdx]
+                                ? ` — ${currentQ.options[userIdx]}`
+                                : null}
+                            </div>
+                            {currentQ.correctOption && (
+                              <div>
+                                <span className="font-semibold text-[var(--foreground)]/80">Correct:</span>{" "}
+                                {currentQ.correctOption}
+                                {correctIdx >= 0 && Array.isArray(currentQ.options) && currentQ.options[correctIdx]
+                                  ? ` — ${currentQ.options[correctIdx]}`
+                                  : null}
+                              </div>
+                            )}
+                          </div>
                           {currentQ.explanation && (
                             <div className="text-sm text-[var(--foreground)]/80">
                               <div className="font-semibold mb-1">Explanation</div>
@@ -3615,18 +3550,36 @@ export default function SurgePage() {
                       <div className="space-y-4 rounded-lg border border-[var(--foreground)]/15 bg-[var(--background)]/60 p-4">
                         {hasAssessment ? (
                           <>
-                            <div className="flex items-center justify-between">
-                              <div className="text-sm font-semibold text-[var(--foreground)]">
-                                {currentResponse.isCorrect ? "Great job!" : "Review your answer"}
-                              </div>
-                              <div className={`text-lg font-bold ${
-                                currentResponse.score >= 8 ? "text-green-500" :
-                                currentResponse.score >= 6 ? "text-yellow-500" :
-                                "text-red-500"
-                              }`}>
-                                Grade: {currentResponse.score}/10
-                              </div>
-                            </div>
+                            {(() => {
+                              const score = Math.max(0, Math.min(10, Number(currentResponse.score) || 0));
+                              const scoreLabel =
+                                score >= 9 ? "Excellent" : score >= 7 ? "Good" : score >= 5 ? "Okay" : "Needs work";
+                              const scorePill =
+                                score >= 8
+                                  ? "bg-green-500/20 text-green-400"
+                                  : score >= 6
+                                  ? "bg-yellow-500/20 text-yellow-400"
+                                  : "bg-red-500/20 text-red-400";
+                              const barColor = score >= 8 ? "bg-green-500" : score >= 6 ? "bg-yellow-500" : "bg-red-500";
+                              return (
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div className="text-sm font-semibold text-[var(--foreground)]">
+                                      {currentResponse.isCorrect ? "Great job!" : "Review your answer"}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <div className={`px-2 py-1 rounded-full text-xs font-semibold ${scorePill}`}>
+                                        {scoreLabel}
+                                      </div>
+                                      <div className="text-lg font-bold text-[var(--foreground)]">{score}/10</div>
+                                    </div>
+                                  </div>
+                                  <div className="h-2 w-full rounded-full bg-[var(--foreground)]/10 overflow-hidden">
+                                    <div className={`h-full ${barColor}`} style={{ width: `${score * 10}%` }} />
+                                  </div>
+                                </div>
+                              );
+                            })()}
                             
                             {currentResponse.assessment && (
                               <div className="text-sm text-[var(--foreground)]/80">
@@ -3635,6 +3588,7 @@ export default function SurgePage() {
                               </div>
                             )}
                             
+                            {/*
                             {currentResponse.whatsGood && (
                               <div className="text-sm text-[var(--foreground)]/80">
                                 <div className="font-semibold mb-1 text-green-500">✓ What's Good</div>
@@ -3649,6 +3603,22 @@ export default function SurgePage() {
                               </div>
                             )}
                             
+                            */}
+
+                            {currentResponse.whatsGood && (
+                              <div className="text-sm text-[var(--foreground)]/80">
+                                <div className="font-semibold mb-1 text-green-400">What's good</div>
+                                <div>{currentResponse.whatsGood}</div>
+                              </div>
+                            )}
+
+                            {currentResponse.whatsBad && (
+                              <div className="text-sm text-[var(--foreground)]/80">
+                                <div className="font-semibold mb-1 text-red-400">To improve</div>
+                                <div>{currentResponse.whatsBad}</div>
+                              </div>
+                            )}
+
                             {currentResponse.enhancedExplanation && (
                               <div className="text-sm text-[var(--foreground)]/80 border-t border-[var(--foreground)]/10 pt-3">
                                 <div className="font-semibold mb-2">Enhanced Explanation</div>

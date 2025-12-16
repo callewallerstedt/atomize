@@ -16,6 +16,29 @@ function toSafeSlug(input: string): string {
     .replace(/^-|-$/g, "");
 }
 
+function rewriteExamSnipeHistorySlugs(courseData: StoredSubjectData, slugMap: Map<string, string>): StoredSubjectData {
+  if (!courseData?.nodes || typeof courseData.nodes !== "object") return courseData;
+
+  const nodes = courseData.nodes as any;
+  const nextNodes: any = { ...nodes };
+  let changed = false;
+
+  for (const key of Object.keys(nextNodes)) {
+    const node = nextNodes[key];
+    if (!node || typeof node !== "object" || Array.isArray(node)) continue;
+    const meta = (node as any).examSnipeMeta;
+    const historySlug = typeof meta?.historySlug === "string" ? meta.historySlug : "";
+    if (!historySlug) continue;
+    const mapped = slugMap.get(historySlug);
+    if (!mapped || mapped === historySlug) continue;
+    nextNodes[key] = { ...(node as any), examSnipeMeta: { ...(meta as any), historySlug: mapped } };
+    changed = true;
+  }
+
+  if (!changed) return courseData;
+  return { ...(courseData as any), nodes: nextNodes } as StoredSubjectData;
+}
+
 // POST - Save a shared course to the current user's account
 export async function POST(
   req: Request,
@@ -85,23 +108,8 @@ export async function POST(
       },
     });
 
-    // Save course data (ensure topics and all other data is preserved)
-    // Store the latest sharer username separately
-    await prisma.subjectData.upsert({
-      where: { userId_slug: { userId: user.id, slug: newSlug } },
-      update: {
-        data: updatedCourseData as any,
-        sharedByUsername: sharedCourse.user.username, // Update to latest sharer
-      },
-      create: {
-        userId: user.id,
-        slug: newSlug,
-        data: updatedCourseData as any,
-        sharedByUsername: sharedCourse.user.username, // Store latest sharer
-      },
-    });
-
     // Create exam snipes for the new user
+    const examSnipeSlugMap = new Map<string, string>();
     for (const examSnipe of examSnipes) {
       try {
         // Generate a unique slug for the exam snipe
@@ -124,11 +132,31 @@ export async function POST(
             subjectSlug: newSlug,
           },
         });
+
+        examSnipeSlugMap.set(String(examSnipe.slug || ""), examSnipeSlug);
       } catch (err) {
         console.error("Error creating exam snipe:", err);
         // Continue with other exam snipes even if one fails
       }
     }
+
+    const rewrittenCourseData = rewriteExamSnipeHistorySlugs(updatedCourseData, examSnipeSlugMap);
+
+    // Save course data (ensure topics and all other data is preserved)
+    // Store the latest sharer username separately
+    await prisma.subjectData.upsert({
+      where: { userId_slug: { userId: user.id, slug: newSlug } },
+      update: {
+        data: rewrittenCourseData as any,
+        sharedByUsername: sharedCourse.user.username, // Update to latest sharer
+      },
+      create: {
+        userId: user.id,
+        slug: newSlug,
+        data: rewrittenCourseData as any,
+        sharedByUsername: sharedCourse.user.username, // Store latest sharer
+      },
+    });
 
     return NextResponse.json({
       ok: true,

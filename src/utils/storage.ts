@@ -75,6 +75,7 @@ export type ReviewSchedule = {
 export type SurgeLogEntry = {
   sessionId: string;
   timestamp: number;
+  updatedAt?: number; // Timestamp of last update (used for cross-device merges)
   repeatedTopics: Array<{
     topic: string;
     questions: Array<{ question: string; answer: string; grade: number }>;
@@ -125,6 +126,7 @@ export type StoredSubjectData = {
 };
 
 const PREFIX = "atomicSubjectData:";
+const MAX_SURGE_LOG_ENTRIES = 100;
 
 export function loadSubjectData(slug: string): StoredSubjectData | null {
   if (typeof window === "undefined") return null;
@@ -161,6 +163,7 @@ export async function syncSubjectDataToServer(slug: string, data: StoredSubjectD
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
+        keepalive: true,
         body: JSON.stringify({ slug, data }),
       });
     }
@@ -212,7 +215,11 @@ export async function saveSubjectDataAsync(slug: string, data: StoredSubjectData
     await syncSubjectDataToServer(slug, data);
   } catch (err) {
     // If local storage fails (quota), still try to sync the full payload to server first.
-    await syncSubjectDataToServer(slug, data).catch(() => {});
+    let fullSyncOk = false;
+    try {
+      await syncSubjectDataToServer(slug, data);
+      fullSyncOk = true;
+    } catch {}
     try {
       const slim: StoredSubjectData = { ...data } as any;
       // Drop heavy fields if quota exceeded
@@ -233,7 +240,9 @@ export async function saveSubjectDataAsync(slug: string, data: StoredSubjectData
       }
       localStorage.setItem(PREFIX + slug, JSON.stringify(slim));
       // If full sync failed above, the slimmed version is a fallback.
-      await syncSubjectDataToServer(slug, slim).catch(() => {});
+      if (!fullSyncOk) {
+        await syncSubjectDataToServer(slug, slim).catch(() => {});
+      }
     } catch {}
   }
 }
@@ -367,59 +376,70 @@ export function getLastSurgeSession(slug: string): SurgeLogEntry | null {
   const latest = log.reduce((latest, entry) => {
     return entry.timestamp > latest.timestamp ? entry : latest;
   }, log[0]);
-  
-  console.log("getLastSurgeSession:", {
-    totalEntries: log.length,
-    selectedSessionId: latest.sessionId,
-    selectedTimestamp: latest.timestamp,
-    selectedDate: new Date(latest.timestamp).toISOString(),
-    allTimestamps: JSON.stringify(log.map(e => ({
-      sessionId: e.sessionId,
-      timestamp: e.timestamp,
-      date: new Date(e.timestamp).toISOString()
-    })), null, 2)
-  });
-  
   return latest;
 }
 
 export function addSurgeLogEntry(slug: string, entry: SurgeLogEntry): void {
-  const data = loadSubjectData(slug);
-  if (!data) return;
+  const data =
+    loadSubjectData(slug) ||
+    ({
+      subject: slug,
+      files: [],
+      combinedText: "",
+      topics: [],
+      nodes: {},
+      examDates: [],
+    } as StoredSubjectData);
   
   if (!data.surgeLog) {
     data.surgeLog = [];
   }
   
-  data.surgeLog.push(entry);
-  // Keep only last 50 sessions to prevent storage bloat
-  if (data.surgeLog.length > 50) {
-    data.surgeLog = data.surgeLog.slice(-50);
+  data.surgeLog.push({ ...entry, updatedAt: entry.updatedAt ?? Date.now() });
+  // Keep only last N sessions to prevent storage bloat
+  if (data.surgeLog.length > MAX_SURGE_LOG_ENTRIES) {
+    data.surgeLog = data.surgeLog.slice(-MAX_SURGE_LOG_ENTRIES);
   }
   
   saveSubjectData(slug, data);
 }
 
 export async function addSurgeLogEntryAsync(slug: string, entry: SurgeLogEntry): Promise<void> {
-  const data = loadSubjectData(slug);
-  if (!data) return;
+  const data =
+    loadSubjectData(slug) ||
+    ({
+      subject: slug,
+      files: [],
+      combinedText: "",
+      topics: [],
+      nodes: {},
+      examDates: [],
+    } as StoredSubjectData);
   
   if (!data.surgeLog) {
     data.surgeLog = [];
   }
   
-  data.surgeLog.push(entry);
-  // Keep only last 50 sessions to prevent storage bloat
-  if (data.surgeLog.length > 50) {
-    data.surgeLog = data.surgeLog.slice(-50);
+  data.surgeLog.push({ ...entry, updatedAt: entry.updatedAt ?? Date.now() });
+  // Keep only last N sessions to prevent storage bloat
+  if (data.surgeLog.length > MAX_SURGE_LOG_ENTRIES) {
+    data.surgeLog = data.surgeLog.slice(-MAX_SURGE_LOG_ENTRIES);
   }
   
   await saveSubjectDataAsync(slug, data);
 }
 
 export async function updateOrAddSurgeLogEntryAsync(slug: string, entry: SurgeLogEntry): Promise<void> {
-  const data = loadSubjectData(slug);
-  if (!data) return;
+  const data =
+    loadSubjectData(slug) ||
+    ({
+      subject: slug,
+      files: [],
+      combinedText: "",
+      topics: [],
+      nodes: {},
+      examDates: [],
+    } as StoredSubjectData);
   
   if (!data.surgeLog) {
     data.surgeLog = [];
@@ -427,19 +447,83 @@ export async function updateOrAddSurgeLogEntryAsync(slug: string, entry: SurgeLo
   
   // Find existing entry with same sessionId
   const existingIndex = data.surgeLog.findIndex(e => e.sessionId === entry.sessionId);
+  const normalizedEntry = { ...entry, updatedAt: entry.updatedAt ?? Date.now() };
   
   if (existingIndex !== -1) {
     // Update existing entry
-    data.surgeLog[existingIndex] = entry;
+    data.surgeLog[existingIndex] = normalizedEntry;
   } else {
     // Add new entry
-    data.surgeLog.push(entry);
+    data.surgeLog.push(normalizedEntry);
   }
   
-  // Keep only last 50 sessions to prevent storage bloat
-  if (data.surgeLog.length > 50) {
-    data.surgeLog = data.surgeLog.slice(-50);
+  // Keep only last N sessions to prevent storage bloat
+  if (data.surgeLog.length > MAX_SURGE_LOG_ENTRIES) {
+    data.surgeLog = data.surgeLog.slice(-MAX_SURGE_LOG_ENTRIES);
   }
   
+  await saveSubjectDataAsync(slug, data);
+}
+
+export async function updateSurgeLogEntryTimestampAsync(
+  slug: string,
+  sessionId: string,
+  timestamp: number
+): Promise<boolean> {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) return false;
+
+  const data =
+    loadSubjectData(slug) ||
+    ({
+      subject: slug,
+      files: [],
+      combinedText: "",
+      topics: [],
+      nodes: {},
+      examDates: [],
+    } as StoredSubjectData);
+
+  if (!Array.isArray(data.surgeLog) || data.surgeLog.length === 0) return false;
+
+  const now = Date.now();
+  let updated = false;
+
+  data.surgeLog = data.surgeLog.map((entry) => {
+    if (entry?.sessionId !== normalizedSessionId) return entry;
+    updated = true;
+    return { ...entry, timestamp, updatedAt: now };
+  });
+
+  if (!updated) return false;
+
+  await saveSubjectDataAsync(slug, data);
+  return true;
+}
+
+export async function markReviewedTopicsAsync(slug: string, topics: string[], reviewedAt = Date.now()): Promise<void> {
+  const data =
+    loadSubjectData(slug) ||
+    ({
+      subject: slug,
+      files: [],
+      combinedText: "",
+      topics: [],
+      nodes: {},
+      examDates: [],
+    } as StoredSubjectData);
+
+  const reviewedTopics = (data.reviewedTopics && typeof data.reviewedTopics === "object" ? data.reviewedTopics : {}) as Record<
+    string,
+    number
+  >;
+
+  for (const topic of topics) {
+    const key = String(topic || "").trim();
+    if (!key) continue;
+    reviewedTopics[key] = Math.max(Number(reviewedTopics[key] || 0), reviewedAt);
+  }
+
+  data.reviewedTopics = reviewedTopics;
   await saveSubjectDataAsync(slug, data);
 }

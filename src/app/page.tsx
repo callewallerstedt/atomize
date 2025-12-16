@@ -3435,7 +3435,8 @@ function Home() {
           if (urlParams.get("redirect") === "share" && urlParams.get("shareId")) {
             const shareId = urlParams.get("shareId");
             // Redirect to share page to save
-            router.push(`/share/${shareId}`);
+            const autoSave = urlParams.get("autoSave") === "true";
+            router.push(`/share/${shareId}${autoSave ? "?autoSave=true" : ""}`);
             return;
           }
         }

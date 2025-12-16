@@ -142,6 +142,77 @@ function mergeTreeTopics(existingTopics: any, incomingTopics: any): any[] {
   return Array.from(outByKey.values());
 }
 
+function mergeReviewedTopics(existingValue: any, incomingValue: any): Record<string, number> | undefined {
+  const existing = isPlainObject(existingValue) ? (existingValue as Record<string, any>) : null;
+  const incoming = isPlainObject(incomingValue) ? (incomingValue as Record<string, any>) : null;
+  if (!existing && !incoming) return undefined;
+
+  const out: Record<string, number> = {};
+  for (const src of [existing, incoming]) {
+    if (!src) continue;
+    for (const [key, value] of Object.entries(src)) {
+      const ts = Number(value);
+      if (!Number.isFinite(ts)) continue;
+      const prev = out[key];
+      out[key] = Number.isFinite(prev) ? Math.max(prev, ts) : ts;
+    }
+  }
+  return out;
+}
+
+function mergeSurgeLog(existingValue: any, incomingValue: any): any[] | undefined {
+  const existing = Array.isArray(existingValue) ? existingValue : [];
+  const incoming = Array.isArray(incomingValue) ? incomingValue : [];
+  if (!existing.length && !incoming.length) return undefined;
+  if (!existing.length) return incomingValue;
+  if (!incoming.length) return existingValue;
+
+  const toKey = (e: any) => (e?.sessionId != null ? String(e.sessionId) : "");
+  const updatedAtOf = (e: any) => Number(e?.updatedAt ?? 0) || 0;
+  const quizCount = (e: any) => (Array.isArray(e?.quizResults) ? e.quizResults.length : 0);
+  const lessonLen = (e: any) => (typeof e?.newTopicLesson === "string" ? e.newTopicLesson.length : 0);
+  const summaryLen = (e: any) => (typeof e?.summary === "string" ? e.summary.length : 0);
+
+  const chooseBetter = (a: any, b: any) => {
+    const aUpdated = updatedAtOf(a);
+    const bUpdated = updatedAtOf(b);
+    if (aUpdated !== bUpdated) return aUpdated > bUpdated ? a : b;
+
+    const aQuiz = quizCount(a);
+    const bQuiz = quizCount(b);
+    if (aQuiz !== bQuiz) return aQuiz > bQuiz ? a : b;
+
+    const aLesson = lessonLen(a);
+    const bLesson = lessonLen(b);
+    if (aLesson !== bLesson) return aLesson > bLesson ? a : b;
+
+    const aSum = summaryLen(a);
+    const bSum = summaryLen(b);
+    if (aSum !== bSum) return aSum > bSum ? a : b;
+
+    // Fall back to incoming winning to reflect most recent client write.
+    return b;
+  };
+
+  const bySession = new Map<string, any>();
+  for (const e of existing) {
+    const k = toKey(e);
+    if (!k) continue;
+    bySession.set(k, e);
+  }
+
+  for (const e of incoming) {
+    const k = toKey(e);
+    if (!k) continue;
+    const prev = bySession.get(k);
+    bySession.set(k, prev ? chooseBetter(prev, e) : e);
+  }
+
+  const merged = Array.from(bySession.values());
+  merged.sort((a, b) => Number(a?.timestamp ?? 0) - Number(b?.timestamp ?? 0));
+  return merged;
+}
+
 function mergeSubjectData(existingData: any, incomingData: any): any {
   if (!isPlainObject(existingData) || !isPlainObject(incomingData)) return incomingData ?? existingData;
 
@@ -157,6 +228,13 @@ function mergeSubjectData(existingData: any, incomingData: any): any {
   merged.nodes = outNodes;
 
   merged.topics = mergeTopics(existingData.topics, incomingData.topics);
+
+  // Merge review progress and surge log for cross-device safety.
+  const reviewedTopics = mergeReviewedTopics(existingData.reviewedTopics, incomingData.reviewedTopics);
+  if (reviewedTopics) merged.reviewedTopics = reviewedTopics;
+
+  const surgeLog = mergeSurgeLog(existingData.surgeLog, incomingData.surgeLog);
+  if (surgeLog) merged.surgeLog = surgeLog;
 
   if (isPlainObject(existingData.tree) || isPlainObject(incomingData.tree)) {
     const existingTree = isPlainObject(existingData.tree) ? existingData.tree : {};
