@@ -9,7 +9,7 @@ import { usePathname, useRouter } from "next/navigation";
 import SettingsModal from "@/components/SettingsModal";
 import Modal from "@/components/Modal";
 import GlowSpinner from "@/components/GlowSpinner";
-import { updateSurgeLogEntryTimestampAsync, type StoredSubjectData } from "@/utils/storage";
+import { loadSubjectData, saveSubjectDataAsync, updateSurgeLogEntryTimestampAsync, type StoredSubjectData } from "@/utils/storage";
 
 // Generate stable dots that don't change on re-render
 function generateDots(count: number) {
@@ -2737,11 +2737,13 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
           if (colonIndex > 0) {
             const key = param.slice(0, colonIndex).trim();
             let value = param.slice(colonIndex + 1).trim();
-            // Clean value: remove any trailing text after whitespace/newline
-            const spaceIndex = value.search(/[\s\n\r]/);
-            if (spaceIndex > 0) {
-              value = value.slice(0, spaceIndex);
+            // Allow spaces for human-readable button text and common freeform params
+            const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel', 'query', 'description', 'content', 'entry', 'date', 'prompt', 'question', 'answer'];
+            if (!spaceAllowedParams.includes(key)) {
+              const spaceIndex = value.search(/[\s\n\r]/);
+              if (spaceIndex > 0) value = value.slice(0, spaceIndex);
             }
+            value = value.replace(/[)\].,;]+$/g, '').trim();
             if (key && value) {
               params[key] = value;
             }
@@ -2769,7 +2771,7 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
             let value = param.slice(colonIndex + 1).trim();
             // For parameters that can contain spaces (topic, name, syllabus, message, label, buttonLabel), keep the full value
             // For other parameters, stop at whitespace to prevent issues when action is in the middle of text
-            const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel'];
+            const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel', 'query', 'description', 'content', 'entry', 'date', 'prompt', 'question', 'answer'];
             if (!spaceAllowedParams.includes(key)) {
               // Clean value: remove any trailing text after whitespace/newline
               // This prevents issues when action is in the middle of a sentence
@@ -2778,6 +2780,7 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
                 value = value.slice(0, spaceIndex);
               }
             }
+            value = value.replace(/[)\].,;]+$/g, '').trim();
             if (key && value) {
               params[key] = value;
             }
@@ -2810,7 +2813,7 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
             let value = param.slice(colonIndex + 1).trim();
             // For parameters that can contain spaces (topic, name, syllabus, message, etc.), keep the full value
             // For other parameters, stop at whitespace to prevent issues when action is in the middle of text
-            const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel'];
+            const spaceAllowedParams = ['topic', 'name', 'syllabus', 'message', 'label', 'buttonLabel', 'query', 'description', 'content', 'entry', 'date', 'prompt', 'question', 'answer'];
             if (!spaceAllowedParams.includes(key)) {
               // Clean value: remove any trailing text after whitespace/newline
               // This prevents issues when action is in the middle of a sentence
@@ -2819,6 +2822,7 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
                 value = value.slice(0, spaceIndex);
               }
             }
+            value = value.replace(/[)\].,;]+$/g, '').trim();
             // For slug parameters, ensure they're clean (only alphanumeric, hyphens, underscores)
             if (key === 'slug' && value) {
               value = value.replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
@@ -3047,29 +3051,228 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
           }
         }
       } else if (action.name === 'create_flashcards') {
-        const slug = action.params.slug?.trim();
-        const topic = action.params.topic?.trim();
-        const count = Math.max(1, Math.min(20, parseInt(action.params.count || '5', 10)));
-        let content = action.params.content?.trim();
+        const getCurrentSlugFromPath = () => {
+          if (typeof window === 'undefined') return '';
+          const m = window.location.pathname.match(/^\/subjects\/([^\/?#]+)/);
+          return m?.[1] ? decodeURIComponent(m[1]) : '';
+        };
+        const getCurrentTopicFromPath = () => {
+          if (typeof window === 'undefined') return '';
+          const m = window.location.pathname.match(/^\/subjects\/[^\/?#]+\/node\/([^\/?#]+)/);
+          return m?.[1] ? decodeURIComponent(m[1]) : '';
+        };
+        const resolveCourseSlug = (maybeSlugOrName: string) => {
+          let resolved = String(maybeSlugOrName || '').trim();
+          if (!resolved) return '';
+          if (typeof window !== 'undefined' && !resolved.match(/^[a-z0-9\-_]+$/i)) {
+            try {
+              const subjectsRaw = localStorage.getItem('atomicSubjects');
+              if (subjectsRaw) {
+                const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+                const exactMatch = subjects.find((s) => s.name.toLowerCase() === resolved.toLowerCase());
+                if (exactMatch) resolved = exactMatch.slug;
+                else {
+                  const partialMatch = subjects.find(
+                    (s) =>
+                      s.name.toLowerCase().includes(resolved.toLowerCase()) ||
+                      resolved.toLowerCase().includes(s.name.toLowerCase())
+                  );
+                  if (partialMatch) resolved = partialMatch.slug;
+                }
+              }
+            } catch {}
+          }
+          return resolved.replace(/[^a-zA-Z0-9\-_]/g, '').toLowerCase();
+        };
+        const getCourseNameForSlug = (slug: string) => {
+          if (typeof window === 'undefined') return '';
+          try {
+            const subjectsRaw = localStorage.getItem('atomicSubjects');
+            if (!subjectsRaw) return '';
+            const subjects: Array<{ name: string; slug: string }> = JSON.parse(subjectsRaw);
+            return subjects.find((s) => s.slug === slug)?.name || '';
+          } catch {
+            return '';
+          }
+        };
+
+        const directPromptRaw = String(action.params.prompt || action.params.question || "").trim();
+        const directAnswerRaw = String(action.params.answer || "").trim();
+
+        let slug = (action.params.slug || '').trim();
+        let topic = (action.params.topic || '').trim(); // legacy/back-compat: treated as a focus/query label
+        const query = (action.params.query || '').trim();
+        const count = Math.max(1, Math.min(100, parseInt(action.params.count || '5', 10)));
+        let content = (action.params.content || '').trim();
+
+        if (!slug) slug = getCurrentSlugFromPath();
+        if (!topic) topic = query || getCurrentTopicFromPath();
+        if (!topic && query) topic = query;
+        slug = resolveCourseSlug(slug);
         
-        if (!slug || !topic) {
-          setMessages((m) => [...m, { role: 'assistant', content: 'I need a course slug and topic name to create flashcards. Please specify them.' }]);
+        if (!slug) {
+          setMessages((m) => [
+            ...m,
+            { role: 'assistant', content: 'I need a course to save these flashcards to. Open a course page (or tell me which course).' }
+          ]);
           return;
         }
-        
-        // If no content provided, try to extract from page
+
+        const buildFlashcardSourceFromCourse = (subjectData: any, maxChars: number) => {
+          const parts: string[] = [];
+
+          const topicNotes =
+            subjectData?.topic_notes && typeof subjectData.topic_notes === 'object'
+              ? String(subjectData.topic_notes?.[topic] || '')
+              : '';
+          const courseNotes = typeof subjectData?.course_notes === 'string' ? subjectData.course_notes : '';
+
+          if (courseNotes.trim()) parts.push(`Course notes:\n${courseNotes.trim()}`);
+          if (topicNotes.trim()) parts.push(`Topic notes (${topic}):\n${topicNotes.trim()}`);
+
+          const topicNode = subjectData?.nodes?.[topic];
+          if (topicNode) {
+            if (typeof topicNode === 'string') {
+              parts.push(`Topic content (${topic}):\n${topicNode}`);
+            } else if (typeof topicNode === 'object') {
+              const overview = typeof topicNode.overview === 'string' ? topicNode.overview : '';
+              if (overview.trim()) parts.push(`Topic overview (${topic}):\n${overview.trim()}`);
+
+              if (Array.isArray(topicNode.symbols) && topicNode.symbols.length) {
+                const symbols = topicNode.symbols
+                  .slice(0, 30)
+                  .map((s: any) => `${s?.symbol || ''} = ${s?.meaning || ''}${s?.units ? ` (${s.units})` : ''}`.trim())
+                  .filter(Boolean)
+                  .join('\n');
+                if (symbols.trim()) parts.push(`Symbols:\n${symbols}`);
+              }
+
+              if (Array.isArray(topicNode.lessons) && topicNode.lessons.length) {
+                const lessonBlocks: string[] = [];
+                for (const lesson of topicNode.lessons) {
+                  if (!lesson || typeof lesson !== 'object') continue;
+                  const title = typeof (lesson as any).title === 'string' ? (lesson as any).title : '';
+                  const body = typeof (lesson as any).body === 'string' ? (lesson as any).body : '';
+                  const compactBody = body.replace(/\s+/g, ' ').trim();
+                  if (!compactBody) continue;
+                  lessonBlocks.push(`${title ? `Lesson: ${title}\n` : ''}${compactBody}`);
+                  if (lessonBlocks.join('\n\n---\n\n').length > 12000) break;
+                }
+                if (lessonBlocks.length) parts.push(`Lessons:\n${lessonBlocks.join('\n\n---\n\n')}`);
+              }
+            }
+          }
+
+          const combinedText = typeof subjectData?.combinedText === 'string' ? subjectData.combinedText : '';
+          if (combinedText.trim()) {
+            // Pick relevant paragraphs if possible, otherwise include a slice.
+            const stop = new Set([
+              'the','a','an','and','or','to','of','in','on','for','with','from','by','at','as','is','are','was','were','be','been','it','this','that','these','those'
+            ]);
+            const rawKeywords = `${topic} ${query}`.toLowerCase().split(/[^a-z0-9åäö]+/i).filter(Boolean);
+            const keywords = Array.from(new Set(rawKeywords.filter((w: string) => w.length >= 3 && !stop.has(w))));
+
+            const paragraphs = combinedText
+              .split(/\n{2,}/g)
+              .map((p: string) => p.replace(/\s+/g, ' ').trim())
+              .filter((p: string) => p.length >= 80)
+              .slice(0, 2000);
+
+            const scoreParagraph = (p: string) => {
+              const lower = p.toLowerCase();
+              let score = 0;
+              for (const k of keywords) {
+                const hits = lower.split(k).length - 1;
+                score += hits;
+              }
+              return score;
+            };
+
+            let picked: string[] = [];
+            if (keywords.length) {
+              const scored = paragraphs
+                .map((p: string) => ({ p, score: scoreParagraph(p) }))
+                .filter((x: { p: string; score: number }) => x.score > 0)
+                .sort((a: { p: string; score: number }, b: { p: string; score: number }) => b.score - a.score)
+                .slice(0, 25)
+                .map((x: { p: string; score: number }) => x.p);
+              picked = scored;
+            }
+
+            const relevant = picked.length ? picked.join('\n\n') : combinedText.slice(0, 8000);
+            if (relevant.trim()) parts.push(`Course materials excerpt:\n${relevant}`);
+          }
+
+          const joined = parts.filter(Boolean).join('\n\n---\n\n').trim();
+          return joined.slice(0, maxChars);
+        };
+
+        const subjectData = loadSubjectData(slug);
+        if (!subjectData) {
+          setMessages((m) => [...m, { role: 'assistant', content: `I can't find that course locally (slug: ${slug}). Open the course once so it's loaded, then try again.` }]);
+          return;
+        }
+
+        const getLastUserPaste = () => {
+          // Prefer the most recent user message if it looks like a paste (long/multiline/structured).
+          for (let i = messages.length - 1; i >= 0; i--) {
+            const msg: any = messages[i];
+            if (msg?.role !== 'user' || typeof msg.content !== 'string') continue;
+            const text = msg.content.trim();
+            if (text.length < 50) continue;
+            const looksLikePaste =
+              text.length >= 200 ||
+              (text.split('\n').length >= 4) ||
+              text.includes('\t') ||
+              text.includes('::') ||
+              /\bQ[:\-]/i.test(text) ||
+              /\bA[:\-]/i.test(text) ||
+              (text.startsWith('[') && text.endsWith(']')) ||
+              (text.startsWith('{') && text.endsWith('}'));
+            if (looksLikePaste) return text;
+            // If it's not clearly a paste, don't grab it (avoid stealing normal questions).
+            return '';
+          }
+          return '';
+        };
+
+        // If no content provided: prefer pasted text from chat, then page text, then course materials.
         if (!content || content.length < 50) {
-          // Try to get content from lesson-content or similar elements
-          const lessonContent = document.querySelector('.lesson-content, .surge-lesson-card, [data-topic]');
-          if (lessonContent) {
-            content = lessonContent.textContent || '';
+          content = getLastUserPaste();
+        }
+        if (!content || content.length < 50) {
+          try {
+            const el = document.querySelector('.lesson-content, .surge-lesson-card, [data-topic]');
+            content = (el?.textContent || '').trim();
+          } catch {}
+        }
+        if (!content || content.length < 50) {
+          content = buildFlashcardSourceFromCourse(subjectData as any, 20000);
+        }
+        if (!content || content.trim().length < 50) {
+          setMessages((m) => [
+            ...m,
+            { role: 'assistant', content: 'I need some actual material to generate flashcards from. Open a lesson/topic with content, or upload course files first.' }
+          ]);
+          return;
+        }
+
+        const languageName = String((subjectData as any).course_language_name || '');
+        const subjectName = getCourseNameForSlug(slug) || String((subjectData as any).subject || slug);
+        const courseContextParts: string[] = [];
+        if (typeof (subjectData as any).course_quick_summary === 'string' && (subjectData as any).course_quick_summary.trim()) {
+          courseContextParts.push(`Course summary: ${(subjectData as any).course_quick_summary.trim()}`);
+        }
+        if (typeof (subjectData as any).course_context === 'string' && (subjectData as any).course_context.trim()) {
+          courseContextParts.push(`Course context: ${(subjectData as any).course_context.trim()}`);
+        }
+        if (Array.isArray((subjectData as any).topics)) {
+          const meta = (subjectData as any).topics.find((t: any) => (t?.name || t) === topic);
+          if (meta && typeof meta === 'object' && typeof meta.summary === 'string' && meta.summary.trim()) {
+            courseContextParts.push(`Topic summary (${topic}): ${meta.summary.trim()}`);
           }
         }
-        
-        if (!content || content.length < 50) {
-          setMessages((m) => [...m, { role: 'assistant', content: 'I need content to create flashcards from. Please provide the content or make sure you\'re on a page with lesson content.' }]);
-          return;
-        }
+        const courseContext = courseContextParts.join('\n');
         
         // Show loading message
         const loadingMessageId = `flashcard-loading-${Date.now()}`;
@@ -3078,22 +3281,119 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
           content: 'Generating Flashcards',
           id: loadingMessageId,
           isLoading: true,
-          flashcardGeneration: { slug, topic, count }
+          flashcardGeneration: { slug, topic: '__course__', count }
         }]);
+
+        const normalizePrompt = (p: string) => String(p || '').trim().replace(/\s+/g, ' ');
+        const normalizeAnswer = (a: string) => String(a || '').trim();
+        const getMostRecentUserText = () => {
+          for (let i = messages.length - 1; i >= 0; i--) {
+            const msg: any = messages[i];
+            if (msg?.role === 'user' && typeof msg.content === 'string' && msg.content.trim()) return msg.content.trim();
+          }
+          return '';
+        };
+        const extractExplicitQAFromText = (text: string) => {
+          const t = String(text || '');
+          if (!t) return null as null | { prompt: string; answer?: string };
+          const m1 =
+            t.match(/question\s*[:\-]?\s*[\"“']([^\"”']+)[\"”'].*?answer\s*[:\-]?\s*[\"“']([^\"”']+)[\"”']/i) ||
+            t.match(/q\s*[:\-]\s*([^\n]+)\s*\n\s*a\s*[:\-]\s*([^\n]+)\s*/i);
+          if (m1) {
+            const prompt = normalizePrompt(m1[1] || '');
+            const answer = normalizeAnswer(m1[2] || '');
+            if (prompt && answer) return { prompt, answer };
+          }
+          const m2 = t.match(/question\s*[:\-]?\s*[\"“']([^\"”']+)[\"”']/i);
+          if (m2) {
+            const prompt = normalizePrompt(m2[1] || '');
+            if (prompt) return { prompt };
+          }
+          return null;
+        };
+
+        const appendToCourseDeck = async (newCards: Array<{ prompt: string; answer: string }>) => {
+          const data = loadSubjectData(slug) || subjectData;
+          const existing = Array.isArray((data as any).course_flashcards) ? (data as any).course_flashcards : [];
+          const merged = [...existing, ...newCards]
+            .map((c) => ({ prompt: normalizePrompt(c?.prompt), answer: normalizeAnswer(c?.answer) }))
+            .filter((c) => c.prompt && c.answer);
+          const seen = new Set<string>();
+          const deduped = merged.filter((c) => {
+            const key = `${c.prompt.toLowerCase()}::${c.answer.toLowerCase()}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          (data as any).course_flashcards = deduped;
+          await saveSubjectDataAsync(slug, data);
+        };
+
+        // If user explicitly gave a single Q/A, store it exactly (no AI).
+        const explicitFromText = extractExplicitQAFromText(getMostRecentUserText());
+        const explicitPrompt = normalizePrompt(directPromptRaw || explicitFromText?.prompt || '');
+        const explicitAnswer = normalizeAnswer(directAnswerRaw || explicitFromText?.answer || '');
+        if (explicitPrompt && explicitAnswer && count === 1) {
+          (async () => {
+            try {
+              await appendToCourseDeck([{ prompt: explicitPrompt, answer: explicitAnswer }]);
+              setMessages((m) => {
+                const copy = [...m];
+                const loadingIdx = copy.findIndex(msg => msg.id === loadingMessageId);
+                if (loadingIdx >= 0) {
+                  copy[loadingIdx] = {
+                    role: 'assistant',
+                    content: `Added 1 flashcard to this course.`,
+                    id: loadingMessageId,
+                    flashcardGeneration: { slug, topic: '__course__', count: 1 },
+                    flashcardSuccess: true,
+                  };
+                }
+                return copy;
+              });
+            } catch (err: any) {
+              setMessages((m) => {
+                const copy = [...m];
+                const loadingIdx = copy.findIndex(msg => msg.id === loadingMessageId);
+                if (loadingIdx >= 0) {
+                  copy[loadingIdx] = {
+                    role: 'assistant',
+                    content: `Failed to add flashcard: ${err?.message || 'Unknown error'}`,
+                    id: loadingMessageId,
+                  };
+                }
+                return copy;
+              });
+            }
+          })();
+          return;
+        }
         
         // Generate flashcards
         (async () => {
           try {
+            const assistMode = !!explicitPrompt && !explicitAnswer && count === 1;
+            const contentForApi = assistMode
+              ? [
+                  `The user wants a flashcard with this exact prompt (keep it verbatim):`,
+                  `"${explicitPrompt}"`,
+                  ``,
+                  `Generate a correct, concise answer. If the provided material doesn't include it, you may use general knowledge.`,
+                  ``,
+                  `COURSE/PAGE MATERIAL (for grounding):`,
+                  content,
+                ].join('\n')
+              : content;
             const res = await fetch('/api/generate-flashcards', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                subject: slug,
+          body: JSON.stringify({
+                subject: subjectName,
                 topic,
-                content,
+                content: contentForApi,
                 count,
-                courseContext: '', // Could be enhanced to get from context
-                languageName: '', // Could be enhanced to get from course data
+                courseContext,
+                languageName,
               }),
             });
             
@@ -3103,54 +3403,16 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
               throw new Error(json?.error || 'Failed to generate flashcards');
             }
             
-            // Save flashcards to topic
-            const { loadSubjectData, saveSubjectData } = await import('@/utils/storage');
-            const data = loadSubjectData(slug);
-            if (!data) {
-              throw new Error('Course not found');
-            }
-            
-            // Get or create topic content
-            let topicContent = data.nodes[topic];
-            if (!topicContent || typeof topicContent === 'string') {
-              // Create new topic content with a single lesson
-              topicContent = {
-                overview: '',
-                symbols: [],
-                lessons: [{
-                  title: topic,
-                  body: content.substring(0, 500), // Store first 500 chars as placeholder
-                  quiz: [],
-                  flashcards: json.flashcards,
-                }],
-              };
-            } else {
-              // Add flashcards to first lesson or create a new one
-              const lessons = (topicContent as any).lessons || [];
-              if (lessons.length > 0) {
-                // Add to first lesson
-                lessons[0] = {
-                  ...lessons[0],
-                  flashcards: [...(lessons[0].flashcards || []), ...json.flashcards],
-                };
-              } else {
-                // Create new lesson
-                lessons.push({
-                  title: topic,
-                  body: content.substring(0, 500),
-                  quiz: [],
-                  flashcards: json.flashcards,
-                });
-              }
-              topicContent = {
-                ...topicContent,
-                lessons,
-              };
-            }
-            
-            // Save updated data
-            data.nodes[topic] = topicContent;
-            saveSubjectData(slug, data);
+            const generatedCards = (json.flashcards as Array<{ prompt: string; answer: string }>)
+              .map((c) => ({ prompt: normalizePrompt(c?.prompt), answer: normalizeAnswer(c?.answer) }))
+              .filter((c) => c.prompt && c.answer);
+
+            const finalCards =
+              assistMode && explicitPrompt
+                ? generatedCards.slice(0, 1).map((c) => ({ prompt: explicitPrompt, answer: c.answer }))
+                : generatedCards;
+
+            await appendToCourseDeck(finalCards);
             
             // Update message to show success
             setMessages((m) => {
@@ -3159,9 +3421,9 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
               if (loadingIdx >= 0) {
                 copy[loadingIdx] = {
                   role: 'assistant',
-                  content: `Flashcards Generated. I've created ${json.flashcards.length} flashcards for "${topic}".`,
+                  content: `Added ${finalCards.length} flashcards to this course.`,
                   id: loadingMessageId,
-                  flashcardGeneration: { slug, topic, count: json.flashcards.length },
+                  flashcardGeneration: { slug, topic: '__course__', count: finalCards.length },
                   flashcardSuccess: true,
                 };
               }

@@ -120,6 +120,7 @@ export type StoredSubjectData = {
   topic_notes?: { [topicName: string]: string }; // freeform notes per topic
   course_icon?: string; // emoji or short icon text
   course_quick_summary?: string; // fast AI read of course context
+  course_flashcards?: LessonFlashcard[]; // course-level flashcards (not tied to a topic/lesson)
   reviewSchedules?: { [key: string]: ReviewSchedule }; // key: "topicName-lessonIndex"
   examDates?: Array<{ date: string; name?: string }>; // ISO date strings, e.g., "2024-03-15"
   surgeLog?: SurgeLogEntry[]; // History of Synapse Surge sessions

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, use, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import GlowSpinner from "@/components/GlowSpinner";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
@@ -639,6 +639,7 @@ export default function SurgePage() {
     : (paramsPromiseOrValue as { slug: string } | undefined);
   const slug = params?.slug ?? "";
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [data, setData] = useState<StoredSubjectData | null>(null);
   const [practiceLog, setPracticeLog] = useState<PracticeLogEntry[]>([]);
@@ -992,8 +993,21 @@ export default function SurgePage() {
     userSetPhaseRef.current = false;
     initialPhaseSetRef.current = false;
 
-    // Always start with review phase
-    const initialPhase: "learn" | "repeat" = "repeat";
+    const prefillTopic = (() => {
+      try {
+        const qp = new URLSearchParams(window.location.search).get("topic");
+        const stored = sessionStorage.getItem(`surge:prefillTopic:${slug}`);
+        return String(qp || stored || "").trim();
+      } catch {
+        return "";
+      }
+    })();
+
+    // Default is review, but quick-start from course page should jump straight into Learn.
+    const initialPhase: "learn" | "repeat" = prefillTopic ? "learn" : "repeat";
+    if (prefillTopic) {
+      userSetPhaseRef.current = true;
+    }
 
     // Mark that initial phase has been set BEFORE setting the phase.
     // This prevents the second useEffect from overriding it.
@@ -2399,6 +2413,38 @@ export default function SurgePage() {
     }
   };
 
+  const preselectHandledRef = useRef(false);
+  useEffect(() => {
+    if (!slug) return;
+    if (preselectHandledRef.current) return;
+    if (sending) return;
+    if (currentTopic) return;
+
+    const qpTopic = String(searchParams?.get("topic") || "").trim();
+    const stored = (() => {
+      try {
+        return String(sessionStorage.getItem(`surge:prefillTopic:${slug}`) || "").trim();
+      } catch {
+        return "";
+      }
+    })();
+    const prefill = qpTopic || stored;
+    if (!prefill) return;
+
+    preselectHandledRef.current = true;
+    try {
+      sessionStorage.removeItem(`surge:prefillTopic:${slug}`);
+    } catch {}
+
+    // Jump straight into learn phase for the selected topic.
+    userSetPhaseRef.current = true;
+    initialPhaseSetRef.current = true;
+    setPhase("learn");
+    setTimeout(() => {
+      handleTopicSelect(prefill);
+    }, 0);
+  }, [currentTopic, handleTopicSelect, searchParams, sending, slug]);
+
   const handleCustomTopicSubmit = () => {
     if (customTopicInput.trim()) {
       handleTopicSelect(customTopicInput.trim());
@@ -2533,6 +2579,9 @@ export default function SurgePage() {
       await updateOrAddSurgeLogEntryAsync(slug, entry);
       setLastSurge(getLastSurgeSession(slug));
       setData(loadSubjectData(slug));
+      try {
+        window.dispatchEvent(new CustomEvent("synapse:subject-data-updated", { detail: { slug, fromSurge: true } }));
+      } catch {}
       return;
 
       /*
@@ -2786,8 +2835,29 @@ export default function SurgePage() {
         : -1;
 
       const timestamp = Date.now();
+      const existingTitles = new Set(
+        (Array.isArray(normalizedNode.lessons) ? normalizedNode.lessons : [])
+          .map((l: any) => String(l?.title || "").trim().toLowerCase())
+          .filter(Boolean),
+      );
+
+      const makeUniqueTitle = (base: string) => {
+        const normalizedBase = base.trim();
+        if (!normalizedBase) return `${topicName} (Surge ${String(sessionId).slice(0, 6)})`;
+        if (!existingTitles.has(normalizedBase.toLowerCase())) return normalizedBase;
+        const withId = `${normalizedBase} ${String(sessionId).slice(0, 6)}`;
+        if (!existingTitles.has(withId.toLowerCase())) return withId;
+        for (let i = 2; i < 50; i++) {
+          const candidate = `${normalizedBase} #${i}`;
+          if (!existingTitles.has(candidate.toLowerCase())) return candidate;
+        }
+        return `${normalizedBase} ${Date.now()}`;
+      };
+
       const lessonTitle =
-        (existingIndex !== -1 && normalizedNode.lessons?.[existingIndex]?.title) || `${topicName} (Surge Lesson)`;
+        existingIndex !== -1
+          ? String(normalizedNode.lessons?.[existingIndex]?.title || makeUniqueTitle(`${topicName} (Surge)`))
+          : makeUniqueTitle(`${topicName} (Surge)`);
 
       const previousLesson = existingIndex !== -1 ? normalizedNode.lessons[existingIndex] : null;
       const baseLesson = {
@@ -2857,6 +2927,9 @@ export default function SurgePage() {
       await saveSubjectDataAsync(slug, updatedData);
       setData(updatedData);
       lastPersistedLessonSignatureRef.current = signature;
+      try {
+        window.dispatchEvent(new CustomEvent("synapse:subject-data-updated", { detail: { slug, fromSurge: true } }));
+      } catch {}
       console.log("Saved Surge lesson to course content", { topicName, sessionId });
     },
     [sessionId, slug, setData]

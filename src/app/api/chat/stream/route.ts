@@ -118,7 +118,7 @@ export async function POST(req: Request) {
       "- open_course_modal (opens course creation modal)",
       "- open_flashcards|slug:course-slug (opens flashcards modal for a course - use the exact slug from the context)",
       "- open_lesson_flashcards|slug:course-slug|topic:TopicName|lessonIndex:0 (opens flashcards for a specific lesson)",
-      "- create_flashcards|slug:course-slug|topic:TopicName|count:number|content:page content (generates flashcards from the current page content and saves them to the specified topic - count should be between 1-20, content should be the text from the current page)",
+      "- create_flashcards|slug:course-slug|count:number|query:optional focus|prompt:optional exact question|answer:optional exact answer (creates/saves flashcards to the COURSE deck (NOT under a topic). Use prompt+answer when the user specifies an exact flashcard to add. Use prompt (no answer) to have the app generate an answer.)",
       "- set_exam_date|slug:course-slug|date:number or DD/MM/YY|name:Optional exam name (set or update exam date for a course - date must be either a number like '22' for 22 days from now, or DD/MM/YY format like '23/11/24'. Use exact slug from context)",
       "- fetch_exam_snipe_data|slug:course-name-or-slug (fetch detailed exam snipe data for a course - use the EXACT course name the user mentioned, NOT the course slug. Exam snipe data is stored separately and matched by course name. Shows loading spinner, fetches the data, adds it to chat context, then you should respond naturally about what you found. The data will stay in context for all future messages in this chat)",
       "- fetch_practice_logs|slug:course-slug-or-name (fetch practice log data for a course - shows what topics were practiced, how many questions, average grades, and recent practice sessions. Use the course slug or name. Shows loading spinner, fetches the data, adds it to chat context, then you should respond naturally about what you found. The data will stay in context for all future messages in this chat)",
@@ -135,9 +135,10 @@ export async function POST(req: Request) {
       "- Quick Learn: Generate quick lessons on any topic at /quicklearn",
       "- Course Structure: Each course has topics, and each topic has lessons with quizzes",
       "- Routes: /subjects/{slug} for course, /subjects/{slug}/node/{topic} for topic, /subjects/{slug}/node/{topic}/lesson/{index} for lesson",
-      "- Flashcards: Each lesson can have flashcards, and courses have a flashcards modal showing all flashcards. You can create flashcards from any page content using ACTION:create_flashcards. When a user asks to create flashcards or wants to study with flashcards, you can generate them from the current page content.",
+      "- Flashcards: Courses have a flashcards modal showing all flashcards. Use ACTION:create_flashcards to generate/save flashcards to the COURSE deck.",
       "",
       "CRITICAL: The CONTEXT includes course information in this format: 'Course: CourseName (slug: course-slug)' followed by 'Topics (X): Topic1, Topic2, Topic3'. ",
+      "DEFAULT COURSE: If Current page is inside /subjects/{slug} and the user does NOT specify a course, assume they mean that current course.",
       "COURSE NAME TO SLUG MAPPING: When a user mentions a course by NAME (e.g., 'French Revolution', 'Signaler och System'), you MUST look up the corresponding slug from the context. ",
       "The course name and slug may be DIFFERENT - always use the slug shown in parentheses after the course name. ",
       "Example: If context shows 'Course: Signaler och System (slug: signaler-och-system)', and user says 'open Signaler och System', use slug 'signaler-och-system' for navigation. ",
@@ -150,7 +151,8 @@ export async function POST(req: Request) {
       "- If user has exam files, suggest Exam Snipe to analyze them",
       "- If user wants to study a course, help them navigate to it or create one",
       "- If user wants to review flashcards, open the flashcards modal for the course or specific lesson",
-      "- If user wants to create flashcards from the current page or lesson, use ACTION:create_flashcards. You can create flashcards from any page content - just extract the content from the page and specify the course slug and topic name. Ask the user how many flashcards they want (default to 5 if not specified).",
+      "- If user wants flashcards, use ACTION:create_flashcards with the course slug (and count if specified). Use query: to focus the content. Default count to 5.",
+      "- If the user pastes any text (including messy flashcards) and wants flashcards from it, use ACTION:create_flashcards (same action). Don't worry about format.",
       "- Use buttons to make actions clear and easy (e.g., 'Snipe' button for exam analysis, 'Generate' for course creation)",
       "- Use file upload areas when you need specific files from the user",
       "- Recommend using the Pomodoro timer (visible in the header) for focused study sessions - it helps maintain focus and track study time",
@@ -439,5 +441,3 @@ RULES:
     return NextResponse.json({ ok: false, error: err?.message || "Unknown error" }, { status: 500 });
   }
 }
-
-

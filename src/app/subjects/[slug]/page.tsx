@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { LessonBody } from "@/components/LessonBody";
 import { FlashcardContent } from "@/components/FlashcardContent";
 import { sanitizeLessonBody, sanitizeFlashcardContent } from "@/lib/sanitizeLesson";
-import { loadSubjectData, saveSubjectData, saveSubjectDataAsync, StoredSubjectData, TopicMeta, getLessonsDueForReview, getUpcomingReviews, LessonFlashcard, LessonHighlight } from "@/utils/storage";
+import { getLastSurgeSession, getSurgeLog, loadSubjectData, saveSubjectData, saveSubjectDataAsync, StoredSubjectData, TopicMeta, getLessonsDueForReview, getUpcomingReviews, LessonFlashcard, LessonHighlight } from "@/utils/storage";
 import HighlightsModal from "@/components/HighlightsModal";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -47,6 +47,10 @@ export default function SubjectPage() {
   const [progress, setProgress] = useState<{ [topicName: string]: { totalLessons: number; completedLessons: number } }>({});
   const [languagePrompt, setLanguagePrompt] = useState<{ code: string; name: string } | null>(null);
   const [query, setQuery] = useState("");
+  const [pendingTopicNav, setPendingTopicNav] = useState<string | null>(null);
+  const [isTopicNavPending, startTopicNavTransition] = useTransition();
+  const [practiceMetaTick, setPracticeMetaTick] = useState(0);
+  const [surgeMetaTick, setSurgeMetaTick] = useState(0);
   const [activeTab, setActiveTab] = useState<'tree' | 'topics' | 'notes'>('tree');
   const [courseNotes, setCourseNotes] = useState<string>("");
   const [tree, setTree] = useState<{ subject: string; topics: any[] } | null>(null);
@@ -77,8 +81,16 @@ export default function SubjectPage() {
   const [selectedFlashcardTopic, setSelectedFlashcardTopic] = useState<string | null>(null);
   const [examDateUpdateTrigger, setExamDateUpdateTrigger] = useState(0); // Force re-render when exam dates change
   const [daysLeft, setDaysLeft] = useState<number | null>(null); // Days until next exam
-  const [examSnipes, setExamSnipes] = useState<Array<{ id: string; courseName: string; slug: string; createdAt: string; fileNames: string[] }>>([]);
+  const [examSnipes, setExamSnipes] = useState<Array<{ id: string; courseName: string; slug: string; createdAt: string; fileNames: string[]; topConcepts: string[] }>>([]);
   const [loadingExamSnipes, setLoadingExamSnipes] = useState(false);
+  const [surgeExamSnipeData, setSurgeExamSnipeData] = useState<string | null>(null);
+  const [surgeSuggestedTopics, setSurgeSuggestedTopics] = useState<string[]>([]);
+  const [surgeSuggesting, setSurgeSuggesting] = useState(false);
+  const [surgeSuggestError, setSurgeSuggestError] = useState<string | null>(null);
+  const [surgeSuggestKick, setSurgeSuggestKick] = useState(0);
+  const surgeSuggestAttemptedRef = useRef<string | null>(null);
+  const [surgeCustomTopicOpen, setSurgeCustomTopicOpen] = useState(false);
+  const [surgeCustomTopicValue, setSurgeCustomTopicValue] = useState("");
   const [pageLoading, setPageLoading] = useState(true); // Initial page load state
   const [subscriptionLevel, setSubscriptionLevel] = useState<string>("Free");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -494,6 +506,103 @@ export default function SubjectPage() {
     }
   }, [slug, refreshSubjectData]);
 
+  const extractExamSnipeConceptNames = useCallback((results: any): string[] => {
+    const concepts = Array.isArray(results?.concepts) ? results.concepts : [];
+    return concepts
+      .map((c: any) => String(c?.name || "").trim())
+      .filter(Boolean)
+      .slice(0, 6);
+  }, []);
+
+  const extractSurgeTopicSuggestions = useCallback((text: string, requiredCount = 4): string[] => {
+    const uniqueTopics: string[] = [];
+    const normalizedSeen = new Set<string>();
+
+    const recordTopic = (raw?: string | null) => {
+      if (!raw) return false;
+      let topic = raw.replace(/^[-•]\s*/, "").replace(/[`*"_]/g, "").trim();
+      if (!topic) return false;
+      topic = topic.replace(/^[0-9]+\.\s*/, "").trim();
+      if (!topic) return false;
+
+      const normalized = topic.toLowerCase().replace(/\s+/g, " ").trim();
+      if (!normalized || normalizedSeen.has(normalized)) return false;
+
+      normalizedSeen.add(normalized);
+      uniqueTopics.push(topic);
+      return true;
+    };
+
+    if (!text.includes("TOPIC") && !text.includes("SUGGESTION")) return [];
+
+    const suggestionRegex = /TOPIC[_\s-]*SUGGESTION\s*[:\-]\s*([^\r\n]+?)(?:\r?\n|$)/gi;
+    const matches = Array.from(text.matchAll(suggestionRegex));
+    for (const match of matches) {
+      const topicText = match[1];
+      if (topicText && topicText.trim()) {
+        const added = recordTopic(topicText);
+        if (added && uniqueTopics.length >= requiredCount) break;
+      }
+    }
+    return uniqueTopics.slice(0, requiredCount);
+  }, []);
+
+  const handleExtractTopics = useCallback(async () => {
+    if (!hasPremiumAccess) {
+      alert("This feature requires Premium access");
+      return;
+    }
+    try {
+      setError(null);
+      setGeneratingBasics(true);
+      const saved = loadSubjectData(slug) as StoredSubjectData | null;
+      const fileIds = saved?.course_file_ids || [];
+      const contextText = [saved?.course_context || "", saved?.combinedText || ""].filter(Boolean).join("\n\n");
+
+      if (!fileIds.length && !contextText.trim()) {
+        throw new Error("No course context found. Upload/analyze course files first.");
+      }
+
+      const res = await fetch("/api/extract-by-ids", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: subjectName || slug,
+          fileIds,
+          contextText,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
+
+      const gotTopics: TopicMeta[] = json.data?.topics || [];
+      const existingTopics = topics || [];
+      const existingTopicNames = new Set(existingTopics.map((t) => t.name));
+      const newTopics = gotTopics.filter((t) => !existingTopicNames.has(t.name));
+      const mergedTopics = [...existingTopics, ...newTopics];
+
+      setTopics(mergedTopics);
+      const nextTree = { subject: subjectName || slug, topics: mergedTopics.map((t: any) => ({ name: t.name, subtopics: [] })) } as any;
+      setTree(nextTree);
+
+      const nextSaved = (loadSubjectData(slug) as StoredSubjectData | null) || saved;
+      if (nextSaved) {
+        nextSaved.topics = mergedTopics;
+        nextSaved.tree = nextTree;
+        nextSaved.combinedText = json.combinedText || nextSaved.combinedText || "";
+        nextSaved.course_context = json.course_context || nextSaved.course_context || "";
+        nextSaved.course_language_code = json.detected_language_code || nextSaved.course_language_code;
+        nextSaved.course_language_name = json.detected_language_name || nextSaved.course_language_name;
+        saveSubjectData(slug, nextSaved);
+      }
+    } catch (e: any) {
+      console.error("Failed to extract topics:", e);
+      setError(e?.message || "Failed to extract topics");
+    } finally {
+      setGeneratingBasics(false);
+    }
+  }, [hasPremiumAccess, slug, subjectName, topics]);
+
   const loadExamSnipes = useCallback(async () => {
     setLoadingExamSnipes(true);
     try {
@@ -512,12 +621,18 @@ export default function SubjectPage() {
           fileNames: Array.isArray(record.fileNames) ? record.fileNames : [],
           results: record.results || {},
         }));
+        try {
+          setSurgeExamSnipeData(records?.[0]?.results ? JSON.stringify(records[0].results, null, 2) : null);
+        } catch {
+          setSurgeExamSnipeData(null);
+        }
         setExamSnipes(records.map((r: any) => ({
           id: r.id,
           courseName: r.courseName,
           slug: r.slug,
           createdAt: r.createdAt,
           fileNames: r.fileNames,
+          topConcepts: extractExamSnipeConceptNames(r.results),
         })));
         // Sync lessons from exam snipes to main course
         await syncExamSnipeLessonsToMainCourse(records);
@@ -534,15 +649,22 @@ export default function SubjectPage() {
             fileNames: Array.isArray(record?.fileNames) ? record.fileNames : [],
             results: record?.results || {},
           }));
+          try {
+            setSurgeExamSnipeData(records?.[0]?.results ? JSON.stringify(records[0].results, null, 2) : null);
+          } catch {
+            setSurgeExamSnipeData(null);
+          }
           setExamSnipes(records.map((r: any) => ({
             id: r.id,
             courseName: r.courseName,
             slug: r.slug,
             createdAt: r.createdAt,
             fileNames: r.fileNames,
+            topConcepts: extractExamSnipeConceptNames(r.results),
           })));
           await syncExamSnipeLessonsToMainCourse(records);
         } else {
+          setSurgeExamSnipeData(null);
           setExamSnipes([]);
         }
       }
@@ -558,26 +680,37 @@ export default function SubjectPage() {
           fileNames: Array.isArray(record?.fileNames) ? record.fileNames : [],
           results: record?.results || {},
         }));
+        try {
+          setSurgeExamSnipeData(records?.[0]?.results ? JSON.stringify(records[0].results, null, 2) : null);
+        } catch {
+          setSurgeExamSnipeData(null);
+        }
         setExamSnipes(records.map((r: any) => ({
           id: r.id,
           courseName: r.courseName,
           slug: r.slug,
           createdAt: r.createdAt,
           fileNames: r.fileNames,
+          topConcepts: extractExamSnipeConceptNames(r.results),
         })));
         await syncExamSnipeLessonsToMainCourse(records);
       } else {
+        setSurgeExamSnipeData(null);
         setExamSnipes([]);
       }
     } finally {
       setLoadingExamSnipes(false);
       setPageLoading(false); // Mark page as loaded when exam snipes finish loading
     }
-  }, [slug, syncExamSnipeLessonsToMainCourse]);
+  }, [extractExamSnipeConceptNames, slug, syncExamSnipeLessonsToMainCourse]);
 
 
   useEffect(() => {
     setPageLoading(true); // Start loading when slug changes
+    setSurgeSuggestedTopics([]);
+    setSurgeSuggestError(null);
+    setSurgeSuggestKick(0);
+    surgeSuggestAttemptedRef.current = null;
     const saved = refreshSubjectData();
     void loadExamSnipes();
 
@@ -597,6 +730,11 @@ export default function SubjectPage() {
   useEffect(() => {
     const handleFocus = async () => {
       void loadExamSnipes();
+      setPracticeMetaTick((t) => t + 1);
+      setSurgeMetaTick((t) => t + 1);
+      if (reviewsDue.length === 0 && surgeSuggestedTopics.length === 0) {
+        setSurgeSuggestKick((k) => k + 1);
+      }
     };
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
@@ -608,6 +746,7 @@ export default function SubjectPage() {
       const detail = (event as CustomEvent).detail;
       if (detail?.slug === slug) {
         refreshSubjectData();
+        setSurgeMetaTick((t) => t + 1);
         // Only reload exam snipes if the update didn't come from exam snipe sync
         // (to prevent infinite loops)
         if (!detail?.fromExamSnipeSync) {
@@ -679,16 +818,30 @@ export default function SubjectPage() {
 
   function collectAllFlashcards() {
     const saved = loadSubjectData(slug);
-    if (!saved || !saved.nodes) {
-      alert("No flashcards found. Generate flashcards from lessons first.");
+    if (!saved) {
+      alert("No flashcards found. Generate flashcards first.");
       return;
     }
+    const nodes = (saved.nodes && typeof saved.nodes === 'object' ? saved.nodes : {}) as any;
 
     const flashcards: Array<LessonFlashcard & { topicName: string; lessonTitle: string; id: string }> = [];
+
+    // Course-level flashcards (not tied to a topic)
+    if (Array.isArray((saved as any).course_flashcards) && (saved as any).course_flashcards.length > 0) {
+      (saved as any).course_flashcards.forEach((flashcard: LessonFlashcard) => {
+        const id = `__course__:Course Deck:${flashcard.prompt}`;
+        flashcards.push({
+          ...flashcard,
+          topicName: "__course__",
+          lessonTitle: "Course Deck",
+          id,
+        });
+      });
+    }
     
     // Iterate through all topics (nodes)
-    Object.keys(saved.nodes).forEach((topicName) => {
-      const node = saved.nodes[topicName];
+    Object.keys(nodes).forEach((topicName) => {
+      const node = nodes[topicName];
       if (!node || typeof node !== 'object') return;
       
       // Check if it's the new format with lessons array
@@ -711,7 +864,7 @@ export default function SubjectPage() {
     });
 
     if (flashcards.length === 0) {
-      alert("No flashcards found. Generate flashcards from lessons first.");
+      alert("No flashcards found. Generate flashcards first.");
       return;
     }
 
@@ -720,7 +873,8 @@ export default function SubjectPage() {
     setFlashcardFlipped(false);
     setShowOnlyStarred(false);
     setIsShuffleActive(false);
-    setShowFlashcardTopicList(true);
+    const uniqueTopics = Array.from(new Set(flashcards.map((f) => f.topicName)));
+    setShowFlashcardTopicList(uniqueTopics.length > 1);
     setSelectedFlashcardTopic(null);
     setAllFlashcardsModalOpen(true);
   }
@@ -985,6 +1139,469 @@ export default function SubjectPage() {
     }
   }
 
+  const surgeNext = useMemo(() => {
+    if (reviewsDue.length > 0) {
+      const count = reviewsDue.length;
+      return {
+        activeStep: "review" as const,
+        nextLabel: `Next: review ${count} lesson${count === 1 ? "" : "s"}`,
+      };
+    }
+    if (!tree?.topics?.length) {
+      return { activeStep: "learn" as const, nextLabel: "Next: extract topics, then start Surge" };
+    }
+    return { activeStep: "learn" as const, nextLabel: "Next: learn a new topic" };
+  }, [reviewsDue.length, tree?.topics?.length]);
+
+  const topicRowMetaByName = useMemo(() => {
+    const map: Record<string, { examSnipe: boolean; surge: boolean; generated: boolean }> = {};
+    for (const t of topics || []) {
+      const rawNode = nodes?.[t.name];
+      const node = rawNode && typeof rawNode === "object" ? rawNode : null;
+      const examSnipeFromMeta =
+        !!(node as any)?.examSnipeMeta ||
+        (Array.isArray((node as any)?.lessonsMeta) &&
+          (node as any).lessonsMeta.some((m: any) => String(m?.tag || m?.type || "").toLowerCase().includes("exam snipe")));
+      const surgeFromLessons =
+        Array.isArray((node as any)?.lessons) &&
+        (node as any).lessons.some((l: any) => l && typeof l === "object" && (l.origin === "surge" || !!l.surgeSessionId));
+
+      const generatedFromLessons =
+        Array.isArray((node as any)?.lessons) &&
+        (node as any).lessons.some((l: any) => {
+          const body = l && typeof l === "object" ? (l as any).body : "";
+          return typeof body === "string" && body.trim().length > 0;
+        });
+
+      map[t.name] = { examSnipe: !!examSnipeFromMeta, surge: !!surgeFromLessons, generated: !!generatedFromLessons };
+    }
+    return map;
+  }, [nodes, topics]);
+
+  const lastSurgeSession = useMemo(() => getLastSurgeSession(slug), [slug, surgeMetaTick]);
+
+  const surgeCard = useMemo(() => {
+    const uniqueReviewTopics = Array.from(new Set(reviewsDue.map((r) => r.topicName))).filter(Boolean);
+
+    if (reviewsDue.length > 0) {
+      const list = uniqueReviewTopics.slice(0, 6);
+      return {
+        mode: "review" as const,
+        headline: "Next, review:",
+        subline: list.length ? list.join(", ") : "Review what's due",
+        pills: [] as string[],
+      };
+    }
+
+    if (surgeSuggestedTopics.length > 0) {
+      const [recommended, ...other] = surgeSuggestedTopics;
+      return {
+        mode: "learn" as const,
+        headline: recommended || "Next",
+        subline: "Chad recommends starting with",
+        pills: other.slice(0, 3),
+      };
+    }
+
+    if (surgeSuggesting) {
+      return {
+        mode: "loading" as const,
+        headline: "Next",
+        subline: "Finding the best topics...",
+        pills: [] as string[],
+      };
+    }
+
+    return {
+      mode: "idle" as const,
+      headline: "Next",
+      subline: surgeSuggestError || "Start Surge to begin",
+      pills: [] as string[],
+    };
+  }, [reviewsDue, surgeSuggestedTopics, surgeSuggestError, surgeSuggesting]);
+
+  const practiceLogs = useMemo(() => {
+    if (typeof window === "undefined") return [] as any[];
+    const fromSubject = (() => {
+      try {
+        const data = loadSubjectData(slug) as StoredSubjectData | null;
+        return Array.isArray(data?.practiceLogs) ? data!.practiceLogs : [];
+      } catch {
+        return [];
+      }
+    })();
+    const fromLocalKey = (() => {
+      try {
+        const raw = window.localStorage.getItem(`atomicPracticeLog:${slug}`);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })();
+
+    const merged = [...fromSubject, ...fromLocalKey].filter((e) => e && typeof e === "object");
+    const byId = new Map<string, any>();
+    for (const entry of merged) {
+      const id = String((entry as any).id || "");
+      if (!id) continue;
+      const prev = byId.get(id);
+      if (!prev || Number((entry as any).timestamp || 0) > Number((prev as any).timestamp || 0)) {
+        byId.set(id, entry);
+      }
+    }
+    const deduped = Array.from(byId.values());
+    deduped.sort((a, b) => Number(a?.timestamp || 0) - Number(b?.timestamp || 0));
+    return deduped;
+  }, [practiceMetaTick, slug]);
+
+  const lastPracticeLabel = useMemo(() => {
+    const ts = Number(practiceLogs.length ? (practiceLogs[practiceLogs.length - 1] as any)?.timestamp : 0);
+    if (!ts) return null;
+    const diffMs = Date.now() - ts;
+    if (!Number.isFinite(diffMs) || diffMs < 0) return null;
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 2) return "Last practice: just now";
+    if (diffMin < 60) return `Last practice: ${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `Last practice: ${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    return `Last practice: ${diffDay}d ago`;
+  }, [practiceLogs]);
+
+  const practiceCard = useMemo(() => {
+    const recentTopics: string[] = [];
+    const seen = new Set<string>();
+    for (let i = practiceLogs.length - 1; i >= 0 && recentTopics.length < 3; i--) {
+      const raw = String((practiceLogs[i] as any)?.topic || "").trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      recentTopics.push(raw);
+    }
+
+    if (practiceLogs.length === 0) {
+      const topicNames = (topics || []).map((t) => t.name).filter(Boolean);
+      const ungeneratedTopic = topicNames.find((name) => !topicRowMetaByName[name]?.generated);
+      const suggestion = ungeneratedTopic || topicNames[0] || null;
+      return {
+        headline: "Practice mode",
+        subline: suggestion ? "Suggested start" : "Active recall on any topic",
+        chips: suggestion ? [suggestion] : ([] as string[]),
+        buttonLabel: "Start",
+      };
+    }
+
+    return {
+      headline: "Continue practice",
+      subline: recentTopics.length ? "Pick up where you left off" : "Review your recent topics",
+      chips: recentTopics,
+      buttonLabel: "Continue",
+    };
+  }, [practiceLogs, topicRowMetaByName, topics]);
+
+  const startSurgeLearnWithTopic = useCallback(
+    (topic: string) => {
+      const t = String(topic || "").trim();
+      if (!t) return;
+      try {
+        sessionStorage.setItem(`surge:prefillTopic:${slug}`, t);
+      } catch {}
+      router.push(`/subjects/${slug}/surge?topic=${encodeURIComponent(t)}`);
+    },
+    [router, slug],
+  );
+
+  useEffect(() => {
+    if (!slug) return;
+    if (reviewsDue.length > 0) return;
+    if (surgeSuggestedTopics.length > 0) return;
+    if (surgeSuggesting) return;
+    const attemptKey = `${slug}:${surgeSuggestKick}:${isAuthenticated ? 1 : 0}:${hasPremiumAccess ? 1 : 0}`;
+    if (surgeSuggestAttemptedRef.current === attemptKey) return;
+
+    surgeSuggestAttemptedRef.current = attemptKey;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      try { controller.abort(); } catch {}
+    }, 25_000);
+
+    (async () => {
+      const fallbackTopics = () => {
+        const out: string[] = [];
+        const seen = new Set<string>();
+
+        // Prefer exam snipe concepts if available
+        try {
+          const results = surgeExamSnipeData ? JSON.parse(surgeExamSnipeData) : null;
+          const concepts = Array.isArray(results?.concepts) ? results.concepts : [];
+          for (const c of concepts) {
+            const name = String(c?.name || "").trim();
+            if (!name) continue;
+            const key = name.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(name);
+            if (out.length >= 4) break;
+          }
+        } catch {}
+
+        const topicNames = (topics || []).map((t) => t.name).filter(Boolean);
+        for (const name of topicNames) {
+          const key = name.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push(name);
+          if (out.length >= 4) break;
+        }
+
+        return out.slice(0, 4);
+      };
+
+      try {
+        setSurgeSuggesting(true);
+        setSurgeSuggestError(null);
+
+        const fallback = fallbackTopics();
+        if (!isAuthenticated) {
+          if (fallback.length) setSurgeSuggestedTopics(fallback);
+          setSurgeSuggestError("Log in to get AI topic suggestions.");
+          return;
+        }
+        if (!hasPremiumAccess) {
+          if (fallback.length) setSurgeSuggestedTopics(fallback);
+          setSurgeSuggestError(fallback.length ? null : "This feature requires Premium access.");
+          return;
+        }
+
+        const data = loadSubjectData(slug) as StoredSubjectData | null;
+        const courseLanguageName =
+          data?.course_language_name ||
+          (data?.course_language_code ? data.course_language_code.toUpperCase() : null);
+        const courseName = data?.subject || subjectName || slug;
+
+        const lines: string[] = [];
+        lines.push(`SURGE MODE ACTIVE FOR COURSE "${courseName}" (slug: ${slug})`);
+        lines.push("");
+        lines.push("CURRENT PHASE: LEARN - Suggesting a new topic");
+        lines.push("");
+        lines.push("INITIAL STEP - TOPIC SELECTION:");
+        lines.push("- Use COURSE CONTEXT, AVAILABLE TOPICS, EXAM SNIPE ANALYSIS, and PAST SURGE SESSIONS");
+        lines.push("- Suggest exactly 4 topics that would provide maximum study value for this course");
+        lines.push("- Prioritize: (1) Exam snipe concepts not yet covered, (2) Course topics not yet learned");
+        lines.push("- Use specific, actionable, exam-ready topics. Avoid broad categories.");
+        if (courseLanguageName) {
+          lines.push(`- LANGUAGE REQUIREMENT: Output topic names exactly as they appear in ${courseLanguageName}. Do NOT translate.`);
+        }
+        lines.push("");
+        lines.push("COURSE CONTEXT:");
+        lines.push(data?.course_context ? data.course_context : "No course summary available.");
+        lines.push("");
+        lines.push("COURSE FILES (first 20k chars):");
+        if (data?.combinedText) {
+          lines.push(data.combinedText.slice(0, 20000));
+        } else {
+          lines.push("No course files available.");
+        }
+        lines.push("");
+        lines.push("AVAILABLE TOPICS:");
+        const availableTopics = (topics && topics.length > 0 ? topics : (Array.isArray(data?.topics) ? data!.topics : [])) as TopicMeta[];
+        if (availableTopics.length > 0) {
+          for (const t of availableTopics) {
+            lines.push(`- ${t.name}${t.summary ? ` - ${t.summary}` : ""}`);
+          }
+        } else {
+          lines.push("No topics available.");
+        }
+        lines.push("");
+        lines.push("EXAM SNIPE ANALYSIS:");
+        lines.push(surgeExamSnipeData ? surgeExamSnipeData : "No exam snipe analysis available.");
+        lines.push("");
+        lines.push("PAST SURGE SESSIONS:");
+        if (lastSurgeSession?.summary) {
+          lines.push(lastSurgeSession.summary);
+        } else {
+          lines.push("No past Surge sessions available.");
+        }
+        if (practiceLogs.length > 0) {
+          lines.push("");
+          lines.push("Practice log (last 20 entries):");
+          practiceLogs.slice(-20).forEach((entry: any) => {
+            lines.push(`[${String(entry?.topic || "")}] Q: ${String(entry?.question || "")} | A: ${String(entry?.answer || "")} | Grade: ${Number(entry?.grade ?? 0)}/10`);
+          });
+        }
+        lines.push("");
+
+        const context = lines.join("\n");
+        const systemPrompt =
+          "You must output exactly 4 topic suggestions.\n" +
+          "Format:\n" +
+          "TOPIC_SUGGESTION: Topic Name 1\n" +
+          "TOPIC_SUGGESTION: Topic Name 2\n" +
+          "TOPIC_SUGGESTION: Topic Name 3\n" +
+          "TOPIC_SUGGESTION: Topic Name 4\n\n" +
+          "Do not write anything else. No explanations, no introductions, no dashes, no bullets. Just those 4 lines starting with TOPIC_SUGGESTION.";
+
+        const res = await fetch("/api/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            context,
+            messages: [{ role: "system", content: systemPrompt }],
+            path: `/subjects/${slug}`,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!res.ok || !res.body) {
+          const errJson = await res.json().catch(() => ({}));
+          throw new Error(errJson?.error || `Chat failed (${res.status})`);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let accumulated = "";
+        let finalTopics: string[] = [];
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+          const chunk = decoder.decode(value, { stream: true });
+          for (const line of chunk.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            const payload = line.slice(6);
+            if (!payload) continue;
+            if (payload === "[DONE]") {
+              break;
+            }
+            try {
+              const parsed = JSON.parse(payload);
+              if (parsed.type === "text") {
+                accumulated += String(parsed.content || "");
+                const topicsNow = extractSurgeTopicSuggestions(accumulated, 4);
+                if (topicsNow.length >= 4) {
+                  finalTopics = topicsNow;
+                  try { await reader.cancel(); } catch {}
+                  break;
+                }
+              } else if (parsed.type === "error") {
+                throw new Error(parsed.error || "Chat error");
+              }
+            } catch {
+              // Ignore malformed SSE chunks
+            }
+          }
+          if (finalTopics.length >= 4) break;
+        }
+
+        if (!finalTopics.length) {
+          finalTopics = extractSurgeTopicSuggestions(accumulated, 4);
+        }
+        const recentSurgeTopics = (() => {
+          try {
+            const log = getSurgeLog(slug);
+            const topics = log
+              .slice(-20)
+              .map((e) => String(e?.newTopic || "").trim())
+              .filter(Boolean);
+            return new Set(topics.map((t) => t.toLowerCase()));
+          } catch {
+            return new Set<string>();
+          }
+        })();
+
+        const normalizedUnique = (arr: string[]) => {
+          const out: string[] = [];
+          const seen = new Set<string>();
+          for (const s of arr) {
+            const t = String(s || "").trim();
+            if (!t) continue;
+            const key = t.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(t);
+          }
+          return out;
+        };
+
+        const rawFinal = finalTopics.length ? finalTopics : fallbackTopics();
+        let filtered = normalizedUnique(rawFinal).filter((t) => !recentSurgeTopics.has(t.toLowerCase()));
+        if (filtered.length < 4) {
+          const fill = normalizedUnique(fallbackTopics()).filter((t) => !recentSurgeTopics.has(t.toLowerCase()));
+          for (const t of fill) {
+            if (filtered.length >= 4) break;
+            if (!filtered.some((x) => x.toLowerCase() === t.toLowerCase())) filtered.push(t);
+          }
+        }
+
+        if (filtered.length) setSurgeSuggestedTopics(filtered.slice(0, 4));
+      } catch (e: any) {
+        if (e?.name === "AbortError") {
+          const final = fallbackTopics();
+          if (final.length) setSurgeSuggestedTopics(final);
+          else setSurgeSuggestError("Timed out getting suggestions.");
+          return;
+        }
+        console.warn("Failed to fetch Surge topic suggestions:", e);
+        const final = fallbackTopics();
+        if (final.length) setSurgeSuggestedTopics(final);
+        else setSurgeSuggestError(e?.message || "Failed to fetch topic suggestions.");
+      } finally {
+        clearTimeout(timeoutId);
+        setSurgeSuggesting(false);
+      }
+    })();
+
+    return () => {
+      clearTimeout(timeoutId);
+      try { controller.abort(); } catch {}
+      setSurgeSuggesting(false);
+    };
+  }, [
+    extractSurgeTopicSuggestions,
+    lastSurgeSession?.summary,
+    reviewsDue.length,
+    slug,
+    subjectName,
+    surgeExamSnipeData,
+    surgeSuggestedTopics.length,
+    surgeSuggesting,
+    practiceMetaTick,
+    (topics || []).length,
+    hasPremiumAccess,
+    isAuthenticated,
+    surgeSuggestKick,
+    surgeMetaTick,
+  ]);
+
+  const lastSurgeLabel = useMemo(() => {
+    const ts = lastSurgeSession?.timestamp;
+    if (!ts) return null;
+    const diffMs = Date.now() - ts;
+    if (!Number.isFinite(diffMs) || diffMs < 0) return null;
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 2) return "Last Surge: just now";
+    if (diffMin < 60) return `Last Surge: ${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `Last Surge: ${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    return `Last Surge: ${diffDay}d ago`;
+  }, [lastSurgeSession?.timestamp]);
+
+  // If a new Surge session happens, refresh topic suggestions so we don't keep showing old recommendations.
+  useEffect(() => {
+    if (!slug) return;
+    if (reviewsDue.length > 0) return;
+    if (!lastSurgeSession?.timestamp) return;
+    if (surgeSuggestedTopics.length === 0) return;
+    setSurgeSuggestedTopics([]);
+    surgeSuggestAttemptedRef.current = null;
+    setSurgeSuggestKick((k) => k + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastSurgeSession?.timestamp]);
+
   // Show loading spinner while initial data is loading
   if (pageLoading) {
     return (
@@ -996,7 +1613,7 @@ export default function SubjectPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-[var(--background)]">
-      <div className="mx-auto w-full max-w-3xl px-6 py-8">
+      <div className="mx-auto w-full max-w-6xl px-6 py-8">
         {(generatingBasics || loading) && (
           <div className="fixed inset-0 z-[9998] flex flex-col items-center justify-center bg-[var(--background)]/80 backdrop-blur-sm">
             <GlowSpinner size={160} ariaLabel="Extracting topics" idSuffix="subject-extract" />
@@ -1006,7 +1623,7 @@ export default function SubjectPage() {
           </div>
         )}
         {/* Reviews Due Banner */}
-        {reviewsDue.length > 0 && (
+        {false && reviewsDue.length > 0 && (
           <div className="mb-6 rounded-xl border border-[#00E5FF] border-opacity-30 bg-[#00E5FF] bg-opacity-10 p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -1046,7 +1663,7 @@ export default function SubjectPage() {
         )}
         
         {/* Upcoming Reviews Info */}
-        {upcomingReviews.length > 0 && reviewsDue.length === 0 && (
+        {false && upcomingReviews.length > 0 && reviewsDue.length === 0 && (
           <div className="mb-6 rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4">
             <div className="text-sm text-[var(--foreground)]">📅 {upcomingReviews.length} upcoming review{upcomingReviews.length > 1 ? 's' : ''} in the next 7 days</div>
             <div className="text-xs text-[#A7AFBE] mt-1">Keep up the great work!</div>
@@ -1054,7 +1671,7 @@ export default function SubjectPage() {
         )}
 
         {/* Course Header with Exam Date */}
-        <div className="mb-6 flex items-center justify-between gap-4">
+        <div className="mb-4 flex items-center justify-between gap-4">
           <h1 className="text-2xl font-bold text-[var(--foreground)]">{subjectName || slug}</h1>
           {daysLeft !== null && (
             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--foreground)]/5 border border-[var(--foreground)]/15 text-[var(--foreground)]/70">
@@ -1063,9 +1680,436 @@ export default function SubjectPage() {
           )}
         </div>
 
-        {activeTab === 'tree' && (
+        {/* Course layout: topics left, actions right */}
+        <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start">
+          <aside className="space-y-4">
+            <div className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-[var(--foreground)]">Topics</div>
+                {isAuthenticated && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--foreground)]/15 text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/25 transition-colors"
+                      onClick={() => { setNewTopicValue(""); setNewTopicOpen(true); }}
+                      aria-label="New topic"
+                      title="New topic"
+                    >
+                      +
+                    </button>
+                    <button
+                      className="inline-flex h-8 items-center rounded-full px-3 text-xs font-medium text-white hover:opacity-95 synapse-style disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ color: "white" }}
+                      disabled={!hasPremiumAccess}
+                      title={!hasPremiumAccess ? "Requires Premium access" : "Extract topics from course files"}
+                      onClick={handleExtractTopics}
+                    >
+                      Extract
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  onClick={collectAllFlashcards}
+                  className="inline-flex h-8 items-center rounded-full border border-[var(--foreground)]/15 bg-[var(--background)] px-3 text-xs font-medium text-[var(--foreground)]/75 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/25 transition-colors"
+                >
+                  Flashcards
+                </button>
+                <button
+                  onClick={collectAllHighlights}
+                  className="inline-flex h-8 items-center rounded-full border border-[var(--foreground)]/15 bg-[var(--background)] px-3 text-xs font-medium text-[var(--foreground)]/75 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/25 transition-colors"
+                >
+                  Highlights
+                </button>
+              </div>
+
+              {topics && topics.length > 0 ? (
+                <div className="mt-3 overflow-hidden rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]">
+                  <ul className="max-h-[calc(100vh-260px)] divide-y divide-[var(--foreground)]/10 overflow-auto">
+                    {topics.map((t, i) => {
+                      const href = `/subjects/${slug}/node/${encodeURIComponent(t.name)}`;
+                      const meta = topicRowMetaByName[t.name];
+                      const isGenerated = !!meta?.generated;
+                      const isPending = pendingTopicNav === t.name && isTopicNavPending;
+                      return (
+                        <li key={`${t.name}-${i}`}>
+                          <Link
+                            href={href}
+                            prefetch
+                            onMouseEnter={() => {
+                              try { router.prefetch(href); } catch {}
+                            }}
+                            onClick={(e) => {
+                              if (e.defaultPrevented) return;
+                              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                              e.preventDefault();
+                              setPendingTopicNav(t.name);
+                              startTopicNavTransition(() => router.push(href));
+                            }}
+                            className="block px-3 py-2.5 hover:bg-[var(--foreground)]/5 transition-colors"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className={["min-w-0 truncate text-sm font-medium", isGenerated ? "text-[var(--foreground)]" : "text-[var(--foreground)]/15"].join(" ")}>
+                                {t.name}
+                              </div>
+                              <div className="flex shrink-0 items-center gap-1.5">
+                                {(meta?.examSnipe || meta?.surge) && (
+                                  <span className="flex items-center gap-1">
+                                    {meta?.examSnipe && (
+                                      <span className="rounded-full border border-[var(--accent-pink)]/25 bg-[var(--accent-pink)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent-pink)]/90">
+                                        Exam Snipe
+                                      </span>
+                                    )}
+                                    {meta?.surge && (
+                                      <span className="rounded-full border border-[var(--accent-cyan)]/25 bg-[var(--accent-cyan)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent-cyan)]/90">
+                                        Surge
+                                      </span>
+                                    )}
+                                  </span>
+                                )}
+                                {isPending && (
+                                  <span className="h-3 w-3 animate-spin rounded-full border border-[var(--foreground)]/30 border-t-[var(--foreground)]/70" />
+                                )}
+                              </div>
+                            </div>
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : (
+                <div className="mt-3 rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)] p-3 text-sm text-[var(--foreground)]/65">
+                  No topics yet.
+                </div>
+              )}
+            </div>
+          </aside>
+
+          <main className="space-y-4">
+            <div className="grid gap-4 lg:grid-cols-2">
+            <div className="relative overflow-hidden rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-5 shadow-sm">
+              <div
+                className="pointer-events-none absolute -inset-10 opacity-60 blur-3xl"
+                style={{ background: "radial-gradient(circle at 30% 20%, rgba(0,229,255,0.16), transparent 60%), radial-gradient(circle at 70% 50%, rgba(255,45,150,0.10), transparent 60%)" }}
+              />
+              <div className="relative">
+                <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--foreground)]/55">Surge</div>
+                {surgeCard.mode === "learn" ? (
+                  <>
+                    <div className="mt-2 text-sm font-semibold text-[var(--foreground)]">Select a topic to start</div>
+                    <div className="mt-3 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--foreground)]/55">
+                      Chad recommends
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => startSurgeLearnWithTopic(surgeCard.headline)}
+                      className="mt-2 w-full rounded-2xl border border-[var(--foreground)]/15 bg-[var(--foreground)]/5 px-4 py-3 text-left text-sm font-semibold text-[var(--foreground)] hover:bg-[var(--foreground)]/8 transition-colors"
+                    >
+                      <span className="block truncate">{surgeCard.headline}</span>
+                    </button>
+
+                    <div className="mt-4 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--foreground)]/55">
+                      Or pick one
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {surgeCard.pills.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => startSurgeLearnWithTopic(t)}
+                          className="inline-flex items-center rounded-full border border-[var(--foreground)]/15 bg-[var(--foreground)]/5 px-3 py-1 text-xs font-medium text-[var(--foreground)]/80 hover:bg-[var(--foreground)]/8 transition-colors"
+                        >
+                          {t}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setSurgeCustomTopicOpen((v) => !v)}
+                        className="inline-flex items-center rounded-full border border-[var(--foreground)]/15 bg-[var(--foreground)]/5 px-3 py-1 text-xs font-medium text-[var(--foreground)]/80 hover:bg-[var(--foreground)]/8 transition-colors"
+                      >
+                        + Custom topic
+                      </button>
+                    </div>
+                    {surgeCustomTopicOpen ? (
+                      <div className="mt-3 flex items-center gap-2">
+                        <input
+                          value={surgeCustomTopicValue}
+                          onChange={(e) => setSurgeCustomTopicValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              startSurgeLearnWithTopic(surgeCustomTopicValue);
+                            }
+                          }}
+                          placeholder="Enter a topic…"
+                          className="h-10 w-full rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)] px-3 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => startSurgeLearnWithTopic(surgeCustomTopicValue)}
+                          className="synapse-style inline-flex h-10 shrink-0 items-center justify-center rounded-xl px-4 text-sm font-semibold !text-white hover:opacity-95 transition-opacity"
+                        >
+                          Start
+                        </button>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <div className="mt-2 text-base font-semibold text-[var(--foreground)]">{surgeCard.headline}</div>
+                    <div className="mt-1 text-sm text-[var(--foreground)]/65">{surgeCard.subline}</div>
+                  </>
+                )}
+                {lastSurgeLabel ? (
+                  <div className="mt-2 text-xs text-[var(--foreground)]/50">{lastSurgeLabel}</div>
+                ) : null}
+
+                {surgeCard.mode !== "learn" ? (
+                  <button
+                    onClick={() => router.push(`/subjects/${slug}/surge`)}
+                    className="synapse-style mt-4 inline-flex h-12 w-full items-center justify-center rounded-2xl px-6 text-base font-semibold !text-white transition-opacity hover:opacity-95"
+                  >
+                    Start
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="relative overflow-hidden rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-5 shadow-sm">
+              <div
+                className="pointer-events-none absolute -inset-10 opacity-60 blur-3xl"
+                style={{ background: "radial-gradient(circle at 30% 20%, rgba(0,229,255,0.16), transparent 60%), radial-gradient(circle at 70% 50%, rgba(255,45,150,0.10), transparent 60%)" }}
+              />
+              <div className="relative">
+                <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--foreground)]/55">Practice</div>
+                <div className="mt-2 text-base font-semibold text-[var(--foreground)]">{practiceCard.headline}</div>
+                <div className="mt-1 text-sm text-[var(--foreground)]/65">{practiceCard.subline}</div>
+                {lastPracticeLabel ? (
+                  <div className="mt-2 text-xs text-[var(--foreground)]/50">{lastPracticeLabel}</div>
+                ) : null}
+
+                {practiceCard.chips.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {practiceCard.chips.map((c) => (
+                      <span
+                        key={c}
+                        className="inline-flex items-center rounded-full border border-[var(--foreground)]/15 bg-[var(--foreground)]/5 px-2.5 py-1 text-xs font-medium text-[var(--foreground)]/75"
+                      >
+                        {c}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+
+                <button
+                  onClick={() => router.push(`/subjects/${slug}/practice`)}
+                  className="synapse-style mt-4 inline-flex h-12 w-full items-center justify-center rounded-2xl px-6 text-base font-semibold !text-white transition-opacity hover:opacity-95"
+                >
+                  {practiceCard.buttonLabel}
+                </button>
+              </div>
+            </div>
+            </div>
+
+            <div className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold text-[var(--foreground)]">Exam Snipe</div>
+                {examSnipes.length > 0 && (
+                  <button
+                    onClick={() => router.push(`/subjects/${slug}/examsnipe`)}
+                    className="inline-flex h-8 items-center rounded-full border border-[var(--foreground)]/15 bg-[var(--background)] px-3 text-xs font-medium text-[var(--foreground)]/75 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/25 transition-colors"
+                  >
+                    View all
+                  </button>
+                )}
+              </div>
+              {loadingExamSnipes ? (
+                <div className="mt-3 text-sm text-[var(--foreground)]/60">Loading…</div>
+              ) : examSnipes.length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  {examSnipes[0]?.topConcepts?.length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {examSnipes[0].topConcepts.slice(0, 6).map((c) => (
+                        <span
+                          key={c}
+                          className="inline-flex items-center rounded-full border border-[var(--foreground)]/15 bg-[var(--foreground)]/5 px-2.5 py-1 text-xs font-medium text-[var(--foreground)]/75"
+                        >
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <button
+                    onClick={() => router.push(`/subjects/${slug}/examsnipe?examSnipeSlug=${encodeURIComponent(examSnipes[0].slug)}`)}
+                    className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)] px-4 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/25 transition-colors"
+                  >
+                    View
+                  </button>
+                  {examSnipes.slice(0, 1).map((examSnipe) => (
+                    <button
+                      key={examSnipe.id}
+                      onClick={() => router.push(`/subjects/${slug}/examsnipe?examSnipeSlug=${encodeURIComponent(examSnipe.slug)}`)}
+                      className="w-full rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)] px-3 py-2 text-left hover:border-[var(--foreground)]/20 hover:bg-[var(--foreground)]/5 transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium text-[var(--foreground)]">{examSnipe.courseName}</div>
+                          <div className="mt-0.5 text-xs text-[var(--foreground)]/55">
+                            {new Date(examSnipe.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" })} · {examSnipe.fileNames.length} file{examSnipe.fileNames.length === 1 ? "" : "s"}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-xs font-medium text-[var(--accent-cyan)]/80">Open</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 text-sm text-[var(--foreground)]/60">No exam snipes yet.</div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 shadow-sm">
+              <div className="text-sm font-semibold text-[var(--foreground)]">Notes</div>
+              <textarea
+                value={courseNotes}
+                onChange={(e) => {
+                  if (!e.target) return;
+                  setCourseNotes(e.target.value);
+                  try {
+                    const data = loadSubjectData(slug) as StoredSubjectData | null;
+                    if (data) {
+                      data.course_notes = e.target.value;
+                      saveSubjectData(slug, data);
+                    }
+                  } catch {}
+                }}
+                onTouchStart={(e) => {
+                  e.currentTarget.focus();
+                }}
+                rows={10}
+                className="mt-3 w-full resize-y rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)] p-3 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none -webkit-user-select-text -webkit-touch-callout-none -webkit-appearance-none"
+                placeholder="Write course notes…"
+                tabIndex={0}
+                style={{
+                  WebkitUserSelect: 'text',
+                  WebkitTouchCallout: 'none',
+                  WebkitAppearance: 'none'
+                }}
+              />
+            </div>
+          </main>
+        </div>
+
+        {false && (
+          <>
+        {/* Surge: default workflow */}
+        <div className="mb-6 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--foreground)]/55">Surge</div>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <div className="text-sm text-[var(--foreground)]/75">{surgeNext.nextLabel}</div>
+                {reviewsDue.length > 0 ? (
+                  <span className="inline-flex items-center rounded-full border border-[var(--accent-cyan)]/25 bg-[var(--accent-cyan)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-cyan)]/90">
+                    {reviewsDue.length} due
+                  </span>
+                ) : upcomingReviews.length > 0 ? (
+                  <span className="inline-flex items-center rounded-full border border-[var(--foreground)]/15 bg-[var(--foreground)]/5 px-2.5 py-1 text-xs font-medium text-[var(--foreground)]/70">
+                    {upcomingReviews.length} upcoming
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            <button
+              onClick={() => router.push(`/subjects/${slug}/surge`)}
+              className="synapse-style inline-flex h-10 shrink-0 items-center justify-center rounded-full px-5 text-sm font-semibold !text-white transition-opacity hover:opacity-95"
+            >
+              Start
+            </button>
+          </div>
+        </div>
+
+        {/* Surge: legacy detailed box (hidden) */}
+        <div className="hidden mb-6 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-5 shadow-sm">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--foreground)]/55">Surge</div>
+              <div className="mt-1 text-lg font-semibold text-[var(--foreground)]">Review → Learn → Quiz</div>
+              <div className="mt-1 text-sm text-[var(--foreground)]/65">{surgeNext.nextLabel}</div>
+            </div>
+            <button
+              onClick={() => router.push(`/subjects/${slug}/surge`)}
+              className="synapse-style inline-flex h-11 items-center justify-center rounded-full px-6 text-sm font-semibold !text-white transition-opacity hover:opacity-95"
+            >
+              Start Surge
+            </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            {[
+              { key: "review" as const, title: "Review", body: "Old topics due now." },
+              { key: "learn" as const, title: "Learn", body: "One new topic." },
+              { key: "quiz" as const, title: "Quiz", body: "Check it sticks." },
+            ].map((step) => {
+              const isActive = surgeNext.activeStep === step.key;
+              return (
+                <div
+                  key={step.key}
+                  className={`rounded-xl border p-3 ${
+                    isActive
+                      ? "border-[var(--foreground)]/25 bg-[var(--foreground)]/5"
+                      : "border-[var(--foreground)]/10 bg-[var(--background)]"
+                  }`}
+                >
+                  <div className="text-sm font-medium text-[var(--foreground)]">{step.title}</div>
+                  <div className="mt-0.5 text-xs text-[var(--foreground)]/60">{step.body}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {(reviewsDue.length > 0 || (upcomingReviews.length > 0 && reviewsDue.length === 0)) && (
+            <div className="mt-4 rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)] p-3">
+              {reviewsDue.length > 0 ? (
+                <>
+                  <div className="text-xs font-medium text-[var(--foreground)]/80">
+                    {reviewsDue.length} lesson{reviewsDue.length === 1 ? "" : "s"} due for review
+                  </div>
+                  <div className="mt-2 space-y-1">
+                    {reviewsDue.slice(0, 3).map((review, idx) => (
+                      <Link
+                        key={idx}
+                        href={`/subjects/${slug}/node/${encodeURIComponent(review.topicName)}`}
+                        className="block text-xs text-[var(--foreground)]/70 hover:text-[var(--foreground)] transition-colors"
+                      >
+                        {review.topicName} · Lesson {review.lessonIndex + 1}
+                      </Link>
+                    ))}
+                    {reviewsDue.length > 3 && (
+                      <div className="text-xs text-[var(--foreground)]/45">+ {reviewsDue.length - 3} more</div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="text-xs text-[var(--foreground)]/65">
+                  {upcomingReviews.length} upcoming review{upcomingReviews.length === 1 ? "" : "s"} in the next 7 days
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <details className="mt-10 rounded-2xl border border-[var(--foreground)]/10 bg-[var(--background)]/30 p-4">
+          <summary className="cursor-pointer list-none text-sm font-medium text-[var(--foreground)]/75 hover:text-[var(--foreground)] transition-colors">
+            Advanced
+          </summary>
+          <div className="mt-4 grid gap-6 lg:grid-cols-[1fr,340px] lg:items-start">
+          <div className="min-w-0">
+            {activeTab === 'tree' && (
           <div className="mt-4">
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="hidden mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
               <button
                 onClick={collectAllFlashcards}
                 className="pill-button w-full sm:w-auto inline-flex h-9 items-center justify-center rounded-full px-4 text-xs font-medium border border-[var(--foreground)]/10 text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors"
@@ -1115,55 +2159,7 @@ export default function SubjectPage() {
                       style={{ color: "white" }}
                       disabled={!hasPremiumAccess}
                       title={!hasPremiumAccess ? "Requires Premium access" : "Extract topics from course files"}
-                      onClick={async () => {
-                        if (!hasPremiumAccess) {
-                          alert("This feature requires Premium access");
-                          return;
-                        }
-                        try {
-                          setLoading(true);
-                          const saved = loadSubjectData(slug) as StoredSubjectData | null;
-                          
-                          // Ensure we have fileIds or fallback to using files/combinedText
-                          const fileIds = saved?.course_file_ids || [];
-                          const contextText = [
-                            saved?.course_context || '', 
-                            saved?.combinedText || ''
-                          ].filter(Boolean).join('\n\n');
-                          
-                          console.log(`[extract-topics] Using ${fileIds.length} file IDs and ${contextText.length} chars of context`);
-                          
-                          const res = await fetch('/api/extract-by-ids', {
-                            method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              subject: subjectName || slug,
-                              fileIds: fileIds,
-                              contextText: contextText
-                            })
-                          });
-                          const json = await res.json().catch(() => ({}));
-                          try { console.log('Extract-by-ids debug:', { filesRead: json?.debug?.filesRead, combinedLength: json?.debug?.combinedLength, combinedPreview: (json?.combinedText || '').slice(0, 500) }); } catch {}
-                          if (!res.ok || !json?.ok) throw new Error(json?.error || `Server error (${res.status})`);
-                          const gotTopics: TopicMeta[] = json.data?.topics || [];
-                          setTopics(gotTopics);
-                          const nextTree = { subject: subjectName || slug, topics: gotTopics.map((t: any) => ({ name: t.name, subtopics: [] })) } as any;
-                          setTree(nextTree);
-                          if (saved) {
-                            saved.topics = gotTopics;
-                            saved.tree = nextTree;
-                            // Save detected course language if provided
-                            if (json.detected_language_code && json.detected_language_name) {
-                              saved.course_language_code = json.detected_language_code;
-                              saved.course_language_name = json.detected_language_name;
-                            }
-                            saveSubjectData(slug, saved);
-                          }
-                        } catch (e: any) {
-                          setError(e?.message || 'Failed to generate topics');
-                        } finally {
-                          setLoading(false);
-                        }
-                      }}
+                      onClick={handleExtractTopics}
                     >
                       <span style={{ color: '#ffffff', position: 'relative', zIndex: 101, opacity: 1, textShadow: 'none' }}>
                         Extract Topics
@@ -1171,7 +2167,7 @@ export default function SubjectPage() {
                     </button>
                   </>
                 )}
-                {subscriptionLevel === "Tester" && tree && tree.topics && tree.topics.length > 0 && (
+                {subscriptionLevel === "Tester" && (tree?.topics?.length || 0) > 0 && (
                   <button
                     onClick={async () => {
                       if (!window.confirm("Are you sure you want to clear all topics? This action cannot be undone.")) return;
@@ -1203,9 +2199,9 @@ export default function SubjectPage() {
                 )}
               </div>
             </div>
-            {tree && tree.topics && tree.topics.length > 0 ? (
+            {(tree?.topics?.length || 0) > 0 ? (
               <ul className="divide-y divide-[var(--foreground)]/10 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]">
-                {[...tree.topics].sort((a, b) => {
+                {[...tree!.topics].sort((a, b) => {
                   const aGen = !!(Array.isArray(nodes?.[a.name]?.lessons) && nodes[a.name].lessons.length > 0);
                   const bGen = !!(Array.isArray(nodes?.[b.name]?.lessons) && nodes[b.name].lessons.length > 0);
                   if (aGen && !bGen) return -1; // Generated first
@@ -1222,8 +2218,8 @@ export default function SubjectPage() {
                     nodes[name].lessons.some((lesson: any) => lesson?.origin === "exam-snipe");
                   const isGenerating = !!nodeGenerating[name];
                   const isFirst = i === 0;
-                  const isLast = i === tree.topics.length - 1;
-                  const isOnly = tree.topics.length === 1;
+                  const isLast = i === tree!.topics.length - 1;
+                  const isOnly = tree!.topics.length === 1;
                   const roundedClass = isOnly ? "rounded-t-2xl rounded-b-2xl" : isFirst ? "rounded-t-2xl" : isLast ? "rounded-b-2xl" : "";
                   // Determine if any lesson quiz is completed (has results for all questions)
                   let quizCompleted = false;
@@ -1565,13 +2561,13 @@ export default function SubjectPage() {
                     <div className="space-y-4">
                       <div>
                         <div className="text-xs font-medium text-[var(--foreground)]/70 mb-1">Topic Name</div>
-                        <div className="text-base font-semibold text-[var(--foreground)]">{topicData.name}</div>
+                        <div className="text-base font-semibold text-[var(--foreground)]">{topicData!.name}</div>
                       </div>
 
-                      {topicData.summary && (
+                      {topicData!.summary && (
                         <div>
                           <div className="text-xs font-medium text-[var(--foreground)]/70 mb-1">Summary</div>
-                          <div className="text-sm text-[var(--foreground)]/90">{topicData.summary}</div>
+                          <div className="text-sm text-[var(--foreground)]/90">{topicData!.summary}</div>
                         </div>
                       )}
 
@@ -1579,7 +2575,7 @@ export default function SubjectPage() {
                       <div className="pt-4 border-t border-[var(--foreground)]/10">
                         <div className="text-xs font-medium text-[var(--foreground)]/70 mb-2">Raw Data (JSON)</div>
                         <pre className="text-xs bg-[var(--background)]/60 border border-[var(--foreground)]/10 rounded-lg p-3 overflow-auto max-h-48 text-[var(--foreground)]/80">
-                          {JSON.stringify(topicData, null, 2)}
+                          {JSON.stringify(topicData!, null, 2)}
                         </pre>
                       </div>
                     </div>
@@ -1708,74 +2704,93 @@ export default function SubjectPage() {
 
         {activeTab === 'topics' && (
           <>
-            <div className="mt-6 flex gap-3">
-              <button
-                onClick={collectAllFlashcards}
-                className="flex-1 rounded-xl bg-gradient-to-r from-[var(--accent-cyan)]/10 to-[var(--accent-pink)]/10 hover:from-[var(--accent-cyan)]/20 hover:to-[var(--accent-pink)]/20 transition-all py-3 px-6 flex items-center justify-center text-base font-semibold text-[var(--foreground)]"
-              >
-                Flashcards
-              </button>
-              <button
-                onClick={collectAllHighlights}
-                className="flex-1 rounded-xl bg-gradient-to-r from-[var(--accent-cyan)]/10 to-[var(--accent-pink)]/10 hover:from-[var(--accent-cyan)]/20 hover:to-[var(--accent-pink)]/20 transition-all py-3 px-6 flex items-center justify-center gap-2 text-base font-semibold text-[var(--foreground)]"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                </svg>
-                Highlights
-              </button>
-            </div>
             {topics ? (
               <>
-                <div className="mt-4">
-              <input
-                value={query}
-                onChange={(e) => { if (!e.target) return; setQuery(e.target.value); }}
-                placeholder="Search topics..."
-                className="w-full rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/50 focus:outline-none"
-              />
-            </div>
-            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {topics
-                .filter((t) =>
-                  query.trim() ? (t.name + " " + (t.summary || "")).toLowerCase().includes(query.toLowerCase()) : true
-                )
-                .map((t, i) => {
-                  const p = progress[t.name];
-                  const pct = p && p.totalLessons > 0 ? Math.round((p.completedLessons / p.totalLessons) * 100) : 0;
-                  return (
-                    <div
-                      key={`${t.name}-${i}`}
-                      className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 cursor-pointer"
-                      role="link"
-                      tabIndex={0}
-                      onClick={() => router.push(`/subjects/${slug}/node/${encodeURIComponent(t.name)}`)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          router.push(`/subjects/${slug}/node/${encodeURIComponent(t.name)}`);
-                        }
-                      }}
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-semibold text-[var(--foreground)]">
+                    Topics <span className="text-[var(--foreground)]/50 font-normal">({(topics || []).length})</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={collectAllFlashcards}
+                      className="inline-flex h-9 items-center rounded-full border border-[var(--foreground)]/15 bg-[var(--background)] px-4 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/25 transition-colors"
                     >
-                      <div className="flex h-full flex-col gap-3">
-                        <div className="min-h-[48px]">
-                          <span className="block text-base font-semibold text-[var(--foreground)] hover:underline">{t.name}</span>
-                          <div className="mt-1 truncate text-sm text-[#A7AFBE]" title={t.summary}>{t.summary}</div>
-                        </div>
-                        <div className="mt-1">
-                          <div className="mb-1 flex items-center justify-between text-xs text-[#9AA3B2]">
-                            <span>Progress</span>
-                            <span>{pct}%</span>
-                          </div>
-                          <div className="h-2 w-full rounded-full bg-[#1A2230]">
-                            <div className="h-2 rounded-full synapse-style" style={{ width: `${pct}%` }} />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
+                      Flashcards
+                    </button>
+                    <button
+                      onClick={collectAllHighlights}
+                      className="inline-flex h-9 items-center rounded-full border border-[var(--foreground)]/15 bg-[var(--background)] px-4 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/25 transition-colors"
+                    >
+                      Highlights
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <input
+                    value={query}
+                    onChange={(e) => { if (!e.target) return; setQuery(e.target.value); }}
+                    placeholder="Filter topics…"
+                    className="w-full rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--foreground)]/45 focus:outline-none"
+                  />
+                </div>
+
+                <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]">
+                  <ul className="divide-y divide-[var(--foreground)]/10">
+                    {(topics || [])
+                      .filter((t) =>
+                        query.trim() ? (t.name + " " + (t.summary || "")).toLowerCase().includes(query.toLowerCase()) : true
+                      )
+                      .map((t, i) => {
+                        const p = progress[t.name];
+                        const pct = p && p.totalLessons > 0 ? Math.round((p.completedLessons / p.totalLessons) * 100) : 0;
+                        const badges = topicRowMetaByName[t.name];
+                        return (
+                          <li key={`${t.name}-${i}`}>
+                            <Link
+                              href={`/subjects/${slug}/node/${encodeURIComponent(t.name)}`}
+                              className="block px-4 py-3 hover:bg-[var(--foreground)]/5 transition-colors"
+                            >
+                              <div className="flex items-start gap-4">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <div className="truncate text-sm font-medium text-[var(--foreground)]">{t.name}</div>
+                                    {(badges?.examSnipe || badges?.surge) && (
+                                      <div className="flex items-center gap-1">
+                                        {badges?.examSnipe && (
+                                          <span className="rounded-full border border-[var(--accent-pink)]/25 bg-[var(--accent-pink)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent-pink)]/90">
+                                            Exam Snipe
+                                          </span>
+                                        )}
+                                        {badges?.surge && (
+                                          <span className="rounded-full border border-[var(--accent-cyan)]/25 bg-[var(--accent-cyan)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent-cyan)]/90">
+                                            Surge
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                  {t.summary ? (
+                                    <div className="mt-0.5 line-clamp-1 text-xs text-[var(--foreground)]/55" title={t.summary}>
+                                      {t.summary}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div className="w-24 shrink-0">
+                                  <div className="flex items-center justify-end text-[10px] text-[var(--foreground)]/55">
+                                    {pct}%
+                                  </div>
+                                  <div className="mt-1 h-1.5 w-full rounded-full bg-[var(--foreground)]/10">
+                                    <div className="h-1.5 rounded-full synapse-style" style={{ width: `${pct}%` }} />
+                                  </div>
+                                </div>
+                              </div>
+                            </Link>
+                          </li>
+                        );
+                      })}
+                  </ul>
+                </div>
             
             {/* Exam Snipes Section */}
             {examSnipes.length > 0 && (
@@ -1859,6 +2874,59 @@ export default function SubjectPage() {
               }}
             />
           </div>
+        )}
+
+          </div>
+
+          <aside className="space-y-4">
+            <div className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-5">
+              <div className="text-sm font-semibold text-[var(--foreground)]">Tools</div>
+              <div className="mt-3 grid gap-2">
+                <button
+                  onClick={collectAllFlashcards}
+                  className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)] px-4 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/20 transition-colors"
+                >
+                  Flashcards
+                </button>
+                <button
+                  onClick={collectAllHighlights}
+                  className="inline-flex h-10 items-center justify-center rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)] px-4 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/20 transition-colors"
+                >
+                  Highlights
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-5">
+              <div className="text-sm font-semibold text-[var(--foreground)]">Practice</div>
+              <div className="mt-1 text-sm text-[var(--foreground)]/65">Intensive mode for a single topic.</div>
+              <button
+                onClick={() => router.push(`/subjects/${slug}/practice`)}
+                className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)] px-4 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/20 transition-colors"
+              >
+                Open Practice
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-5">
+              <div className="text-sm font-semibold text-[var(--foreground)]">Context</div>
+              <div className="mt-1 text-sm text-[var(--foreground)]/65">
+                {tree?.topics?.length ? `${tree?.topics?.length} topics` : "No topics yet"}
+                {daysLeft !== null ? ` · ${daysLeft} day${daysLeft === 1 ? "" : "s"} left` : ""}
+              </div>
+              {examSnipes.length > 0 && (
+                <button
+                  onClick={() => router.push(`/subjects/${slug}/examsnipe`)}
+                  className="mt-3 inline-flex h-10 w-full items-center justify-center rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)] px-4 text-sm font-medium text-[var(--foreground)]/80 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/20 transition-colors"
+                >
+                  Exam Snipe
+                </button>
+              )}
+            </div>
+          </aside>
+        </div>
+        </details>
+          </>
         )}
         <Modal
           open={!!languagePrompt}
@@ -2173,8 +3241,8 @@ export default function SubjectPage() {
                   </svg>
                 </button>
                 <div className="mb-4">
-                  <h2 className="text-xl font-semibold text-[var(--foreground)] mb-2">Flashcards by Topic</h2>
-                  <p className="text-sm text-[var(--foreground)]/70">Select a topic to view its flashcards</p>
+                  <h2 className="text-xl font-semibold text-[var(--foreground)] mb-2">Flashcards</h2>
+                  <p className="text-sm text-[var(--foreground)]/70">Select a deck</p>
                 </div>
                 <div className="max-h-[400px]" style={{ padding: '1rem 0.75rem', overflowY: 'auto', overflowX: 'visible' }}>
                   <div className="space-y-3">
@@ -2196,7 +3264,7 @@ export default function SubjectPage() {
                         }}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium">{topic}</span>
+                          <span className="font-medium">{topic === "__course__" ? "Course Deck" : topic}</span>
                           <span className="text-sm opacity-60 whitespace-nowrap">
                             {flashcardsByTopic[topic].length} {flashcardsByTopic[topic].length === 1 ? 'flashcard' : 'flashcards'}
                           </span>
@@ -2246,7 +3314,9 @@ export default function SubjectPage() {
                   </span>
                 </div>
                 <div className="text-xs text-[var(--foreground)]/50 text-left">
-                  {currentCard?.topicName} • {currentCard?.lessonTitle}
+                  {currentCard?.topicName === "__course__"
+                    ? "Course Deck"
+                    : `${currentCard?.topicName} • ${currentCard?.lessonTitle}`}
                 </div>
               </div>
               <div className="relative flex items-center justify-center gap-3">

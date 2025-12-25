@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, useTransition } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { LessonBody } from "@/components/LessonBody";
 import { FlashcardContent } from "@/components/FlashcardContent";
@@ -1137,6 +1138,76 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
     return Array.from(new Set(names)).slice(0, 200);
   }, [subjectData]);
 
+  const [topicsPanelOpen, setTopicsPanelOpen] = useState(true);
+  const [pendingTopicNav, setPendingTopicNav] = useState<string | null>(null);
+  const [isTopicNavPending, startTopicNavTransition] = useTransition();
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`node:topicsPanelOpen:${slug}`);
+      if (saved === "0") setTopicsPanelOpen(false);
+      if (saved === "1") setTopicsPanelOpen(true);
+    } catch {}
+  }, [slug]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`node:topicsPanelOpen:${slug}`, topicsPanelOpen ? "1" : "0");
+    } catch {}
+  }, [slug, topicsPanelOpen]);
+
+  const topicRowMetaByName = useMemo(() => {
+    const map: Record<string, { examSnipe: boolean; surge: boolean; generated: boolean }> = {};
+    const names = Array.from(new Set([...(courseTopics || []), title].filter(Boolean)));
+    for (const topicName of names) {
+      const rawNode = (subjectData?.nodes as any)?.[topicName];
+      const node = rawNode && typeof rawNode === "object" ? rawNode : null;
+
+      const examSnipeFromMeta =
+        !!(node as any)?.examSnipeMeta ||
+        (Array.isArray((node as any)?.lessonsMeta) &&
+          (node as any).lessonsMeta.some((m: any) => {
+            const tag = String(m?.tag || m?.type || "");
+            return tag.toLowerCase().includes("exam snipe");
+          }));
+
+      const surgeFromLessons =
+        Array.isArray((node as any)?.lessons) &&
+        (node as any).lessons.some((l: any) => l && typeof l === "object" && (l.origin === "surge" || !!l.surgeSessionId));
+
+      const generatedFromLessons =
+        Array.isArray((node as any)?.lessons) &&
+        (node as any).lessons.some((l: any) => {
+          const body = l && typeof l === "object" ? (l as any).body : "";
+          return typeof body === "string" && body.trim().length > 0;
+        });
+
+      map[topicName] = { examSnipe: !!examSnipeFromMeta, surge: !!surgeFromLessons, generated: !!generatedFromLessons };
+    }
+    return map;
+  }, [courseTopics, subjectData, title]);
+
+  const currentTopicBadges = useMemo(() => {
+    const stored = topicRowMetaByName[title];
+    const examSnipe =
+      !!stored?.examSnipe ||
+      !!(content as any)?.examSnipeMeta ||
+      String(lessonMeta?.tag || lessonMeta?.type || "").toLowerCase().includes("exam snipe");
+    const surge =
+      !!stored?.surge ||
+      (Array.isArray(content?.lessons) &&
+        content.lessons.some((l: any) => l && typeof l === "object" && (l.origin === "surge" || !!l.surgeSessionId)));
+    return { examSnipe, surge };
+  }, [content, lessonMeta?.tag, lessonMeta?.type, title, topicRowMetaByName]);
+
+  const currentTopicSummary = useMemo(() => {
+    const topicMeta = (subjectData?.topics || []).find((t: any) => String(t?.name) === title);
+    const summary = String((topicMeta as any)?.summary || (topicMeta as any)?.description || "").trim();
+    const examSnipeMeta = (content as any)?.examSnipeMeta;
+    const examSummary = String(examSnipeMeta?.conceptDescription || "").trim();
+    return summary || examSummary || "";
+  }, [content, subjectData, title]);
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem(`starredFlashcards:${slug}`);
@@ -1797,7 +1868,168 @@ function toggleStar(flashcardId: string) {
   return (
     <>
     <div className="flex min-h-screen flex-col bg-[var(--background)] text-[var(--foreground)]">
-      <div className="mx-auto w-full max-w-3xl px-6 py-8">
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-5 py-5">
+        <div
+          className={[
+            "grid gap-5 lg:gap-8",
+            topicsPanelOpen ? "lg:grid-cols-[260px_minmax(0,1fr)]" : "lg:grid-cols-[56px_minmax(0,1fr)]",
+          ].join(" ")}
+        >
+          <aside className="hidden lg:block">
+            <div className="sticky top-6">
+              <div
+                className={[
+                  "rounded-2xl border border-[var(--foreground)]/10 bg-[var(--background)]/40 backdrop-blur-sm",
+                  topicsPanelOpen ? "p-4" : "p-2",
+                ].join(" ")}
+              >
+                <div className={topicsPanelOpen ? "flex flex-col gap-3" : "flex flex-col items-center gap-2"}>
+                  <div className={topicsPanelOpen ? "flex items-start justify-between gap-3" : "flex items-center justify-center"}>
+                    <div className={topicsPanelOpen ? "flex items-start gap-3" : "flex items-center justify-center"}>
+                      <Link
+                        href={`/subjects/${slug}`}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/60 text-[var(--foreground)]/70 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/20 transition-colors"
+                        aria-label="Home"
+                        title="Home"
+                      >
+                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 10.5L12 3l9 7.5V21a.75.75 0 01-.75.75H3.75A.75.75 0 013 21V10.5z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 21V12h6v9" />
+                        </svg>
+                      </Link>
+                      {topicsPanelOpen ? (
+                        <div className="min-w-0">
+                          <div className="text-xs text-[var(--foreground)]/55">{subjectData?.subject || slug}</div>
+                          <div className="mt-1 text-sm font-medium text-[var(--foreground)]/85">Topics</div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setTopicsPanelOpen((v) => !v)}
+                      className={[
+                        "inline-flex h-9 items-center justify-center gap-2 rounded-full border border-[var(--foreground)]/10 bg-[var(--background)]/60 text-[var(--foreground)]/75 hover:text-[var(--foreground)] hover:border-[var(--foreground)]/20 transition-colors",
+                        topicsPanelOpen ? "px-4" : "w-9",
+                      ].join(" ")}
+                      aria-label={topicsPanelOpen ? "Collapse topics" : "Expand topics"}
+                      title={topicsPanelOpen ? "Collapse topics" : "Expand topics"}
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        {topicsPanelOpen ? <path d="M15 18l-6-6 6-6" /> : <path d="M9 18l6-6-6-6" />}
+                      </svg>
+                      {topicsPanelOpen ? <span className="text-xs font-medium">Collapse</span> : null}
+                    </button>
+                  </div>
+                </div>
+                {topicsPanelOpen ? (
+                <nav className="mt-3 max-h-[calc(100vh-220px)] overflow-auto pr-1">
+                  <ul className="space-y-1">
+                    {courseTopics.map((topicName) => {
+                      const href = `/subjects/${slug}/node/${encodeURIComponent(topicName)}`;
+                      const isActive = topicName === title;
+                      const meta = topicRowMetaByName[topicName];
+                      const isGenerated = !!meta?.generated;
+                      const isPending = pendingTopicNav === topicName && isTopicNavPending;
+                      return (
+                        <li key={topicName}>
+                          <Link
+                            href={href}
+                            prefetch
+                            onMouseEnter={() => {
+                              try { router.prefetch(href); } catch {}
+                            }}
+                            onClick={(e) => {
+                              if (e.defaultPrevented) return;
+                              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                              e.preventDefault();
+                              setPendingTopicNav(topicName);
+                              startTopicNavTransition(() => router.push(href));
+                            }}
+                            className={[
+                              "flex items-center gap-2 rounded-xl px-2.5 py-2 text-sm transition-colors",
+                              isActive
+                                ? "bg-[var(--foreground)]/10 text-[var(--foreground)]"
+                                : isGenerated
+                                  ? "text-[var(--foreground)]/75 hover:bg-[var(--foreground)]/5 hover:text-[var(--foreground)]"
+                                  : "text-[var(--foreground)]/15 hover:bg-[var(--foreground)]/5 hover:text-[var(--foreground)]/55",
+                              ].join(" ")}
+                            aria-current={isActive ? "page" : undefined}
+                          >
+                            <span className="min-w-0 flex-1 truncate">{topicName}</span>
+                            {(meta?.examSnipe || meta?.surge || isPending) && (
+                              <span className="flex shrink-0 items-center gap-1.5">
+                                {meta?.examSnipe && (
+                                  <span className="rounded-full border border-[var(--accent-pink)]/25 bg-[var(--accent-pink)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent-pink)]/90">
+                                    Exam Snipe
+                                  </span>
+                                )}
+                                {meta?.surge && (
+                                  <span className="rounded-full border border-[var(--accent-cyan)]/25 bg-[var(--accent-cyan)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent-cyan)]/90">
+                                    Surge
+                                  </span>
+                                )}
+                                {isPending && (
+                                  <span className="h-3 w-3 animate-spin rounded-full border border-[var(--foreground)]/30 border-t-[var(--foreground)]/70" />
+                                )}
+                              </span>
+                            )}
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </nav>
+                ) : null}
+              </div>
+            </div>
+          </aside>
+
+          <main className={["min-w-0 transition-opacity", isTopicNavPending ? "opacity-70" : "opacity-100"].join(" ")}>
+            <div className="mb-4 lg:hidden">
+              <div className="text-xs text-[var(--foreground)]/55">{subjectData?.subject || slug}</div>
+              <div className="mt-2 flex items-center gap-2">
+                <select
+                  value={title}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    const href = `/subjects/${slug}/node/${encodeURIComponent(next)}`;
+                    setPendingTopicNav(next);
+                    startTopicNavTransition(() => router.push(href));
+                  }}
+                  className="h-10 w-full rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/60 px-3 text-sm text-[var(--foreground)] focus:outline-none focus:ring-0"
+                >
+                  {(courseTopics.includes(title) ? courseTopics : [title, ...courseTopics]).map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <header className="mb-6 flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <h1 className="truncate text-xl font-semibold text-[var(--foreground)]">{title}</h1>
+              </div>
+              {(currentTopicBadges.examSnipe || currentTopicBadges.surge) && (
+                <div className="flex shrink-0 items-center gap-2">
+                  {currentTopicBadges.examSnipe && (
+                    <span className="rounded-full border border-[var(--accent-pink)]/25 bg-[var(--accent-pink)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-pink)]/90">
+                      Exam Snipe
+                    </span>
+                  )}
+                  {currentTopicBadges.surge && (
+                    <span className="rounded-full border border-[var(--accent-cyan)]/25 bg-[var(--accent-cyan)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-cyan)]/90">
+                      Surge
+                    </span>
+                  )}
+                </div>
+              )}
+            </header>
+
         {error ? (
           <div className="mb-4 rounded-xl border border-[var(--accent-pink)]/30 bg-[var(--background)]/60 p-3 text-sm text-[var(--accent-pink)]">{error}</div>
         ) : null}
@@ -1822,7 +2054,13 @@ function toggleStar(flashcardId: string) {
           </div>
         ) : content && content.lessonsMeta && content.lessonsMeta[activeLessonIndex] && !content.lessons?.[activeLessonIndex]?.body ? (
           // Ungenerated lesson - show Start button UI
-          <div className="relative mx-auto mt-24 flex max-w-md flex-col items-center justify-center gap-6">
+          <div className="relative mx-auto mt-16 flex w-full max-w-lg flex-col items-center justify-center gap-5 px-4">
+            <div className="text-center space-y-2">
+              <div className="text-lg font-semibold text-[var(--foreground)]">Not generated yet</div>
+              <div className="text-sm text-[var(--foreground)]/65">
+                {currentTopicSummary || "Start to generate your first lesson for this topic."}
+              </div>
+            </div>
             <div className="pointer-events-none absolute -inset-10 -z-10 rounded-full blur-2xl" style={{ background: 'radial-gradient(circle at center, rgba(0, 229, 255, 0.25), rgba(255, 45, 150, 0.12) 60%, transparent 70%)' }} />
             {lessonLoading && (
               <div className="flex flex-col items-center gap-2">
@@ -1831,7 +2069,7 @@ function toggleStar(flashcardId: string) {
               </div>
             )}
             <button
-              className="relative inline-flex h-24 w-24 items-center justify-center rounded-full synapse-style text-white font-semibold text-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity shadow-[0_4px_12px_rgba(0,0,0,0.5)]"
+              className="relative inline-flex h-12 w-full max-w-xs items-center justify-center rounded-2xl synapse-style text-white font-semibold text-base hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity shadow-[0_4px_12px_rgba(0,0,0,0.5)]"
               onClick={async () => {
                 try {
                   setLessonLoading(true);
@@ -2266,11 +2504,8 @@ function toggleStar(flashcardId: string) {
                   </span>
                 </div>
               )}
-              <div className="text-lg font-medium text-[var(--foreground)]">
+              <div className="text-xs text-[var(--foreground)]/55">
                 {content?.lessonsMeta?.[activeLessonIndex]?.title || 'Lesson'}
-              </div>
-              <div className="text-sm text-[var(--foreground)]/60">
-                Click to generate
               </div>
             </div>
           </div>
@@ -4155,6 +4390,8 @@ function toggleStar(flashcardId: string) {
             </button>
           </div>
         )}
+          </main>
+        </div>
       </div>
     </div>
     {flashcardModalOpen && lessonFlashcards.length > 0 && (() => {
@@ -4467,52 +4704,55 @@ function toggleStar(flashcardId: string) {
     )}
     {/* Bottom utilities: subtle Export PDF */}
     {content && content.lessons && content.lessons[activeLessonIndex]?.body && (
-      <div className="mx-auto w-full max-w-3xl px-6 pb-10">
-        <div className="flex items-center justify-center mt-4">
-          <button
-            onClick={async () => {
-              try {
-                const lesson = content.lessons[activeLessonIndex];
-                if (!lesson) return;
-                const res = await fetch('/api/export-pdf', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    title: lesson.title,
-                    content: lesson.body,
-                    subject: subjectData?.subject || slug,
-                    topic: title,
-                  })
-                });
-                if (!res.ok) throw new Error('Failed to generate PDF');
-                const blob = await res.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                let filename = lesson.title.toLowerCase();
-                const invalidChars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
-                for (const char of invalidChars) { filename = filename.split(char).join('_'); }
-                a.download = `${filename}.pdf`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-              } catch (err: any) {
-                alert('Failed to export PDF: ' + err.message);
-              }
-            }}
-            className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-[var(--foreground)] bg-[var(--background)]/70 border border-[var(--foreground)]/15 hover:bg-[var(--background)]/80 transition-colors"
-            title="Export lesson to PDF"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="mr-2">
-              <path d="M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <polyline points="14,2 14,8 20,8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <polyline points="10,9 9,9 8,9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            Export PDF
-          </button>
+      <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 pb-10">
+        <div className="grid gap-6 lg:gap-10 lg:grid-cols-[260px_minmax(0,1fr)]">
+          <div className="hidden lg:block" aria-hidden />
+          <div className="flex items-center justify-center mt-4">
+            <button
+              onClick={async () => {
+                try {
+                  const lesson = content.lessons[activeLessonIndex];
+                  if (!lesson) return;
+                  const res = await fetch('/api/export-pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      title: lesson.title,
+                      content: lesson.body,
+                      subject: subjectData?.subject || slug,
+                      topic: title,
+                    })
+                  });
+                  if (!res.ok) throw new Error('Failed to generate PDF');
+                  const blob = await res.blob();
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  let filename = lesson.title.toLowerCase();
+                  const invalidChars = ['/', '\\', ':', '*', '?', '\"', '<', '>', '|'];
+                  for (const char of invalidChars) { filename = filename.split(char).join('_'); }
+                  a.download = `${filename}.pdf`;
+                  document.body.appendChild(a);
+                  a.click();
+                  window.URL.revokeObjectURL(url);
+                  document.body.removeChild(a);
+                } catch (err: any) {
+                  alert('Failed to export PDF: ' + err.message);
+                }
+              }}
+              className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium text-[var(--foreground)] bg-[var(--background)]/70 border border-[var(--foreground)]/15 hover:bg-[var(--background)]/80 transition-colors"
+              title="Export lesson to PDF"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="mr-2">
+                <path d="M14 2H6C4.89543 2 4 2.89543 4 4V20C4 21.1046 4.89543 22 6 22H18C19.1046 22 20 21.1046 20 20V8L14 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <polyline points="14,2 14,8 20,8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <line x1="16" y1="13" x2="8" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <line x1="16" y1="17" x2="8" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <polyline points="10,9 9,9 8,9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Export PDF
+            </button>
+          </div>
         </div>
       </div>
     )}
