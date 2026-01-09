@@ -81,7 +81,16 @@ export default function SubjectPage() {
   const [selectedFlashcardTopic, setSelectedFlashcardTopic] = useState<string | null>(null);
   const [examDateUpdateTrigger, setExamDateUpdateTrigger] = useState(0); // Force re-render when exam dates change
   const [daysLeft, setDaysLeft] = useState<number | null>(null); // Days until next exam
-  const [examSnipes, setExamSnipes] = useState<Array<{ id: string; courseName: string; slug: string; createdAt: string; fileNames: string[]; topConcepts: string[] }>>([]);
+  const [examSnipes, setExamSnipes] = useState<Array<{
+    id: string;
+    courseName: string;
+    slug: string;
+    createdAt: string;
+    fileNames: string[];
+    topConcepts: string[];
+    patternAnalysis?: string;
+    commonQuestions?: Array<{ question: string; examCount?: number; averagePoints?: number }>;
+  }>>([]);
   const [loadingExamSnipes, setLoadingExamSnipes] = useState(false);
   const [surgeExamSnipeData, setSurgeExamSnipeData] = useState<string | null>(null);
   const [surgeSuggestedTopics, setSurgeSuggestedTopics] = useState<string[]>([]);
@@ -633,6 +642,16 @@ export default function SubjectPage() {
           createdAt: r.createdAt,
           fileNames: r.fileNames,
           topConcepts: extractExamSnipeConceptNames(r.results),
+          patternAnalysis: typeof r.results?.patternAnalysis === "string" ? r.results.patternAnalysis : "",
+          commonQuestions: Array.isArray(r.results?.commonQuestions)
+            ? r.results.commonQuestions
+                .map((q: any) => ({
+                  question: String(q?.question || ""),
+                  examCount: typeof q?.examCount === "number" ? q.examCount : undefined,
+                  averagePoints: typeof q?.averagePoints === "number" ? q.averagePoints : undefined,
+                }))
+                .filter((q: any) => q.question)
+            : [],
         })));
         // Sync lessons from exam snipes to main course
         await syncExamSnipeLessonsToMainCourse(records);
@@ -661,6 +680,16 @@ export default function SubjectPage() {
             createdAt: r.createdAt,
             fileNames: r.fileNames,
             topConcepts: extractExamSnipeConceptNames(r.results),
+            patternAnalysis: typeof r.results?.patternAnalysis === "string" ? r.results.patternAnalysis : "",
+            commonQuestions: Array.isArray(r.results?.commonQuestions)
+              ? r.results.commonQuestions
+                  .map((q: any) => ({
+                    question: String(q?.question || ""),
+                    examCount: typeof q?.examCount === "number" ? q.examCount : undefined,
+                    averagePoints: typeof q?.averagePoints === "number" ? q.averagePoints : undefined,
+                  }))
+                  .filter((q: any) => q.question)
+              : [],
           })));
           await syncExamSnipeLessonsToMainCourse(records);
         } else {
@@ -692,6 +721,16 @@ export default function SubjectPage() {
           createdAt: r.createdAt,
           fileNames: r.fileNames,
           topConcepts: extractExamSnipeConceptNames(r.results),
+          patternAnalysis: typeof r.results?.patternAnalysis === "string" ? r.results.patternAnalysis : "",
+          commonQuestions: Array.isArray(r.results?.commonQuestions)
+            ? r.results.commonQuestions
+                .map((q: any) => ({
+                  question: String(q?.question || ""),
+                  examCount: typeof q?.examCount === "number" ? q.examCount : undefined,
+                  averagePoints: typeof q?.averagePoints === "number" ? q.averagePoints : undefined,
+                }))
+                .filter((q: any) => q.question)
+            : [],
         })));
         await syncExamSnipeLessonsToMainCourse(records);
       } else {
@@ -1601,6 +1640,109 @@ export default function SubjectPage() {
     setSurgeSuggestKick((k) => k + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSurgeSession?.timestamp]);
+
+  // Show loading spinner while initial data is loading
+  const renderExamSnipesSection = (heading: string) => (
+    <div className="mt-6">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h3 className="text-lg font-semibold text-[var(--foreground)]">{heading}</h3>
+        <span className="text-xs text-[var(--foreground)]/50">{examSnipes.length} saved</span>
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {examSnipes.map((examSnipe) => {
+          const topTopics = examSnipe.topConcepts.slice(0, 4);
+          const commonQuestions = (examSnipe.commonQuestions || []).slice(0, 3);
+          const createdAt = examSnipe.createdAt ? new Date(examSnipe.createdAt) : null;
+          const createdLabel = createdAt
+            ? createdAt.toLocaleDateString(undefined, { dateStyle: "medium" })
+            : "Unknown date";
+          const pattern = (examSnipe.patternAnalysis || "").trim();
+
+          return (
+            <div
+              key={examSnipe.id}
+              className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)]/80 p-4 transition-colors hover:border-[var(--foreground)]/30"
+              role="link"
+              tabIndex={0}
+              onClick={() => router.push(`/subjects/${slug}/examsnipe?examSnipeSlug=${encodeURIComponent(examSnipe.slug)}`)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  router.push(`/subjects/${slug}/examsnipe?examSnipeSlug=${encodeURIComponent(examSnipe.slug)}`);
+                }
+              }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-[var(--foreground)] line-clamp-2">
+                    {examSnipe.courseName}
+                  </div>
+                  <div className="mt-1 text-xs text-[var(--foreground)]/60">
+                    {createdLabel} - {examSnipe.fileNames.length} exam{examSnipe.fileNames.length !== 1 ? "s" : ""}
+                  </div>
+                </div>
+                <span className="rounded-full border border-[var(--accent-pink)]/20 bg-[var(--accent-pink)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent-pink)]/90">
+                  Exam Snipe
+                </span>
+              </div>
+
+              {pattern ? (
+                <div className="mt-3 rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/70 px-3 py-2 text-xs text-[var(--foreground)]/70 line-clamp-3">
+                  {pattern}
+                </div>
+              ) : null}
+
+              <div className="mt-3">
+                <div className="text-[10px] uppercase tracking-wide text-[var(--foreground)]/50">Top topics to learn</div>
+                {topTopics.length ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {topTopics.map((topic) => (
+                      <span
+                        key={topic}
+                        className="rounded-full border border-[var(--accent-cyan)]/25 bg-[var(--accent-cyan)]/10 px-2.5 py-0.5 text-[11px] text-[var(--accent-cyan)]/90"
+                      >
+                        {topic}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-2 text-xs text-[var(--foreground)]/50">No concept highlights yet.</div>
+                )}
+              </div>
+
+              <div className="mt-4">
+                <div className="text-[10px] uppercase tracking-wide text-[var(--foreground)]/50">Common questions</div>
+                {commonQuestions.length ? (
+                  <div className="mt-2 space-y-2 text-xs text-[var(--foreground)]/70">
+                    {commonQuestions.map((q, idx) => (
+                      <div key={`${examSnipe.id}-q-${idx}`} className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/70 px-2.5 py-2">
+                        <div className="line-clamp-2">{q.question}</div>
+                        {(q.examCount || q.averagePoints) && (
+                          <div className="mt-1 text-[10px] text-[var(--foreground)]/50">
+                            {typeof q.examCount === "number" ? `${q.examCount} exam${q.examCount === 1 ? "" : "s"}` : ""}
+                            {typeof q.averagePoints === "number" ? ` - ${q.averagePoints.toFixed(1)} avg points` : ""}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-2 text-xs text-[var(--foreground)]/50">No recurring questions detected.</div>
+                )}
+              </div>
+
+              <div className="mt-4 inline-flex items-center gap-2 text-xs font-medium text-[var(--accent-cyan)]/80">
+                <span>Open analysis</span>
+                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   // Show loading spinner while initial data is loading
   if (pageLoading) {
@@ -2651,48 +2793,7 @@ export default function SubjectPage() {
             )}
             
             {/* Exam Snipes Section - shown under topics in tree view */}
-            {examSnipes.length > 0 && (
-              <div className="mt-6">
-                <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Saved Exam Snipes</h3>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {examSnipes.map((examSnipe) => {
-                    return (
-                      <div
-                        key={examSnipe.id}
-                        className="pill-button rounded-2xl border border-[var(--foreground)]/10 text-[var(--foreground)]/80 cursor-pointer p-4 hover:text-[var(--foreground)] transition-colors"
-                        role="link"
-                        tabIndex={0}
-                        onClick={() => router.push(`/subjects/${slug}/examsnipe?examSnipeSlug=${encodeURIComponent(examSnipe.slug)}`)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            router.push(`/subjects/${slug}/examsnipe?examSnipeSlug=${encodeURIComponent(examSnipe.slug)}`);
-                          }
-                        }}
-                      >
-                        <div className="flex flex-col gap-2">
-                          <div className="text-sm font-semibold text-[var(--foreground)] line-clamp-2">
-                            {examSnipe.courseName}
-                          </div>
-                          <div className="text-xs text-[var(--foreground)]/60">
-                            {new Date(examSnipe.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" })}
-                          </div>
-                          <div className="text-xs text-[var(--foreground)]/50">
-                            {examSnipe.fileNames.length} exam{examSnipe.fileNames.length !== 1 ? "s" : ""}
-                          </div>
-                          <div className="mt-2 inline-flex items-center gap-2 text-xs font-medium text-[var(--accent-cyan)]/80">
-                            <span>Open analysis</span>
-                            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M5 12h14M13 6l6 6-6 6" />
-                            </svg>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            {examSnipes.length > 0 && renderExamSnipesSection("Saved Exam Snipes")}
           </div>
         )}
 
@@ -2793,48 +2894,7 @@ export default function SubjectPage() {
                 </div>
             
             {/* Exam Snipes Section */}
-            {examSnipes.length > 0 && (
-              <div className="mt-8">
-                <h3 className="text-lg font-semibold text-[var(--foreground)] mb-4">Saved Exam Snipes</h3>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {examSnipes.map((examSnipe) => {
-                    return (
-                      <div
-                        key={examSnipe.id}
-                        className="rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-4 cursor-pointer hover:border-[var(--foreground)]/30 transition-colors"
-                        role="link"
-                        tabIndex={0}
-                        onClick={() => router.push(`/subjects/${slug}/examsnipe?examSnipeSlug=${encodeURIComponent(examSnipe.slug)}`)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            router.push(`/subjects/${slug}/examsnipe?examSnipeSlug=${encodeURIComponent(examSnipe.slug)}`);
-                          }
-                        }}
-                      >
-                        <div className="flex flex-col gap-2">
-                          <div className="text-sm font-semibold text-[var(--foreground)] line-clamp-2">
-                            {examSnipe.courseName}
-                          </div>
-                          <div className="text-xs text-[var(--foreground)]/60">
-                            {new Date(examSnipe.createdAt).toLocaleDateString(undefined, { dateStyle: "medium" })}
-                          </div>
-                          <div className="text-xs text-[var(--foreground)]/50">
-                            {examSnipe.fileNames.length} exam{examSnipe.fileNames.length !== 1 ? "s" : ""}
-                          </div>
-                          <div className="mt-2 inline-flex items-center gap-2 text-xs font-medium text-[var(--accent-cyan)]/80">
-                            <span>Open analysis</span>
-                            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M5 12h14M13 6l6 6-6 6" />
-                            </svg>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            {examSnipes.length > 0 && renderExamSnipesSection("Saved Exam Snipes")}
           </>
             ) : (
               <div className="mt-4 rounded-2xl border border-[var(--foreground)]/15 bg-[var(--background)] p-6 text-center text-sm text-[var(--foreground)]/70">

@@ -3360,7 +3360,7 @@ function Home() {
   const [loadingExamHistory, setLoadingExamHistory] = useState(false);
   const [examMenuOpenFor, setExamMenuOpenFor] = useState<string | null>(null);
   const [examDateUpdateTrigger, setExamDateUpdateTrigger] = useState(0); // Force re-render when exam dates change
-  const [, setCourseMetaUpdateTrigger] = useState(0);
+  const [courseMetaUpdateTrigger, setCourseMetaUpdateTrigger] = useState(0);
   const [surgeButtonHovered, setSurgeButtonHovered] = useState<string | null>(null);
   const [tutorialSignal, setTutorialSignal] = useState(0);
   const settingsFileInputRef = useRef<HTMLInputElement>(null);
@@ -3477,7 +3477,38 @@ function Home() {
                 
                 // Sync subject data from server in parallel (non-blocking)
                 // Use Promise.allSettled to fetch all in parallel without blocking
-                Promise.allSettled(
+                const mergeTopics = (serverTopics: any, localTopics: any) => {
+                  const topicMap = new Map<string, { name: string; summary: string }>();
+                  const addTopic = (topic: any) => {
+                    const name = typeof topic === "string" ? topic : topic?.name;
+                    if (!name) return;
+                    const key = String(name).trim().toLowerCase();
+                    if (!key) return;
+                    const summary = typeof topic === "string" ? "" : String(topic?.summary || "");
+                    if (!topicMap.has(key)) {
+                      topicMap.set(key, { name: String(name), summary });
+                      return;
+                    }
+                    const existing = topicMap.get(key);
+                    if (existing && !existing.summary && summary) {
+                      existing.summary = summary;
+                    }
+                  };
+                  (Array.isArray(serverTopics) ? serverTopics : []).forEach(addTopic);
+                  (Array.isArray(localTopics) ? localTopics : []).forEach(addTopic);
+                  return Array.from(topicMap.values());
+                };
+
+                const mergeNodes = (serverNodes: any, localNodes: any) => {
+                  const serverHasNodes = serverNodes && typeof serverNodes === "object" && Object.keys(serverNodes).length > 0;
+                  const localHasNodes = localNodes && typeof localNodes === "object" && Object.keys(localNodes).length > 0;
+                  if (!serverHasNodes && !localHasNodes) return {};
+                  if (!serverHasNodes) return { ...(localNodes as Record<string, any>) };
+                  if (!localHasNodes) return { ...(serverNodes as Record<string, any>) };
+                  return { ...(serverNodes as Record<string, any>), ...(localNodes as Record<string, any>) };
+                };
+
+                const syncResults = await Promise.allSettled(
                   subjectsJson.subjects.map(async (subject: Subject) => {
                     try {
                       const dataRes = await fetch(`/api/subject-data?slug=${encodeURIComponent(subject.slug)}`, { credentials: "include" });
@@ -3521,11 +3552,28 @@ function Home() {
                           // Use merged surgeLog
                           serverData.surgeLog = mergedSurgeLog;
                         }
+
+                        const mergedTopics = mergeTopics(serverData?.topics, localData?.topics);
+                        const mergedNodes = mergeNodes(serverData?.nodes, localData?.nodes);
+                        const mergedTree =
+                          (localData?.tree?.topics && localData.tree.topics.length > 0)
+                            ? localData.tree
+                            : (serverData?.tree?.topics && serverData.tree.topics.length > 0)
+                            ? serverData.tree
+                            : (mergedTopics.length > 0)
+                            ? {
+                                subject: serverData?.subject || localData?.subject || subject.slug,
+                                topics: mergedTopics.map((t) => ({ name: t.name, subtopics: [] })),
+                              }
+                            : serverData?.tree || localData?.tree;
                         
                         // Merge other fields: prefer local if it exists and is more recent
                         const mergedData: StoredSubjectData = {
                           ...serverData,
                           ...(localData || {}),
+                          topics: mergedTopics,
+                          nodes: mergedNodes,
+                          tree: mergedTree as any,
                           surgeLog: useLocalSurgeLog ? [] : (serverData?.surgeLog || localData?.surgeLog || [])
                         };
                         
@@ -3534,6 +3582,9 @@ function Home() {
                     } catch {}
                   })
                 );
+                if (syncResults.length > 0) {
+                  setCourseMetaUpdateTrigger((tick) => tick + 1);
+                }
               }
             } catch {}
           };
@@ -5018,7 +5069,8 @@ function Home() {
                 })()}
                 {(() => {
                   // Use examDateUpdateTrigger to force re-render when metadata changes
-                  const _ = examDateUpdateTrigger;
+                  void examDateUpdateTrigger;
+                  void courseMetaUpdateTrigger;
                   const data = loadSubjectData(s.slug);
                   const topicCount = data?.topics?.length || 0;
                   const daysLeft = getDaysUntilNextExam(data?.examDates);
@@ -5068,7 +5120,8 @@ function Home() {
               </div>
               <div className="mt-auto pt-3 flex w-full items-center gap-3">
                 {(() => {
-                  const _ = examDateUpdateTrigger;
+                  void examDateUpdateTrigger;
+                  void courseMetaUpdateTrigger;
                   const data = loadSubjectData(s.slug);
                   const topicCount = data?.topics?.length || 0;
                   return (

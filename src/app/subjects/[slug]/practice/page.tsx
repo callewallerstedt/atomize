@@ -3459,24 +3459,81 @@ Respond with ONLY the specific topic name, no explanation.`;
       let finalTopicName = specificTopicName;
       let lessonAlreadyExists = lessonExists(specificTopicName);
       
-      if (!lessonAlreadyExists) {
-        // Check if base topic has a lesson
-        if (lessonExists(topicName)) {
-          // Use existing base topic lesson
-          finalTopicName = topicName;
-        } else {
-          // Generate new lesson with question-specific context
-          const success = await generateLessonForTopic(topicName, questionText, specificTopicName);
-          if (!success) {
-            alert("Failed to generate lesson. Please try again.");
-            return;
-          }
-          // Use the specific topic name
-          finalTopicName = specificTopicName;
-        }
+      if (!lessonAlreadyExists && lessonExists(topicName)) {
+        finalTopicName = topicName;
+        lessonAlreadyExists = true;
       }
 
-      // Navigate to the lesson
+      const existingNode = subjectData?.nodes?.[finalTopicName];
+      const existingLessonBody =
+        existingNode && typeof existingNode === "object"
+          ? String((existingNode as any)?.lessons?.[0]?.body || "").trim()
+          : "";
+      const shouldAutoGenerate = !lessonAlreadyExists || !existingLessonBody;
+
+      if (subjectData) {
+        const updatedData: StoredSubjectData = { ...subjectData };
+        updatedData.nodes = { ...(updatedData.nodes || {}) };
+        const existing = updatedData.nodes[finalTopicName];
+        const normalized =
+          existing && typeof existing === "object"
+            ? {
+                ...existing,
+                lessons: Array.isArray((existing as any).lessons) ? [...(existing as any).lessons] : [],
+                lessonsMeta: Array.isArray((existing as any).lessonsMeta) ? [...(existing as any).lessonsMeta] : [],
+              }
+            : {
+                overview: "",
+                symbols: [],
+                lessons: [],
+                lessonsMeta: [],
+              };
+
+        if (normalized.lessons.length === 0) {
+          normalized.lessons.push({
+            title: finalTopicName,
+            body: "",
+            quiz: [],
+            metadata: null,
+          });
+        }
+        if (normalized.lessonsMeta.length === 0) {
+          normalized.lessonsMeta.push({ type: "Lesson Outline", title: finalTopicName });
+        }
+        updatedData.nodes[finalTopicName] = normalized as any;
+        updatedData.topics = Array.isArray(updatedData.topics) ? [...updatedData.topics] : [];
+        if (!updatedData.topics.some((t) => t?.name === finalTopicName)) {
+          updatedData.topics.push({ name: finalTopicName, summary: "" });
+        }
+        const treeTopics = Array.isArray(updatedData.tree?.topics) ? [...(updatedData.tree?.topics || [])] : [];
+        if (!treeTopics.some((t: any) => t?.name === finalTopicName)) {
+          treeTopics.push({ name: finalTopicName, subtopics: [] });
+        }
+        updatedData.tree = {
+          subject: updatedData.tree?.subject || updatedData.subject || slug,
+          topics: treeTopics,
+        };
+
+        await saveSubjectDataAsync(slug, updatedData);
+        setSubjectData(updatedData);
+      }
+
+      if (shouldAutoGenerate && typeof window !== "undefined") {
+        try {
+          sessionStorage.setItem(
+            "__pendingPracticeLesson",
+            JSON.stringify({
+              slug,
+              topic: finalTopicName,
+              lessonIndex: 0,
+              questionText,
+              requestedAt: Date.now(),
+            })
+          );
+        } catch {}
+      }
+
+      // Navigate to the lesson immediately; generation (if needed) will start on the lesson page.
       router.push(`/subjects/${slug}/node/${encodeURIComponent(finalTopicName)}/lesson/0`);
     } catch (err) {
       console.error("Error opening lesson:", err);
