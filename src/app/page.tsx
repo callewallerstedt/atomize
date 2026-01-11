@@ -13,6 +13,7 @@ import { saveSubjectData, StoredSubjectData, loadSubjectData } from "@/utils/sto
 import { changelog } from "../../CHANGELOG";
 import { LessonBody } from "@/components/LessonBody";
 import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
+import CoSolve from "@/components/CoSolve";
 
 type Subject = { name: string; slug: string; sharedByUsername?: string | null };
 
@@ -491,7 +492,7 @@ function HomepageFileUploadArea({
   );
 }
 
-function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn }: { tutorialSignal: number; setTutorialSignal: (updater: (prev: number) => number) => void; onQuickLearn?: (query: string) => void }) {
+function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn, setCoSolveOpen }: { tutorialSignal: number; setTutorialSignal: (updater: (prev: number) => number) => void; onQuickLearn?: (query: string) => void; setCoSolveOpen?: (open: boolean) => void }) {
   const router = useRouter();
   const pathname = usePathname();
   const [welcomeText, setWelcomeText] = useState("");
@@ -3094,6 +3095,30 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                 </button>
                 <button
                   onClick={() => {
+                    if (!hasPremiumAccess) {
+                      if (typeof document !== "undefined") {
+                        document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
+                      }
+                      return;
+                    }
+                    if (!homepageSending && !isTutorialActive && setCoSolveOpen) {
+                      setCoSolveOpen(true);
+                    }
+                  }}
+                  disabled={homepageSending || isTutorialActive}
+                  className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
+                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
+                  title="Draw and solve problems with AI"
+                >
+                  CoSolve
+                  {!hasPremiumAccess && (
+                    <span className="ml-1 inline-flex items-center rounded-full bg-[var(--foreground)]/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--foreground)]/60">
+                      Pro
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => {
                     if (!homepageSending && !isTutorialActive) {
                       handleSendMessage("Help!");
                     }
@@ -3305,6 +3330,30 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                 </button>
                 <button
                   onClick={() => {
+                    if (!hasPremiumAccess) {
+                      if (typeof document !== "undefined") {
+                        document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
+                      }
+                      return;
+                    }
+                    if (!homepageSending && !isTutorialActive) {
+                      setCoSolveOpen(true);
+                    }
+                  }}
+                  disabled={homepageSending || isTutorialActive}
+                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
+                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
+                  title="Draw and solve problems with AI"
+                >
+                  CoSolve
+                  {!hasPremiumAccess && (
+                    <span className="ml-1 inline-flex items-center rounded-full bg-white/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/60">
+                      Pro
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => {
                     if (!homepageSending && !isTutorialActive) {
                       handleSendMessage("Help!");
                     }
@@ -3387,6 +3436,7 @@ function Home() {
   const [subscriptionLevel, setSubscriptionLevel] = useState<string | null>(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [coSolveOpen, setCoSolveOpen] = useState(false);
   const hasPremiumAccess =
     subscriptionLevel === "Tester" ||
     subscriptionLevel === "Paid" ||
@@ -4981,9 +5031,10 @@ function Home() {
         }}
       />
       <div className="relative z-10">
-        <WelcomeMessage 
+        <WelcomeMessage
           tutorialSignal={tutorialSignal}
           setTutorialSignal={setTutorialSignal}
+          setCoSolveOpen={setCoSolveOpen}
           onQuickLearn={(query) => {
             setQuickLearnQuery(query);
             handleQuickLearn();
@@ -6213,6 +6264,9 @@ function Home() {
       })()}
       </div>
       </div>
+      
+      {/* CoSolve Canvas Modal */}
+      <CoSolve isOpen={coSolveOpen} onClose={() => setCoSolveOpen(false)} />
     </>
   );
 }

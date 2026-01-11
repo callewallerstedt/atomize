@@ -1507,110 +1507,6 @@ function ClockDisplay() {
   );
 }
 
-// Temperature Display Component
-function TemperatureDisplay() {
-  const [temperature, setTemperature] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchTemperature = async () => {
-      try {
-        // Get user's location
-        if (!navigator.geolocation) {
-          setError("Geolocation not supported");
-          setLoading(false);
-          return;
-        }
-
-        navigator.geolocation.getCurrentPosition(
-          async (position) => {
-            const { latitude, longitude } = position.coords;
-            
-            try {
-              // Using OpenWeatherMap API (free tier)
-              // You'll need to add your API key to environment variables
-              const apiKey = process.env.NEXT_PUBLIC_WEATHER_API_KEY || '';
-              
-              if (!apiKey) {
-                // Fallback: Use a free weather API that doesn't require key
-                const response = await fetch(
-                  `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m&timezone=auto`
-                );
-                
-                if (!response.ok) throw new Error('Weather API failed');
-                
-                const data = await response.json();
-                const temp = Math.round(data.current.temperature_2m);
-                setTemperature(temp);
-                setLoading(false);
-              } else {
-                // Use OpenWeatherMap if API key is available
-                const response = await fetch(
-                  `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${apiKey}&units=metric`
-                );
-                
-                if (!response.ok) throw new Error('Weather API failed');
-                
-                const data = await response.json();
-                setTemperature(Math.round(data.main.temp));
-                setLoading(false);
-              }
-            } catch (err) {
-              console.error('Error fetching weather:', err);
-              setError("Failed to fetch");
-              setLoading(false);
-            }
-          },
-          (err) => {
-            console.error('Geolocation error:', err);
-            setError("Location denied");
-            setLoading(false);
-          },
-          { timeout: 10000 }
-        );
-      } catch (err) {
-        console.error('Error:', err);
-        setError("Error");
-        setLoading(false);
-      }
-    };
-
-    fetchTemperature();
-    
-    // Refresh temperature every 10 minutes
-    const interval = setInterval(fetchTemperature, 10 * 60 * 1000);
-    
-    return () => clearInterval(interval);
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-[var(--background)]/60 backdrop-blur-sm border border-[var(--foreground)]/10">
-        <svg className="w-4 h-4 text-[var(--foreground)]/70 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-        <span className="text-sm text-[var(--foreground)]/50">--°</span>
-      </div>
-    );
-  }
-
-  if (error || temperature === null) {
-    return null; // Don't show anything if there's an error
-  }
-
-  return (
-    <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-[var(--background)]/60 backdrop-blur-sm border border-[var(--foreground)]/10">
-      <svg className="w-4 h-4 text-[var(--foreground)]/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
-      </svg>
-      <span className="text-sm font-medium text-[var(--foreground)]">
-        {temperature}°C
-      </span>
-    </div>
-  );
-}
 
 // Pomodoro Timer Component
 function PomodoroTimer() {
@@ -5476,12 +5372,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               </button>
             </div>
 
-            {/* Center: Clock and Temperature */}
+            {/* Center: Clock */}
             <div className="hidden md:flex absolute left-1/2 transform -translate-x-1/2 items-center gap-4">
               {/* Clock Component */}
               <ClockDisplay />
-              {/* Temperature Component */}
-              <TemperatureDisplay />
               {/* SURGE text on surge page */}
               {pathname?.includes('/surge') && (
                 <h1 

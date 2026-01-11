@@ -1608,3 +1608,128 @@ button.upgrade-liquid-btn * {
   z-index: 100;
   filter: drop-shadow(0 10px 25px rgba(0, 0, 0, 0.5));
 }
+
+/* ========================================
+   COSOLVE CANVAS STYLES
+   ======================================== */
+
+/* CoSolve container */
+.cosolve-container {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Smooth canvas rendering */
+.cosolve-canvas {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Slider styles */
+.slider {
+  background: var(--foreground);
+  opacity: 0.2;
+  transition: opacity 0.2s;
+}
+
+.slider:hover {
+  opacity: 0.3;
+}
+
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  cursor: pointer;
+  border: 2px solid var(--background);
+  box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.3);
+}
+
+.slider::-webkit-slider-thumb:hover {
+  background: var(--accent-cyan);
+  transform: scale(1.1);
+}
+
+.slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  cursor: pointer;
+  border: 2px solid var(--background);
+  box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.3);
+}
+
+.slider::-moz-range-thumb:hover {
+  background: var(--accent-cyan);
+  transform: scale(1.1);
+}
+
+/* Canvas cursor based on tool */
+.cosolve-canvas-pen {
+  cursor: crosshair;
+}
+
+.cosolve-canvas-eraser {
+  cursor: cell;
+}
+
+/* Smooth brush size preview animation */
+.cosolve-brush-preview {
+  transition: width 150ms ease, height 150ms ease;
+}
+
+/* Color button selection ring */
+.cosolve-color-btn.selected {
+  box-shadow: 0 0 0 2px var(--accent-cyan), 0 0 8px var(--accent-cyan);
+}
+
+/* Tool button active state */
+.cosolve-tool-active {
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.2), rgba(255, 45, 150, 0.2));
+  border: 1px solid rgba(0, 229, 255, 0.3);
+}
+
+/* AI response loading animation */
+@keyframes cosolve-thinking {
+  0%, 100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.cosolve-thinking-dot {
+  animation: cosolve-thinking 1.4s ease-in-out infinite;
+}
+
+.cosolve-thinking-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.cosolve-thinking-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* Sidebar collapse transition */
+.cosolve-sidebar {
+  transition: width 200ms ease-in-out;
+}
+
+/* Light mode adjustments for CoSolve */
+.light-mode .cosolve-sidebar {
+  background-color: rgba(248, 250, 252, 0.95);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.light-mode .cosolve-header {
+  background-color: rgba(248, 250, 252, 0.95);
+  border-color: rgba(0, 0, 0, 0.1);
+}

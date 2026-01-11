@@ -37,6 +37,38 @@ model User {
   usageStats           UsageStats?
   feedback             Feedback[]
   sharedCourses        SharedCourse[]
+  coSolveHistory       CoSolveHistory[]
+  coSolveCanvases      CoSolveCanvas[]
+}
+
+model CoSolveHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  // Store a compressed screenshot as a data URL (usually image/jpeg)
+  imageData String   @db.Text
+  // Markdown/LaTeX response returned from the model
+  response  String   @db.Text
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model CoSolveCanvas {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  strokes      Json
+  textElements Json
+  pdfOverlays  Json?
+  canvasBg     String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
 }
 
 model Session {
