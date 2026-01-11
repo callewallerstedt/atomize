@@ -3336,7 +3336,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                       }
                       return;
                     }
-                    if (!homepageSending && !isTutorialActive) {
+                    if (!homepageSending && !isTutorialActive && setCoSolveOpen) {
                       setCoSolveOpen(true);
                     }
                   }}
