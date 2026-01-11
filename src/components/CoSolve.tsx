@@ -3270,7 +3270,7 @@ DO NOT ADD ANY EXTRA TEXT.`
           const lines = rewrittenText.split('\n');
           if (lines.length > 1) {
             // Look for lines that look like content (contain math symbols or are short)
-            const contentLines = lines.filter(line =>
+            const contentLines = lines.filter((line: string) =>
               line.includes('$') || line.includes('\\') ||
               (line.length < 100 && !line.toLowerCase().includes('equation') && !line.toLowerCase().includes('text'))
             );
