@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useRef, useState, useEffect, useCallback, useLayoutEffect, useMemo, startTransition } from "react";
+import React, { useRef, useState, useEffect, useCallback, useLayoutEffect, useMemo } from "react";
 import { LessonBody } from "./LessonBody";
 
 interface Point {
   x: number;
   y: number;
   pressure: number;
+  timestamp?: number;
 }
 
 type PointerLike = {
@@ -109,6 +110,73 @@ const saveColorPresets = (colors: Array<{ name: string; value: string }>) => {
 
 // Brush size will now be controlled by a slider (1-50)
 const DEFAULT_BRUSH_SIZE = 2;
+
+// === PERFORMANCE OPTIMIZATIONS ===
+
+// Catmull-Rom spline interpolation for smooth curves
+// This creates natural-looking curves between points
+const catmullRomSpline = (p0: Point, p1: Point, p2: Point, p3: Point, t: number): { x: number; y: number; pressure: number } => {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  
+  // Catmull-Rom basis functions
+  const f0 = -0.5 * t3 + t2 - 0.5 * t;
+  const f1 = 1.5 * t3 - 2.5 * t2 + 1;
+  const f2 = -1.5 * t3 + 2 * t2 + 0.5 * t;
+  const f3 = 0.5 * t3 - 0.5 * t2;
+  
+  return {
+    x: p0.x * f0 + p1.x * f1 + p2.x * f2 + p3.x * f3,
+    y: p0.y * f0 + p1.y * f1 + p2.y * f2 + p3.y * f3,
+    pressure: p0.pressure * f0 + p1.pressure * f1 + p2.pressure * f2 + p3.pressure * f3,
+  };
+};
+
+// Calculate velocity between two points for natural width variation
+const calculateVelocity = (p1: Point, p2: Point): number => {
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const dt = ((p2.timestamp || 0) - (p1.timestamp || 0)) || 16; // Default to 60fps timing
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  return distance / Math.max(dt, 1);
+};
+
+// Smooth stroke width based on velocity and pressure
+const calculateStrokeWidth = (baseSize: number, pressure: number, velocity: number): number => {
+  // Higher velocity = thinner stroke (more natural pen feel)
+  const velocityFactor = Math.max(0.4, Math.min(1, 1 - velocity * 0.008));
+  // Combine with pressure
+  const pressureFactor = Math.max(0.3, Math.min(1.2, pressure));
+  return baseSize * pressureFactor * velocityFactor;
+};
+
+// Point filtering to reduce jitter while preserving fast movements
+const filterPoints = (points: Point[], minDistance: number = 1.5): Point[] => {
+  if (points.length < 2) return points;
+  
+  const filtered: Point[] = [points[0]];
+  let lastPoint = points[0];
+  
+  for (let i = 1; i < points.length - 1; i++) {
+    const point = points[i];
+    const dx = point.x - lastPoint.x;
+    const dy = point.y - lastPoint.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    
+    // Keep points that are far enough apart or have significant pressure change
+    if (dist >= minDistance || Math.abs(point.pressure - lastPoint.pressure) > 0.1) {
+      filtered.push(point);
+      lastPoint = point;
+    }
+  }
+  
+  // Always keep the last point
+  if (points.length > 1) {
+    filtered.push(points[points.length - 1]);
+  }
+  
+  return filtered;
+};
 
 const CANVAS_BACKGROUNDS = [
   { name: "Dark", value: "#1a1a1a" },
@@ -271,6 +339,7 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
   
   // Lasso state
   const [lassoPoints, setLassoPoints] = useState<Point[]>([]);
+  const lassoPointsRef = useRef<Point[]>([]);
   const [lassoSelection, setLassoSelection] = useState<{strokes: number[], bounds: {x: number, y: number, width: number, height: number}} | null>(null);
   const [showLassoMenu, setShowLassoMenu] = useState(false);
   
@@ -440,6 +509,8 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
   const redrawCanvasRef = useRef<(() => void) | null>(null);
   const strokeBoundsRef = useRef<Array<{ minX: number; minY: number; maxX: number; maxY: number }>>([]);
   const prevStrokesForBoundsRef = useRef<Stroke[]>([]);
+  // Grid cache for faster rendering
+  const gridPatternCacheRef = useRef<{ pattern: CanvasPattern | null; bg: string; gridColor: string; spacing: number } | null>(null);
 
   const computeStrokeBounds = useCallback((stroke: Stroke) => {
     if (!stroke || stroke.points.length === 0) {
@@ -473,8 +544,15 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     currentStrokeRef.current = currentStroke;
   }, [currentStroke]);
 
-  useEffect(() => {
+  // Sync strokes to ref using useLayoutEffect so it's updated before other layout effects read it
+  // Also invalidate static layer cache when strokes change
+  useLayoutEffect(() => {
     strokesRef.current = strokes;
+    // Invalidate static layer cache since strokes changed
+    staticLayerRef.current = null;
+    staticLayerBoundsRef.current = null;
+    staticLayerScaleRef.current = null;
+    staticLayerStrokeCountRef.current = 0;
   }, [strokes]);
 
   useEffect(() => {
@@ -995,7 +1073,8 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d");
+    // OPTIMIZATION: Use alpha: false for better GPU performance
+    const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) return;
 
     const resolutionMultiplier = resolutionMultiplierRef.current;
@@ -1004,10 +1083,7 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       height: canvas.height / resolutionMultiplier,
     };
 
-    // Clear and fill background
-    ctx.clearRect(0, 0, rect.width, rect.height);
-
-    // Draw background
+    // Draw background - no clearRect needed since we fill the entire canvas
     let bgColor = "#1a1a1a";
     let gridColor = "#2a2a2a";
 
@@ -1026,12 +1102,11 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     ctx.fillStyle = bgColor;
     ctx.fillRect(0, 0, rect.width, rect.height);
 
-    // Draw grid in screen space for stable performance during pan/zoom
     // Use refs for pan/zoom (source of truth) to avoid jitter during panning
     const currentPan = panOffsetRef.current;
     const currentZoom = zoomRef.current;
 
-    // Always show grid - never hide it during panning
+    // OPTIMIZED: Draw grid with cached pattern for better performance
     if (showGrid) {
       const gridSize = 25;
       const spacing = gridSize * currentZoom;
@@ -1039,23 +1114,59 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
         const mod = (value: number, m: number) => ((value % m) + m) % m;
         const startX = mod(currentPan.x, spacing) - spacing;
         const startY = mod(currentPan.y, spacing) - spacing;
-        const endX = rect.width + spacing;
-        const endY = rect.height + spacing;
-
-        ctx.save();
-        ctx.strokeStyle = gridColor;
-        ctx.lineWidth = 0.5;
-        ctx.beginPath();
-        for (let x = startX; x <= endX; x += spacing) {
-          ctx.moveTo(x, 0);
-          ctx.lineTo(x, rect.height);
+        
+        // Use cached grid pattern for better performance
+        const cache = gridPatternCacheRef.current;
+        const roundedSpacing = Math.round(spacing * 2) / 2;
+        const needNewPattern = !cache || Math.abs(cache.spacing - roundedSpacing) > 1 || cache.gridColor !== gridColor;
+        
+        if (needNewPattern && roundedSpacing >= 4 && roundedSpacing <= 300) {
+          const tileSize = Math.max(4, Math.ceil(roundedSpacing));
+          const patternCanvas = document.createElement('canvas');
+          patternCanvas.width = tileSize;
+          patternCanvas.height = tileSize;
+          const patternCtx = patternCanvas.getContext('2d');
+          if (patternCtx) {
+            patternCtx.strokeStyle = gridColor;
+            patternCtx.lineWidth = 0.5;
+            patternCtx.beginPath();
+            patternCtx.moveTo(0, 0);
+            patternCtx.lineTo(0, tileSize);
+            patternCtx.moveTo(0, 0);
+            patternCtx.lineTo(tileSize, 0);
+            patternCtx.stroke();
+            const pattern = ctx.createPattern(patternCanvas, 'repeat');
+            gridPatternCacheRef.current = { pattern, bg: bgColor, gridColor, spacing: roundedSpacing };
+          }
         }
-        for (let y = startY; y <= endY; y += spacing) {
-          ctx.moveTo(0, y);
-          ctx.lineTo(rect.width, y);
+        
+        // Use pattern or fallback to line drawing
+        const cachedPattern = gridPatternCacheRef.current?.pattern;
+        if (cachedPattern && Math.abs((gridPatternCacheRef.current?.spacing || 0) - roundedSpacing) <= 1) {
+          ctx.save();
+          ctx.translate(startX, startY);
+          ctx.fillStyle = cachedPattern;
+          ctx.fillRect(-startX, -startY, rect.width + spacing * 2, rect.height + spacing * 2);
+          ctx.restore();
+        } else {
+          // Fallback: direct line drawing
+          const endX = rect.width + spacing;
+          const endY = rect.height + spacing;
+          ctx.save();
+          ctx.strokeStyle = gridColor;
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          for (let x = startX; x <= endX; x += spacing) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, rect.height);
+          }
+          for (let y = startY; y <= endY; y += spacing) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(rect.width, y);
+          }
+          ctx.stroke();
+          ctx.restore();
         }
-        ctx.stroke();
-        ctx.restore();
       }
     }
 
@@ -1095,8 +1206,9 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     const staticLayer = staticLayerRef.current;
     const staticBounds = staticLayerBoundsRef.current;
     const cachedStrokeCount = staticLayerStrokeCountRef.current;
-    // Use ref to get latest strokes during panning
-    const strokesToCheck = strokesRef.current.length > 0 ? strokesRef.current : strokes;
+    // Always use ref for strokes - it's kept in sync and updated immediately when needed
+    // The ref is the source of truth for immediate updates (like undo/rewrite)
+    const strokesToCheck = strokesRef.current;
     const cacheHasAllStrokes = cachedStrokeCount === strokesToCheck.length;
     const cacheCanCover = cachedStrokeCount <= strokesToCheck.length;
     const viewX = -currentPan.x / Math.max(0.001, currentZoom);
@@ -1135,18 +1247,34 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       // Critical for smooth pan/zoom: avoid per-frame O(N) loops over all strokes.
       // Only draw strokes that were added after the cache was built.
       if (!cacheHasAllStrokes) {
-        // Use ref to get latest strokes during panning
-        const strokesToDraw = strokesRef.current.length > 0 ? strokesRef.current : strokes;
+        // PERFORMANCE OPTIMIZATION: Set common context properties once
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.globalCompositeOperation = 'source-over';
+        
+        // Always use ref for strokes - it's kept in sync and updated immediately when needed
+        const strokesToDraw = strokesRef.current;
         for (let i = cachedStrokeCount; i < strokesToDraw.length; i++) {
           const stroke = strokesToDraw[i];
           if (!stroke?.points.length) continue;
+          // Only set stroke-specific properties
+          ctx.strokeStyle = stroke.color;
           drawStroke(ctx, stroke, null);
         }
       }
     } else {
       // Draw all strokes (not using cache, or cache unavailable)
-      // Use ref to get latest strokes during panning
-      const strokesToDraw = strokesRef.current.length > 0 ? strokesRef.current : strokes;
+      // PERFORMANCE OPTIMIZATION: Set common context properties once, not per stroke
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.globalCompositeOperation = 'source-over';
+      
+      // Always use ref for strokes - it's kept in sync and updated immediately when needed
+      const strokesToDraw = strokesRef.current;
       strokesToDraw.forEach((stroke, index) => {
         if (stroke.points.length === 0) return;
         const bounds = strokeBoundsRef.current[index];
@@ -1158,6 +1286,8 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
             bounds.minY > viewY + viewH;
           if (outside) return;
         }
+        // Only set stroke-specific properties
+        ctx.strokeStyle = stroke.color;
         drawStroke(ctx, stroke, null);
       });
     }
@@ -1174,20 +1304,30 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     }
     
     if (strokeToDraw) {
+      // PERFORMANCE OPTIMIZATION: Set context properties for active stroke
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = strokeToDraw.color;
+      ctx.globalCompositeOperation = 'source-over';
       drawStroke(ctx, strokeToDraw, tool === "eraser" ? eraserTarget : null);
     }
 
     // Text elements are rendered as HTML overlays for proper markdown/latex support
 
-    // Draw lasso
-    if (lassoPoints.length > 1) {
+    // Draw lasso - use ref for latest data during active drawing
+    const currentLassoPoints = lassoPointsRef.current.length > 0 ? lassoPointsRef.current : lassoPoints;
+    if (currentLassoPoints.length > 1) {
       ctx.save();
       ctx.strokeStyle = "#00E5FF";
       ctx.lineWidth = 2 / currentZoom;
       ctx.setLineDash([5 / currentZoom, 5 / currentZoom]);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.beginPath();
-      ctx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
-      lassoPoints.forEach(p => ctx.lineTo(p.x, p.y));
+      ctx.moveTo(currentLassoPoints[0].x, currentLassoPoints[0].y);
+      currentLassoPoints.forEach(p => ctx.lineTo(p.x, p.y));
       ctx.stroke();
       ctx.restore();
     }
@@ -1229,10 +1369,10 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     }
 
     ctx.restore();
-  }, [strokes, currentStroke, canvasBg, showGrid, panOffset, zoom, eraserTarget, tool, lassoPoints, lassoSelection, textElements, pdfOverlays, isPanning]);
+  }, [currentStroke, canvasBg, showGrid, panOffset, zoom, eraserTarget, tool, lassoPoints, lassoSelection, textElements, pdfOverlays, isPanning]);
 
-  // Keep redrawCanvas ref in sync
-  useEffect(() => {
+  // Keep redrawCanvas ref in sync using useLayoutEffect so it's updated synchronously
+  useLayoutEffect(() => {
     redrawCanvasRef.current = redrawCanvas;
   }, [redrawCanvas]);
 
@@ -1293,8 +1433,10 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
 
   const drawStrokeSegment = (ctx: CanvasRenderingContext2D, stroke: Stroke, fromPoint: Point, toPoint: Point, smoothingEnabled: boolean) => {
     // Context properties are already set in flushPendingPoints - avoid redundant settings
-    const avgPressure = (fromPoint.pressure + toPoint.pressure) / 2;
-    ctx.lineWidth = Math.max(stroke.size * avgPressure, stroke.size * 0.5);
+    // Use pressure from destination point to preserve pressure sensitivity
+    // This ensures the stroke width reflects the actual pressure at each point
+    const pressure = toPoint.pressure;
+    ctx.lineWidth = Math.max(stroke.size * pressure, stroke.size * 0.5);
 
     // Ensure no dash pattern for normal drawing
     ctx.setLineDash([]);
@@ -1319,28 +1461,84 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
   };
 
   const drawStroke = (ctx: CanvasRenderingContext2D, stroke: Stroke, highlightIndex: number | null) => {
-    ctx.save();
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = stroke.color;
-    ctx.globalCompositeOperation = 'source-over';
+    // PERFORMANCE OPTIMIZATION: High-quality stroke rendering with Catmull-Rom splines
+    const rawPoints = stroke.points;
+    if (rawPoints.length === 0) return;
 
-    const pointsToDraw = stroke.points;
-
-    if (pointsToDraw.length === 1) {
-      const point = pointsToDraw[0];
-      drawStrokePoint(ctx, stroke, point);
-    } else if (pointsToDraw.length >= 2) {
-      for (let i = 1; i < pointsToDraw.length; i++) {
-        const prevPoint = pointsToDraw[i - 1];
-        const currPoint = pointsToDraw[i];
-        drawStrokeSegment(ctx, stroke, prevPoint, currPoint, smoothingEnabled);
-      }
+    // Single point - draw as circle
+    if (rawPoints.length === 1) {
+      const point = rawPoints[0];
+      const radius = Math.max(stroke.size * point.pressure, stroke.size * 0.4) / 2;
+      ctx.fillStyle = stroke.color;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      return;
     }
 
-    ctx.restore();
+    // Filter points to reduce jitter for better quality
+    const pointsToDraw = rawPoints.length > 4 ? filterPoints(rawPoints, 1.2) : rawPoints;
+    
+    if (pointsToDraw.length < 2) {
+      const point = pointsToDraw[0] || rawPoints[0];
+      const radius = Math.max(stroke.size * point.pressure, stroke.size * 0.4) / 2;
+      ctx.fillStyle = stroke.color;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+
+    ctx.strokeStyle = stroke.color;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    // For 2-3 points, draw with variable pressure along the path
+    if (pointsToDraw.length <= 3) {
+      // Draw segment by segment with pressure from each destination point
+      for (let i = 1; i < pointsToDraw.length; i++) {
+        const fromPoint = pointsToDraw[i - 1];
+        const toPoint = pointsToDraw[i];
+        const pressure = toPoint.pressure;
+        ctx.lineWidth = Math.max(stroke.size * pressure, stroke.size * 0.4);
+        ctx.beginPath();
+        ctx.moveTo(fromPoint.x, fromPoint.y);
+        ctx.lineTo(toPoint.x, toPoint.y);
+        ctx.stroke();
+      }
+      return;
+    }
+
+    // For 4+ points: Use Catmull-Rom splines with variable pressure along the path
+    // This creates professional-quality strokes with natural curvature and pressure sensitivity
+    const numSegments = 4; // Interpolation segments per point pair (higher = smoother)
+    
+    // Draw stroke with variable width based on pressure at each segment
+    for (let i = 0; i < pointsToDraw.length - 1; i++) {
+      // Get 4 control points for spline (with clamping at edges)
+      const p0 = pointsToDraw[Math.max(0, i - 1)];
+      const p1 = pointsToDraw[i];
+      const p2 = pointsToDraw[Math.min(pointsToDraw.length - 1, i + 1)];
+      const p3 = pointsToDraw[Math.min(pointsToDraw.length - 1, i + 2)];
+
+      // Draw each segment with its own pressure-based width
+      for (let j = 1; j <= numSegments; j++) {
+        const t1 = (j - 1) / numSegments;
+        const t2 = j / numSegments;
+        const interpolated1 = catmullRomSpline(p0, p1, p2, p3, t1);
+        const interpolated2 = catmullRomSpline(p0, p1, p2, p3, t2);
+        
+        // Use pressure from destination point to preserve pressure sensitivity
+        const pressure = interpolated2.pressure;
+        ctx.lineWidth = Math.max(stroke.size * pressure, stroke.size * 0.35);
+        
+        // Draw this segment
+        ctx.beginPath();
+        ctx.moveTo(interpolated1.x, interpolated1.y);
+        ctx.lineTo(interpolated2.x, interpolated2.y);
+        ctx.stroke();
+      }
+    }
   };
 
   const getViewWorldRect = (targetZoom: number, targetPan: { x: number; y: number }) => {
@@ -1474,14 +1672,34 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     }
   }, [panOffset, zoom, isPanning]);
 
-  // Use useLayoutEffect to ensure canvas redraws synchronously with text element updates
-  // This keeps everything perfectly in sync
-  // Skip during active panning to prevent jitter (panning uses direct ref updates)
+  // OPTIMIZED: Use useLayoutEffect only for critical state changes
+  // During drawing/panning, the respective handlers (flushPendingPoints, schedulePanZoom) handle rendering
+  // This effect is for: undo, stroke completion, background changes, zoom changes when idle
+  const prevStrokesRef = useRef<Stroke[]>(strokes);
+  const prevStrokeLengthRef = useRef(strokes.length);
   useLayoutEffect(() => {
-    if (!isPanning) {
+    const strokesChanged = strokes !== prevStrokesRef.current;
+    const strokeLengthChanged = strokes.length !== prevStrokeLengthRef.current;
+    prevStrokesRef.current = strokes;
+    prevStrokeLengthRef.current = strokes.length;
+    
+    // Only redraw if:
+    // 1. Strokes changed (undo/redo/completion)
+    // 2. Not actively drawing (flushPendingPoints handles that)
+    // 3. Not actively panning (schedulePanZoom handles that)
+    if (strokesChanged && strokeLengthChanged && !isPanningRef.current && !isDrawingRef.current) {
       redrawCanvas();
     }
-  }, [redrawCanvas, panOffset, zoom, isPanning]);
+  }, [redrawCanvas, strokes]);
+  
+  // Separate effect for pan/zoom changes when idle (not during active interaction)
+  useLayoutEffect(() => {
+    // Skip if we're actively interacting
+    if (isPanningRef.current || isDrawingRef.current || activeTouchesRef.current.size > 0) {
+      return;
+    }
+    redrawCanvas();
+  }, [redrawCanvas, panOffset, zoom]);
 
   const getPointerPressure = (e: PointerLike) => {
     if (!e.pointerType || e.pointerType === "mouse") {
@@ -1535,11 +1753,11 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
 
   const getPointerPos = (e: PointerLike): Point => {
     const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0, pressure: 0.5 };
+    if (!canvas) return { x: 0, y: 0, pressure: 0.5, timestamp: performance.now() };
 
     // Use cached rect to avoid expensive getBoundingClientRect on every event
     const rect = getCachedRect();
-    if (!rect) return { x: 0, y: 0, pressure: 0.5 };
+    if (!rect) return { x: 0, y: 0, pressure: 0.5, timestamp: performance.now() };
 
     // Mouse position relative to canvas visual display
     const mouseX = e.clientX - rect.left;
@@ -1565,6 +1783,7 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       x: clampedX,
       y: clampedY,
       pressure: getPointerPressure(e),
+      timestamp: e.timeStamp || performance.now(),
     };
   };
 
@@ -1623,7 +1842,7 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       return;
     }
 
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) {
       pendingPointsRef.current = [];
       return;
@@ -1635,28 +1854,38 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     // Clear pending points immediately to allow new points to queue while processing
     pendingPointsRef.current = [];
 
-    // Set canvas properties once per batch
+    const currentPan = panOffsetRef.current;
+    const currentZoom = zoomRef.current;
+
+    // OPTIMIZATION: Instead of redrawing the entire canvas, only draw new segments
+    // This dramatically reduces CPU usage during drawing
+    
+    // Add points to stroke first
+    for (const point of queuedPoints) {
+      stroke.points.push(point);
+    }
+
+    // Now draw ONLY the new segments on top of existing content
     ctx.save();
-    ctx.translate(panOffsetRef.current.x, panOffsetRef.current.y);
-    ctx.scale(zoomRef.current, zoomRef.current);
+    ctx.translate(currentPan.x, currentPan.y);
+    ctx.scale(currentZoom, currentZoom);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.strokeStyle = stroke.color;
+    ctx.fillStyle = stroke.color;
 
-    let prevPoint = lastPointRef.current;
     const zoomFactor = Math.max(0.25, zoomRef.current);
     const maxJump = 600 / zoomFactor;
     const maxJumpSq = maxJump * maxJump;
-    // Maximum gap before we interpolate - in world coordinates
-    const maxGapDistance = 8; // pixels in world space
+    const maxGapDistance = 6; // pixels in world space
     const maxGapSq = maxGapDistance * maxGapDistance;
 
-    // Draw each point with proper pressure handling
+    let prevPoint = lastPointRef.current;
+
+    // Draw each queued point as a segment from the previous point
     for (const point of queuedPoints) {
-      stroke.points.push(point);
-      
       if (prevPoint) {
         const dx = point.x - prevPoint.x;
         const dy = point.y - prevPoint.y;
@@ -1664,68 +1893,104 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
 
         if (!Number.isFinite(distSq) || distSq > maxJumpSq) {
           // Large jump - draw point only
-          drawStrokePoint(ctx, stroke, point);
+          const radius = Math.max(stroke.size * point.pressure, stroke.size * 0.4) / 2;
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+          ctx.fill();
           prevPoint = point;
           continue;
         }
 
-        // If gap is too large, interpolate intermediate points to fill it
-        if (distSq > maxGapSq) {
-          const dist = Math.sqrt(distSq);
-          const numSteps = Math.ceil(dist / maxGapDistance);
-          const stepX = dx / numSteps;
-          const stepY = dy / numSteps;
-          const stepPressure = (point.pressure - prevPoint.pressure) / numSteps;
+        // Calculate velocity-based width for natural pen feel
+        const velocity = calculateVelocity(prevPoint, point);
+        const avgPressure = (prevPoint.pressure + point.pressure) / 2;
+        const lineWidth = calculateStrokeWidth(stroke.size, avgPressure, velocity);
+
+        // If gap is moderate, use quadratic bezier for smoothness
+        if (distSq > maxGapSq && stroke.points.length >= 3) {
+          // Use the point before prevPoint as control point for smoothing
+          const pointIndex = stroke.points.length - queuedPoints.length + queuedPoints.indexOf(point);
+          const controlPoint = stroke.points[Math.max(0, pointIndex - 2)] || prevPoint;
           
-          // Draw interpolated segments to fill the gap
-          let currentPrev = prevPoint;
-          for (let i = 1; i < numSteps; i++) {
-            const interpPoint: Point = {
-              x: prevPoint.x + stepX * i,
-              y: prevPoint.y + stepY * i,
-              pressure: prevPoint.pressure + stepPressure * i
-            };
-            // Draw segment to interpolated point
-            drawStrokeSegment(ctx, stroke, currentPrev, interpPoint, smoothingEnabledRef.current);
-            currentPrev = interpPoint;
-          }
-          // Final segment to the actual point
-          drawStrokeSegment(ctx, stroke, currentPrev, point, smoothingEnabledRef.current);
+          ctx.beginPath();
+          ctx.moveTo(prevPoint.x, prevPoint.y);
+          const cpX = prevPoint.x + (point.x - controlPoint.x) * 0.2;
+          const cpY = prevPoint.y + (point.y - controlPoint.y) * 0.2;
+          ctx.quadraticCurveTo(cpX, cpY, point.x, point.y);
+          ctx.lineWidth = lineWidth;
+          ctx.stroke();
         } else {
-          // Normal gap - just draw the segment
-          drawStrokeSegment(ctx, stroke, prevPoint, point, smoothingEnabledRef.current);
+          // Normal gap - draw line segment
+          ctx.beginPath();
+          ctx.moveTo(prevPoint.x, prevPoint.y);
+          ctx.lineTo(point.x, point.y);
+          ctx.lineWidth = lineWidth;
+          ctx.stroke();
         }
         prevPoint = point;
       } else {
-        // First point of stroke
-        drawStrokePoint(ctx, stroke, point);
+        // First point of stroke - draw a dot
+        const radius = Math.max(stroke.size * point.pressure, stroke.size * 0.4) / 2;
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+        ctx.fill();
         prevPoint = point;
       }
     }
 
     lastPointRef.current = prevPoint ?? lastPointRef.current;
     ctx.restore();
+    
+    // OPTIMIZATION: Only trigger React state update sparingly to reduce re-renders
+    // The actual stroke data is stored in the ref and will be committed on pointerUp
+    if (currentStrokeRef.current && currentStrokeRef.current.points.length === 5 && !currentStroke) {
+      setCurrentStroke(currentStrokeRef.current);
+    }
   };
 
+  // Track last flush time for adaptive scheduling
+  const lastFlushTimeRef = useRef<number>(0);
+  const flushAccumulatorRef = useRef<number>(0);
+  
   const schedulePointFlush = () => {
     if (pendingPointsRef.current.length === 0) return;
     
-    // On slower devices, process points immediately instead of waiting for RAF
-    // This ensures smoother drawing even when the frame rate is low
+    // ULTRA-LOW LATENCY: Process points immediately without RAF delay
+    // This gives OneNote-like responsiveness
     if (drawRafRef.current !== null) {
       window.cancelAnimationFrame(drawRafRef.current);
       drawRafRef.current = null;
     }
     
-    // Process immediately for better responsiveness on slower devices
+    // Track timing for adaptive behavior
+    const now = performance.now();
+    const timeSinceLastFlush = now - lastFlushTimeRef.current;
+    lastFlushTimeRef.current = now;
+    
+    // If we're flushing faster than 120Hz (8.3ms), accumulate and batch
+    // This prevents overwhelming slow GPUs while maintaining responsiveness
+    if (timeSinceLastFlush < 8 && pendingPointsRef.current.length < 3) {
+      flushAccumulatorRef.current += timeSinceLastFlush;
+      if (flushAccumulatorRef.current < 8) {
+        // Queue for next RAF to batch multiple quick events
+        drawRafRef.current = requestAnimationFrame(flushPendingPoints);
+        return;
+      }
+    }
+    flushAccumulatorRef.current = 0;
+    
+    // Process immediately for better responsiveness
     flushPendingPoints();
   };
 
   const queuePendingPoints = (points: Point[]) => {
     if (points.length === 0) return;
     
-    // No batching - process all points immediately for maximum responsiveness
+    // Add points to queue
     pendingPointsRef.current.push(...points);
+    
+    // For pen/stylus input, process immediately for lowest latency
+    // For mouse, batch slightly for smoother lines
     schedulePointFlush();
   };
 
@@ -1905,6 +2170,7 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     }
 
     if (effectiveTool === "lasso") {
+      lassoPointsRef.current = [point];
       setLassoPoints([point]);
       setLassoSelection(null);
       setShowLassoMenu(false);
@@ -1923,7 +2189,12 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       if (strokeIndex !== null) {
         setUndoStack((prev) => [...prev, strokes]);
         setStrokes((prev) => prev.filter((_, index) => index !== strokeIndex));
+        // Force immediate redraw
+        if (redrawCanvasRef.current) {
+          redrawCanvasRef.current();
+        }
       }
+      setEraserTarget(strokeIndex);
       return;
     }
 
@@ -1934,9 +2205,15 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       color: currentColor,
       size: brushSize,
     };
-    setCurrentStroke(nextStroke);
+    // PERFORMANCE OPTIMIZATION: Only update ref during drawing, defer React state update
+    // This prevents React re-renders during active drawing
     currentStrokeRef.current = nextStroke;
     isDrawingRef.current = true;
+    // Defer React state update - only set it after first point is drawn or on stroke completion
+    // This reduces React re-renders during drawing
+    if (!currentStroke) {
+      setCurrentStroke(nextStroke);
+    }
     rawUpdateSeenRef.current = false;
     lastPointRef.current = point;
     // Invalidate cached rect when starting a stroke to ensure accuracy
@@ -2063,23 +2340,38 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
 
     const effectiveTool = isPenBarrelButtonPressed(e) ? "eraser" : tool;
 
-    if (effectiveTool === "lasso" && isDrawing) {
-      setLassoPoints(prev => [...prev, point]);
+    if (effectiveTool === "lasso" && isDrawingRef.current) {
+      // Update both state and ref
+      const newPoints = [...lassoPointsRef.current, point];
+      lassoPointsRef.current = newPoints;
+      setLassoPoints(newPoints);
+      
+      // Draw lasso directly and synchronously - no RAF delay
+      const canvas = canvasRef.current;
+      if (canvas && newPoints.length > 1) {
+        const ctx = canvas.getContext("2d", { alpha: false });
+        if (ctx) {
+          // Full canvas redraw to show lasso path properly
+          if (redrawCanvasRef.current) {
+            redrawCanvasRef.current();
+          }
+        }
+      }
       return;
     }
 
     if (effectiveTool === "eraser") {
-      if (isDrawing) {
-        const strokeIndex = findStrokeUnderCursor(point.x, point.y);
-        if (strokeIndex !== null) {
-          setUndoStack((prev) => [...prev, strokes]);
-          setStrokes((prev) => prev.filter((_, index) => index !== strokeIndex));
+      // Always try to erase when pointer is moving (pointer is down during move)
+      const strokeIndex = findStrokeUnderCursor(point.x, point.y);
+      if (strokeIndex !== null && isDrawingRef.current) {
+        setUndoStack((prev) => [...prev, strokes]);
+        setStrokes((prev) => prev.filter((_, index) => index !== strokeIndex));
+        // Force immediate redraw
+        if (redrawCanvasRef.current) {
+          redrawCanvasRef.current();
         }
-        setEraserTarget(strokeIndex);
-      } else {
-        const strokeIndex = findStrokeUnderCursor(point.x, point.y);
-        setEraserTarget(strokeIndex);
       }
+      setEraserTarget(strokeIndex);
       return;
     }
 
@@ -2185,6 +2477,8 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
         });
         setShowLassoMenu(true);
       }
+      lassoPointsRef.current = [];
+      lassoPointsRef.current = [];
       setLassoPoints([]);
     }
 
@@ -2733,8 +3027,25 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
   const handleUndo = () => {
     if (undoStack.length > 0) {
       const previousState = undoStack[undoStack.length - 1];
+      // Update ref immediately so redraw uses correct data
+      strokesRef.current = previousState;
+      // Invalidate cache immediately
+      staticLayerRef.current = null;
+      staticLayerBoundsRef.current = null;
+      staticLayerScaleRef.current = null;
+      staticLayerStrokeCountRef.current = 0;
+      // Update state
       setStrokes(previousState);
       setUndoStack((prev) => prev.slice(0, -1));
+      // CRITICAL: Force immediate redraw using requestAnimationFrame to ensure it runs after state update
+      // Use the ref version to ensure we get the latest redrawCanvas function
+      requestAnimationFrame(() => {
+        if (redrawCanvasRef.current) {
+          redrawCanvasRef.current();
+        } else {
+          redrawCanvas();
+        }
+      });
     }
   };
 
@@ -3456,7 +3767,24 @@ DO NOT ADD ANY EXTRA TEXT.`
           
           // Remove selected strokes
           const selectedIndexes = new Set(lassoSelection.strokes);
-          setStrokes(prev => prev.filter((_, index) => !selectedIndexes.has(index)));
+          const newStrokes = strokes.filter((_, index) => !selectedIndexes.has(index));
+          // Update ref immediately so redraw uses correct data
+          strokesRef.current = newStrokes;
+          // Invalidate cache immediately
+          staticLayerRef.current = null;
+          staticLayerBoundsRef.current = null;
+          staticLayerScaleRef.current = null;
+          staticLayerStrokeCountRef.current = 0;
+          // Update state
+          setStrokes(newStrokes);
+          // CRITICAL: Force immediate redraw using requestAnimationFrame to ensure it runs after state update
+          requestAnimationFrame(() => {
+            if (redrawCanvasRef.current) {
+              redrawCanvasRef.current();
+            } else {
+              redrawCanvas();
+            }
+          });
           
           // Add to chat
           setChatMessages(prev => [...prev, {
@@ -3789,15 +4117,17 @@ DO NOT ADD ANY EXTRA TEXT.`
             }`}
             title={textElementsClickable ? "Disable text element interaction" : "Enable text element interaction"}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 -2 24 26" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" strokeMiterlimit="10">
               {textElementsClickable ? (
                 <>
-                  <path d="M12 2v20M2 12h20"/>
-                  <circle cx="9" cy="9" r="2"/>
-                  <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+                  <rect x="5.25" y="10.5" width="13.5" height="10.5"/>
+                  <path d="M16.5,10.5v-6c0-2.475-2.025-4.5-4.5-4.5h0c-2.475,0-4.5,2.025-4.5,4.5v3"/>
                 </>
               ) : (
-                <path d="M12 2v20M2 12h20"/>
+                <>
+                  <rect x="5.25" y="10.5" width="13.5" height="10.5"/>
+                  <path d="M16.5,10.5v-3c0-2.475-2.025-4.5-4.5-4.5h0c-2.475,0-4.5,2.025-4.5,4.5v3"/>
+                </>
               )}
             </svg>
           </button>
@@ -3841,10 +4171,24 @@ DO NOT ADD ANY EXTRA TEXT.`
             </button>
             {showPdfPanel && (
               <div
-                className="absolute right-0 top-12 z-[1000] w-64 rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/95 p-3 shadow-lg backdrop-blur"
-                onPointerDown={(e) => e.stopPropagation()}
-                onPointerMove={(e) => e.stopPropagation()}
-                onPointerUp={(e) => e.stopPropagation()}
+                className="absolute right-0 top-12 z-[9999] w-64 rounded-xl border border-[var(--foreground)]/10 bg-[var(--background)]/95 p-3 shadow-lg backdrop-blur"
+                style={{ pointerEvents: 'auto' }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                }}
+                onPointerMove={(e) => {
+                  e.stopPropagation();
+                }}
+                onPointerUp={(e) => {
+                  e.stopPropagation();
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
               >
                 <div className="text-[11px] uppercase tracking-wide text-[var(--foreground)]/60">PDF layers</div>
                 {pdfOverlays.length === 0 ? (
@@ -3855,11 +4199,13 @@ DO NOT ADD ANY EXTRA TEXT.`
                       <div key={overlay.id} className="flex items-center justify-between gap-2 text-sm">
                         <button
                           className="truncate text-left text-[var(--foreground)]/80 hover:text-[var(--foreground)]"
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             if (!overlay.locked) {
                               setSelectedPdfId(overlay.id);
                             }
                           }}
+                          onMouseDown={(e) => e.stopPropagation()}
                           title={overlay.name}
                         >
                           {overlay.name}
@@ -3867,7 +4213,8 @@ DO NOT ADD ANY EXTRA TEXT.`
                         <div className="flex items-center gap-1">
                           <button
                             className="rounded-md px-2 py-1 text-xs text-[var(--foreground)]/70 hover:text-[var(--foreground)] hover:bg-[var(--foreground)]/10"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               const scale = 1.08;
                               setPdfOverlays(prev => prev.map(p =>
                                 p.id === overlay.id
@@ -3875,12 +4222,14 @@ DO NOT ADD ANY EXTRA TEXT.`
                                   : p
                               ));
                             }}
+                            onMouseDown={(e) => e.stopPropagation()}
                           >
                             +
                           </button>
                           <button
                             className="rounded-md px-2 py-1 text-xs text-[var(--foreground)]/70 hover:text-[var(--foreground)] hover:bg-[var(--foreground)]/10"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               const scale = 1 / 1.08;
                               setPdfOverlays(prev => prev.map(p =>
                                 p.id === overlay.id
@@ -3888,12 +4237,14 @@ DO NOT ADD ANY EXTRA TEXT.`
                                   : p
                               ));
                             }}
+                            onMouseDown={(e) => e.stopPropagation()}
                           >
                             -
                           </button>
                           <button
                             className="rounded-md px-2 py-1 text-xs text-[var(--foreground)]/70 hover:text-[var(--foreground)] hover:bg-[var(--foreground)]/10"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setPdfOverlays(prev => prev.map(p =>
                                 p.id === overlay.id ? { ...p, locked: !p.locked } : p
                               ));
@@ -3901,16 +4252,19 @@ DO NOT ADD ANY EXTRA TEXT.`
                                 setSelectedPdfId(null);
                               }
                             }}
+                            onMouseDown={(e) => e.stopPropagation()}
                           >
                             {overlay.locked ? "Unlock" : "Lock"}
                           </button>
                           <button
                             className="rounded-md px-2 py-1 text-xs text-red-400 hover:bg-red-500/10"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setPdfOverlays(prev => prev.filter(p => p.id !== overlay.id));
                               pdfImageCacheRef.current.delete(overlay.id);
                               setSelectedPdfId((prev) => (prev === overlay.id ? null : prev));
                             }}
+                            onMouseDown={(e) => e.stopPropagation()}
                           >
                             Remove
                           </button>
@@ -4420,12 +4774,21 @@ DO NOT ADD ANY EXTRA TEXT.`
                 )}
                 <div className="flex items-center gap-2 mt-1">
                   <label className="flex items-center gap-1.5 text-[9px] text-[var(--foreground)]/60 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={includeCanvas}
-                      onChange={(e) => setIncludeCanvas(e.target.checked)}
-                      className="w-3 h-3 rounded border border-[var(--foreground)]/20 bg-[var(--foreground)]/5 checked:bg-[var(--accent-cyan)] checked:border-[var(--accent-cyan)] cursor-pointer"
-                    />
+                    <button
+                      type="button"
+                      onClick={() => setIncludeCanvas(!includeCanvas)}
+                      className={`w-3.5 h-3.5 rounded border-2 border-[var(--foreground)]/30 flex items-center justify-center transition-all ${
+                        includeCanvas 
+                          ? 'bg-[var(--foreground)]/20 border-[var(--foreground)]/60' 
+                          : 'bg-transparent'
+                      }`}
+                    >
+                      {includeCanvas && (
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--foreground)] pointer-events-none">
+                          <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                      )}
+                    </button>
                     <span>Include canvas</span>
                   </label>
                   <p className="text-[9px] text-[var(--foreground)]/40">
