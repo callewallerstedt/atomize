@@ -3263,7 +3263,7 @@ DO NOT ADD ANY EXTRA TEXT.`
           // Remove common explanatory prefixes
           rewrittenText = rewrittenText
             .replace(/^.*?(?:equation is|appears to be|this is|the text|rewritten as)[:\s]*/i, '')
-            .replace(/^.*?["""](.*)["""].*?$/s, '$1') // Extract content from quotes
+            .replace(/^.*?["""]([\s\S]*?)["""][\s\S]*?$/, '$1') // Extract content from quotes
             .trim();
 
           // If it still contains explanatory text, try to extract just the content
