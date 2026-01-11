@@ -2964,7 +2964,7 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
         if (!pageCtx) continue;
         pageCtx.imageSmoothingEnabled = true;
         pageCtx.imageSmoothingQuality = "high";
-        await page.render({ canvasContext: pageCtx, viewport }).promise;
+        await page.render({ canvas: pageCanvas, viewport }).promise;
         pageCanvases.push(pageCanvas);
         maxWidth = Math.max(maxWidth, pageCanvas.width);
         totalHeight += pageCanvas.height;
