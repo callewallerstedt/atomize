@@ -2942,7 +2942,7 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     if (!file) return;
     setIsPdfProcessing(true);
     try {
-      const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf");
+      const pdfjsLib = await import("pdfjs-dist");
       if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
         pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
       }
