@@ -13,7 +13,6 @@ import { saveSubjectData, StoredSubjectData, loadSubjectData } from "@/utils/sto
 import { changelog } from "../../CHANGELOG";
 import { LessonBody } from "@/components/LessonBody";
 import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
-import CoSolve from "@/components/CoSolve";
 
 type Subject = { name: string; slug: string; sharedByUsername?: string | null };
 
@@ -492,7 +491,7 @@ function HomepageFileUploadArea({
   );
 }
 
-function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn, setCoSolveOpen }: { tutorialSignal: number; setTutorialSignal: (updater: (prev: number) => number) => void; onQuickLearn?: (query: string) => void; setCoSolveOpen?: (open: boolean) => void }) {
+function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn }: { tutorialSignal: number; setTutorialSignal: (updater: (prev: number) => number) => void; onQuickLearn?: (query: string) => void }) {
   const router = useRouter();
   const pathname = usePathname();
   const [welcomeText, setWelcomeText] = useState("");
@@ -3101,8 +3100,8 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                       }
                       return;
                     }
-                    if (!homepageSending && !isTutorialActive && setCoSolveOpen) {
-                      setCoSolveOpen(true);
+                    if (!homepageSending && !isTutorialActive) {
+                      router.push("/cosolve");
                     }
                   }}
                   disabled={homepageSending || isTutorialActive}
@@ -3336,8 +3335,8 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                       }
                       return;
                     }
-                    if (!homepageSending && !isTutorialActive && setCoSolveOpen) {
-                      setCoSolveOpen(true);
+                    if (!homepageSending && !isTutorialActive) {
+                      router.push("/cosolve");
                     }
                   }}
                   disabled={homepageSending || isTutorialActive}
@@ -3436,7 +3435,6 @@ function Home() {
   const [subscriptionLevel, setSubscriptionLevel] = useState<string | null>(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
-  const [coSolveOpen, setCoSolveOpen] = useState(false);
   const hasPremiumAccess =
     subscriptionLevel === "Tester" ||
     subscriptionLevel === "Paid" ||
@@ -5034,7 +5032,6 @@ function Home() {
         <WelcomeMessage
           tutorialSignal={tutorialSignal}
           setTutorialSignal={setTutorialSignal}
-          setCoSolveOpen={setCoSolveOpen}
           onQuickLearn={(query) => {
             setQuickLearnQuery(query);
             handleQuickLearn();
@@ -6265,8 +6262,7 @@ function Home() {
       </div>
       </div>
       
-      {/* CoSolve Canvas Modal */}
-      <CoSolve isOpen={coSolveOpen} onClose={() => setCoSolveOpen(false)} />
+      {/* CoSolve is now a separate page at /cosolve */}
     </>
   );
 }

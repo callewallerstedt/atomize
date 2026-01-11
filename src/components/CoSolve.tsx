@@ -209,6 +209,7 @@ const mergeCanvases = (local: CanvasData[], remote: CanvasData[]) => {
 export function CoSolve({ isOpen, onClose }: CoSolveProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const resolutionMultiplierRef = useRef<number>(2);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -227,7 +228,7 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
   const [tool, setTool] = useState<"pen" | "eraser" | "pan" | "lasso">("pen");
   const [eraserTarget, setEraserTarget] = useState<number | null>(null);
   const [showGrid, setShowGrid] = useState(true);
-  const [smoothingEnabled, setSmoothingEnabled] = useState(true);
+  const [smoothingEnabled, setSmoothingEnabled] = useState(false);
   const [colorPresets, setColorPresets] = useState(getInitialColors);
   
   // UI state
@@ -265,6 +266,7 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
   const currentStrokeRef = useRef<Stroke | null>(currentStroke);
   const toolRef = useRef(tool);
   const brushSizeRef = useRef(brushSize);
+  const smoothingEnabledRef = useRef(smoothingEnabled);
   const rafPanZoomRef = useRef<number | null>(null);
   
   // Lasso state
@@ -325,6 +327,9 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     } else if (skipStateUpdate) {
       // During active panning: optimized for speed - reduce update frequency
       if (rafPanZoomRef.current === null) {
+        // Switch to lower resolution for better pan/zoom performance
+        adjustCanvasResolution(false);
+        
         let frameCount = 0;
         const updateLoop = () => {
           frameCount++;
@@ -381,6 +386,8 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
             textPanZoomRef.current = finalValue;
             setTextPanZoom(finalValue);
             rafPanZoomRef.current = null;
+            // Restore high resolution for quality when panning ends
+            adjustCanvasResolution(true);
             // Rebuild static layer for better quality after panning ends
             setTimeout(() => {
               if (!isDrawingRef.current && !isPanningRef.current && activeTouchesRef.current.size === 0) {
@@ -430,6 +437,7 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
   const staticLayerBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const staticLayerScaleRef = useRef<number | null>(null);
   const staticLayerStrokeCountRef = useRef(0);
+  const redrawCanvasRef = useRef<(() => void) | null>(null);
   const strokeBoundsRef = useRef<Array<{ minX: number; minY: number; maxX: number; maxY: number }>>([]);
   const prevStrokesForBoundsRef = useRef<Stroke[]>([]);
 
@@ -441,7 +449,7 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    const radius = Math.max(stroke.size * 0.5, stroke.size * 0.35);
+    const radius = Math.max(stroke.size * 0.5, stroke.size * 0.5);
 
     for (const point of stroke.points) {
       minX = Math.min(minX, point.x - radius);
@@ -510,6 +518,10 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
   useEffect(() => {
     brushSizeRef.current = brushSize;
   }, [brushSize]);
+
+  useEffect(() => {
+    smoothingEnabledRef.current = smoothingEnabled;
+  }, [smoothingEnabled]);
 
   useEffect(() => {
     supportsPointerRawUpdateRef.current =
@@ -783,6 +795,7 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       isPanningRef.current = false;
       setIsDrawing(false);
       isDrawingRef.current = false;
+      // Don't resize canvas after loading - let it stay at current resolution
       
       // Update state
       setCurrentCanvasIdState(id);
@@ -907,30 +920,43 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     return () => clearTimeout(saveTimeout);
   }, [strokes, textElements, pdfOverlays, canvasBg, currentCanvasName, currentCanvasId, isOpen]);
 
-  // Resize canvas to fit container
-  const resizeCanvas = useCallback(() => {
+  // Adjust canvas resolution dynamically - lower during pan/zoom for performance, high when idle for quality
+  const adjustCanvasResolution = useCallback((useHighResolution: boolean) => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
 
     const rect = container.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
+    
+    // Use standard DPR resolution for good quality without excessive performance cost
+    // dpr * 2 was causing massive lag on slow devices
+    const resolutionMultiplier = Math.max(dpr, 1);
+    resolutionMultiplierRef.current = resolutionMultiplier;
 
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
+    canvas.width = rect.width * resolutionMultiplier;
+    canvas.height = rect.height * resolutionMultiplier;
     
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
 
     const ctx = canvas.getContext("2d");
     if (ctx) {
-      ctx.scale(dpr, dpr);
+      ctx.scale(resolutionMultiplier, resolutionMultiplier);
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
     }
 
-    redrawCanvas();
+    // Use ref to call redrawCanvas to avoid dependency issues
+    if (redrawCanvasRef.current) {
+      redrawCanvasRef.current();
+    }
   }, []);
+
+  // Resize canvas to fit container (uses high resolution by default)
+  const resizeCanvas = useCallback(() => {
+    adjustCanvasResolution(true);
+  }, [adjustCanvasResolution]);
 
   useEffect(() => {
     if (isOpen) {
@@ -972,10 +998,10 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
+    const resolutionMultiplier = resolutionMultiplierRef.current;
     const rect = {
-      width: canvas.width / dpr,
-      height: canvas.height / dpr,
+      width: canvas.width / resolutionMultiplier,
+      height: canvas.height / resolutionMultiplier,
     };
 
     // Clear and fill background
@@ -1044,8 +1070,15 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     ctx.lineWidth = 3 / currentZoom; // Thicker line that scales with zoom
     ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(0, -rect.height / currentZoom); // Start above visible area
-    ctx.lineTo(0, rect.height / currentZoom * 2); // End below visible area
+
+    // Calculate visible world bounds for the guide line
+    const guideViewY = -currentPan.y / Math.max(0.001, currentZoom);
+    const guideViewH = rect.height / Math.max(0.001, currentZoom);
+
+    // Draw line from top to bottom of visible area (with some margin)
+    const margin = guideViewH * 0.5; // Extra margin to ensure line is always visible
+    ctx.moveTo(0, guideViewY - margin);
+    ctx.lineTo(0, guideViewY + guideViewH + margin);
     ctx.stroke();
 
     // Skip PDF overlay drawing during very active panning for better performance
@@ -1159,12 +1192,33 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       ctx.restore();
     }
 
-    // Draw lasso selection bounds
+    // Draw lasso selection bounds with static gradient
     if (lassoSelection) {
       ctx.save();
-      ctx.strokeStyle = "#00E5FF";
-      ctx.lineWidth = 2 / currentZoom;
-      ctx.setLineDash([8 / currentZoom, 4 / currentZoom]);
+
+      // Create static gradient effect
+      const gradient = ctx.createLinearGradient(
+        lassoSelection.bounds.x,
+        lassoSelection.bounds.y,
+        lassoSelection.bounds.x + lassoSelection.bounds.width,
+        lassoSelection.bounds.y + lassoSelection.bounds.height
+      );
+
+      // Static gradient with synapse colors
+      gradient.addColorStop(0, 'rgba(0, 230, 255, 0.8)'); // Cyan
+      gradient.addColorStop(0.5, 'rgba(255, 105, 180, 0.9)'); // Pink
+      gradient.addColorStop(1, 'rgba(0, 230, 255, 0.8)'); // Cyan
+
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = 3 / currentZoom;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      // Static dash pattern
+      const dashLength = 12 / currentZoom;
+      const gapLength = 6 / currentZoom;
+      ctx.setLineDash([dashLength, gapLength]);
+
       ctx.strokeRect(
         lassoSelection.bounds.x,
         lassoSelection.bounds.y,
@@ -1176,6 +1230,11 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
 
     ctx.restore();
   }, [strokes, currentStroke, canvasBg, showGrid, panOffset, zoom, eraserTarget, tool, lassoPoints, lassoSelection, textElements, pdfOverlays, isPanning]);
+
+  // Keep redrawCanvas ref in sync
+  useEffect(() => {
+    redrawCanvasRef.current = redrawCanvas;
+  }, [redrawCanvas]);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -1224,20 +1283,39 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
   }, [pdfOverlays]);
 
   const drawStrokePoint = (ctx: CanvasRenderingContext2D, stroke: Stroke, point: Point) => {
-    const radius = Math.max(stroke.size * point.pressure, stroke.size * 0.3) / 2;
+    // Context properties are already set in flushPendingPoints - avoid redundant settings
+    const radius = Math.max(stroke.size * point.pressure, stroke.size * 0.5) / 2;
     ctx.fillStyle = stroke.color;
     ctx.beginPath();
     ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
     ctx.fill();
   };
 
-  const drawStrokeSegment = (ctx: CanvasRenderingContext2D, stroke: Stroke, fromPoint: Point, toPoint: Point) => {
+  const drawStrokeSegment = (ctx: CanvasRenderingContext2D, stroke: Stroke, fromPoint: Point, toPoint: Point, smoothingEnabled: boolean) => {
+    // Context properties are already set in flushPendingPoints - avoid redundant settings
     const avgPressure = (fromPoint.pressure + toPoint.pressure) / 2;
-    ctx.lineWidth = Math.max(stroke.size * avgPressure, stroke.size * 0.3);
-    ctx.beginPath();
-    ctx.moveTo(fromPoint.x, fromPoint.y);
-    ctx.lineTo(toPoint.x, toPoint.y);
-    ctx.stroke();
+    ctx.lineWidth = Math.max(stroke.size * avgPressure, stroke.size * 0.5);
+
+    // Ensure no dash pattern for normal drawing
+    ctx.setLineDash([]);
+
+    if (smoothingEnabled) {
+      // Use quadratic Bezier curve for smooth lines
+      // Control point is the midpoint between the two points
+      const controlX = (fromPoint.x + toPoint.x) / 2;
+      const controlY = (fromPoint.y + toPoint.y) / 2;
+
+      ctx.beginPath();
+      ctx.moveTo(fromPoint.x, fromPoint.y);
+      ctx.quadraticCurveTo(controlX, controlY, toPoint.x, toPoint.y);
+      ctx.stroke();
+    } else {
+      // Use straight lines when smoothing is disabled
+      ctx.beginPath();
+      ctx.moveTo(fromPoint.x, fromPoint.y);
+      ctx.lineTo(toPoint.x, toPoint.y);
+      ctx.stroke();
+    }
   };
 
   const drawStroke = (ctx: CanvasRenderingContext2D, stroke: Stroke, highlightIndex: number | null) => {
@@ -1258,7 +1336,7 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       for (let i = 1; i < pointsToDraw.length; i++) {
         const prevPoint = pointsToDraw[i - 1];
         const currPoint = pointsToDraw[i];
-        drawStrokeSegment(ctx, stroke, prevPoint, currPoint);
+        drawStrokeSegment(ctx, stroke, prevPoint, currPoint, smoothingEnabled);
       }
     }
 
@@ -1270,9 +1348,9 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     if (!canvas) {
       return { x: 0, y: 0, width: 0, height: 0 };
     }
-    const dpr = window.devicePixelRatio || 1;
-    const viewWidth = (canvas.width / dpr) / Math.max(0.001, targetZoom);
-    const viewHeight = (canvas.height / dpr) / Math.max(0.001, targetZoom);
+    const resolutionMultiplier = resolutionMultiplierRef.current;
+    const viewWidth = (canvas.width / resolutionMultiplier) / Math.max(0.001, targetZoom);
+    const viewHeight = (canvas.height / resolutionMultiplier) / Math.max(0.001, targetZoom);
     const x = -targetPan.x / Math.max(0.001, targetZoom);
     const y = -targetPan.y / Math.max(0.001, targetZoom);
     return { x, y, width: viewWidth, height: viewHeight };
@@ -1336,6 +1414,9 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       return;
     }
 
+    // Enable anti-aliasing for smooth rendering
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.scale(dpr * scale, dpr * scale);
     ctx.translate(-minX, -minY);
     strokes.forEach((stroke, index) => {
@@ -1432,28 +1513,42 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     );
   };
 
+  // Cache the canvas bounding rect to avoid expensive getBoundingClientRect calls
+  const cachedRectRef = useRef<{ rect: DOMRect; time: number } | null>(null);
+  
+  const getCachedRect = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    
+    const now = performance.now();
+    // Cache rect for 100ms during drawing, or invalidate if not drawing
+    const cached = cachedRectRef.current;
+    if (cached && (now - cached.time < 100)) {
+      return cached.rect;
+    }
+    
+    // Update cache
+    const newRect = canvas.getBoundingClientRect();
+    cachedRectRef.current = { rect: newRect, time: now };
+    return newRect;
+  };
+
   const getPointerPos = (e: PointerLike): Point => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0, pressure: 0.5 };
 
-    // Get the actual visual display size of the canvas
-    const rect = canvas.getBoundingClientRect();
+    // Use cached rect to avoid expensive getBoundingClientRect on every event
+    const rect = getCachedRect();
+    if (!rect) return { x: 0, y: 0, pressure: 0.5 };
 
     // Mouse position relative to canvas visual display
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    // The canvas internal resolution is (width * dpr) x (height * dpr)
-    // With ctx.scale(dpr, dpr), we draw in CSS pixel coordinates: [0, canvas.width/dpr] x [0, canvas.height/dpr]
-    // rect.width/height is the actual visual display size (affected by zoom, CSS, etc.)
-    // We need to map from visual coords to the CSS coordinate system used for drawing
-    const dpr = window.devicePixelRatio || 1;
-    const canvasCssWidth = canvas.width / dpr;
-    const canvasCssHeight = canvas.height / dpr;
-    
-    // Scale mouse position from visual space to canvas CSS coordinate space
-    const scaleX = canvasCssWidth / rect.width;
-    const scaleY = canvasCssHeight / rect.height;
+    // Pre-calculate scaling factors
+    const resolutionMultiplier = resolutionMultiplierRef.current;
+    const scaleX = (canvas.width / resolutionMultiplier) / rect.width;
+    const scaleY = (canvas.height / resolutionMultiplier) / rect.height;
 
     const currentPan = panOffsetRef.current;
     const currentZoom = zoomRef.current;
@@ -1475,23 +1570,43 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
 
   const getCoalescedPointerEvents = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const nativeEvent = e.nativeEvent as PointerEvent;
+    const events: PointerEvent[] = [];
+    
+    // Get coalesced events (intermediate events that were throttled)
     if (typeof nativeEvent.getCoalescedEvents === "function") {
       const coalesced = nativeEvent.getCoalescedEvents();
       if (coalesced.length > 0) {
-        return coalesced;
+        events.push(...coalesced);
       }
     }
-    return [nativeEvent];
+    
+    // Always include the current event if we don't have coalesced events
+    // or if the current event is different from the last coalesced one
+    if (events.length === 0 || events[events.length - 1] !== nativeEvent) {
+      events.push(nativeEvent);
+    }
+    
+    return events;
   };
 
   const getCoalescedPointerEventsFromNative = (event: PointerEvent) => {
+    const events: PointerEvent[] = [];
+    
+    // Get coalesced events (intermediate events that were throttled)
     if (typeof event.getCoalescedEvents === "function") {
       const coalesced = event.getCoalescedEvents();
       if (coalesced.length > 0) {
-        return coalesced;
+        events.push(...coalesced);
       }
     }
-    return [event];
+    
+    // Always include the current event if we don't have coalesced events
+    // or if the current event is different from the last coalesced one
+    if (events.length === 0 || events[events.length - 1] !== event) {
+      events.push(event);
+    }
+    
+    return events;
   };
 
   const flushPendingPoints = () => {
@@ -1516,52 +1631,73 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
 
     const queuedPoints = pendingPointsRef.current;
     if (queuedPoints.length === 0) return;
+    
+    // Clear pending points immediately to allow new points to queue while processing
     pendingPointsRef.current = [];
 
-    // Set canvas properties once per batch instead of every point
+    // Set canvas properties once per batch
     ctx.save();
     ctx.translate(panOffsetRef.current.x, panOffsetRef.current.y);
     ctx.scale(zoomRef.current, zoomRef.current);
-
-    // Only set smoothing properties if they might have changed
-    if (!ctx.imageSmoothingEnabled) {
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-    }
-    if (ctx.lineCap !== "round" || ctx.lineJoin !== "round") {
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.strokeStyle = stroke.color;
 
     let prevPoint = lastPointRef.current;
     const zoomFactor = Math.max(0.25, zoomRef.current);
     const maxJump = 600 / zoomFactor;
-    const minMoveToDrawSegment = 0.001;
+    const maxJumpSq = maxJump * maxJump;
+    // Maximum gap before we interpolate - in world coordinates
+    const maxGapDistance = 8; // pixels in world space
+    const maxGapSq = maxGapDistance * maxGapDistance;
 
+    // Draw each point with proper pressure handling
     for (const point of queuedPoints) {
+      stroke.points.push(point);
+      
       if (prevPoint) {
-        const fromPoint = prevPoint;
-        const dx = point.x - fromPoint.x;
-        const dy = point.y - fromPoint.y;
-        const dist = Math.hypot(dx, dy);
+        const dx = point.x - prevPoint.x;
+        const dy = point.y - prevPoint.y;
+        const distSq = dx * dx + dy * dy;
 
-        if (!Number.isFinite(dist) || dist > maxJump) {
-          stroke.points.push(point);
+        if (!Number.isFinite(distSq) || distSq > maxJumpSq) {
+          // Large jump - draw point only
           drawStrokePoint(ctx, stroke, point);
           prevPoint = point;
           continue;
         }
 
-        stroke.points.push(point);
-        if (dist <= minMoveToDrawSegment) {
-          drawStrokePoint(ctx, stroke, point);
+        // If gap is too large, interpolate intermediate points to fill it
+        if (distSq > maxGapSq) {
+          const dist = Math.sqrt(distSq);
+          const numSteps = Math.ceil(dist / maxGapDistance);
+          const stepX = dx / numSteps;
+          const stepY = dy / numSteps;
+          const stepPressure = (point.pressure - prevPoint.pressure) / numSteps;
+          
+          // Draw interpolated segments to fill the gap
+          let currentPrev = prevPoint;
+          for (let i = 1; i < numSteps; i++) {
+            const interpPoint: Point = {
+              x: prevPoint.x + stepX * i,
+              y: prevPoint.y + stepY * i,
+              pressure: prevPoint.pressure + stepPressure * i
+            };
+            // Draw segment to interpolated point
+            drawStrokeSegment(ctx, stroke, currentPrev, interpPoint, smoothingEnabledRef.current);
+            currentPrev = interpPoint;
+          }
+          // Final segment to the actual point
+          drawStrokeSegment(ctx, stroke, currentPrev, point, smoothingEnabledRef.current);
         } else {
-          drawStrokeSegment(ctx, stroke, fromPoint, point);
+          // Normal gap - just draw the segment
+          drawStrokeSegment(ctx, stroke, prevPoint, point, smoothingEnabledRef.current);
         }
         prevPoint = point;
       } else {
-        stroke.points.push(point);
+        // First point of stroke
         drawStrokePoint(ctx, stroke, point);
         prevPoint = point;
       }
@@ -1573,15 +1709,22 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
 
   const schedulePointFlush = () => {
     if (pendingPointsRef.current.length === 0) return;
+    
+    // On slower devices, process points immediately instead of waiting for RAF
+    // This ensures smoother drawing even when the frame rate is low
     if (drawRafRef.current !== null) {
       window.cancelAnimationFrame(drawRafRef.current);
       drawRafRef.current = null;
     }
+    
+    // Process immediately for better responsiveness on slower devices
     flushPendingPoints();
   };
 
   const queuePendingPoints = (points: Point[]) => {
     if (points.length === 0) return;
+    
+    // No batching - process all points immediately for maximum responsiveness
     pendingPointsRef.current.push(...points);
     schedulePointFlush();
   };
@@ -1604,7 +1747,8 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       }
     }
 
-    // Store the raw/coalesced points as-is. (Interpolation here caused point explosions and pan/zoom lag.)
+    if (points.length === 0) return;
+
     queuePendingPoints(points);
   };
 
@@ -1613,9 +1757,9 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     if (!canvas) return { x: 0, y: 0 };
 
     const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    const canvasCssWidth = canvas.width / dpr;
-    const canvasCssHeight = canvas.height / dpr;
+    const resolutionMultiplier = resolutionMultiplierRef.current;
+    const canvasCssWidth = canvas.width / resolutionMultiplier;
+    const canvasCssHeight = canvas.height / resolutionMultiplier;
     const scaleX = canvasCssWidth / rect.width;
     const scaleY = canvasCssHeight / rect.height;
 
@@ -1765,10 +1909,14 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       setLassoSelection(null);
       setShowLassoMenu(false);
       setIsDrawing(true);
+      isDrawingRef.current = true;
+      // Don't resize canvas during drawing - it causes massive lag
       return;
     }
 
     setIsDrawing(true);
+    isDrawingRef.current = true;
+    // Don't resize canvas during drawing - it causes massive lag
 
     if (effectiveTool === "eraser") {
       const strokeIndex = findStrokeUnderCursor(point.x, point.y);
@@ -1791,16 +1939,17 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     isDrawingRef.current = true;
     rawUpdateSeenRef.current = false;
     lastPointRef.current = point;
+    // Invalidate cached rect when starting a stroke to ensure accuracy
+    cachedRectRef.current = null;
     if (canvas) {
       const ctx = canvas.getContext("2d");
       if (ctx) {
         ctx.save();
         ctx.translate(panOffsetRef.current.x, panOffsetRef.current.y);
         ctx.scale(zoomRef.current, zoomRef.current);
-        if (!ctx.imageSmoothingEnabled) {
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = "high";
-        }
+        // Ensure anti-aliasing is always enabled for smooth rendering
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
         if (ctx.lineCap !== "round" || ctx.lineJoin !== "round") {
           ctx.lineCap = "round";
           ctx.lineJoin = "round";
@@ -1826,9 +1975,9 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const cssScaleX = (canvas.width / dpr) / rect.width;
-      const cssScaleY = (canvas.height / dpr) / rect.height;
+      const resolutionMultiplier = resolutionMultiplierRef.current;
+      const cssScaleX = (canvas.width / resolutionMultiplier) / rect.width;
+      const cssScaleY = (canvas.height / resolutionMultiplier) / rect.height;
       const canvasCenterX = (centerScreenX - rect.left) * cssScaleX;
       const canvasCenterY = (centerScreenY - rect.top) * cssScaleY;
 
@@ -1898,9 +2047,9 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       const canvas = canvasRef.current;
       if (canvas) {
         const rect = canvas.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        const scaleX = (canvas.width / dpr) / rect.width;
-        const scaleY = (canvas.height / dpr) / rect.height;
+        const resolutionMultiplier = resolutionMultiplierRef.current;
+        const scaleX = (canvas.width / resolutionMultiplier) / rect.width;
+        const scaleY = (canvas.height / resolutionMultiplier) / rect.height;
         const dx = (e.clientX - lastPanPointRef.current.x) * scaleX;
         const dy = (e.clientY - lastPanPointRef.current.y) * scaleY;
         const currentPan = panOffsetRef.current;
@@ -1936,11 +2085,9 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
 
     if (!isDrawingRef.current || !currentStrokeRef.current) return;
 
-    // When available, prefer `pointerrawupdate` for pen drawing to avoid duplicating points
-    // (both `pointermove` and `pointerrawupdate` can fire for the same motion).
-    if (supportsPointerRawUpdateRef.current && rawUpdateSeenRef.current) {
-      return;
-    }
+    // Process pointermove events to capture all points
+    // Note: pointerrawupdate may also fire, but we process both to ensure we don't miss points
+    // The coalesced events API helps avoid duplicates naturally
     const events = getCoalescedPointerEvents(e);
     processPointerEvents(events);
   };
@@ -2980,6 +3127,9 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
       const combinedCtx = combinedCanvas.getContext("2d");
       if (!combinedCtx) return;
 
+      // Enable anti-aliasing for smooth image rendering
+      combinedCtx.imageSmoothingEnabled = true;
+      combinedCtx.imageSmoothingQuality = 'high';
       let offsetY = 0;
       pageCanvases.forEach((pageCanvas, index) => {
         combinedCtx.drawImage(pageCanvas, 0, offsetY);
@@ -3059,6 +3209,9 @@ export function CoSolve({ isOpen, onClose }: CoSolveProps) {
     const ctx = tempCanvas.getContext('2d');
     if (!ctx) return null;
     
+    // Enable anti-aliasing for smooth rendering
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.scale(dpr, dpr);
     
     // Fill with background color
@@ -4376,9 +4529,9 @@ DO NOT ADD ANY EXTRA TEXT.`
                 if (!canvas) return;
                 
                 const rect = canvas.getBoundingClientRect();
-                const dpr = window.devicePixelRatio || 1;
-                const cssScaleX = (canvas.width / dpr) / rect.width;
-                const cssScaleY = (canvas.height / dpr) / rect.height;
+                const resolutionMultiplier = resolutionMultiplierRef.current;
+                const cssScaleX = (canvas.width / resolutionMultiplier) / rect.width;
+                const cssScaleY = (canvas.height / resolutionMultiplier) / rect.height;
                 
                 // Mouse position in canvas CSS coordinates
                 const canvasMouseX = (e.clientX - rect.left) * cssScaleX;
@@ -4430,63 +4583,83 @@ DO NOT ADD ANY EXTRA TEXT.`
           )}
 
           {/* Lasso AI menu */}
-          {showLassoMenu && lassoSelection && (
-            <div
-              className="absolute bg-[var(--background)] border border-[var(--foreground)]/20 rounded-xl shadow-xl z-50 p-2 flex gap-2"
-              style={{
-                left: lassoSelection.bounds.x + panOffset.x,
-                top: lassoSelection.bounds.y + lassoSelection.bounds.height + panOffset.y + 10,
-              }}
-            >
-              <button
-                onClick={handleLassoExplain}
-                className="px-3 py-2 text-sm rounded-lg bg-[var(--accent-cyan)]/20 hover:bg-[var(--accent-cyan)]/30 transition-colors flex items-center gap-2"
+          {showLassoMenu && lassoSelection && (() => {
+            // Center the menu horizontally under the selection rectangle
+            const selectionCenterX = lassoSelection.bounds.x + lassoSelection.bounds.width / 2;
+            const menuTop = (lassoSelection.bounds.y + lassoSelection.bounds.height) * zoom + panOffset.y + 10;
+
+            // Ensure menu stays within viewport bounds
+            const viewportWidth = window.innerWidth || 800;
+            const viewportHeight = window.innerHeight || 600;
+            const menuWidth = 280; // Approximate width of menu
+            const menuHeight = 50;  // Approximate height of menu
+
+            // Center the menu horizontally
+            const menuLeft = selectionCenterX * zoom + panOffset.x - menuWidth / 2;
+
+            const clampedLeft = Math.max(10, Math.min(menuLeft, viewportWidth - menuWidth - 10));
+            const clampedTop = Math.max(10, Math.min(menuTop, viewportHeight - menuHeight - 10));
+
+            return (
+              <div
+                className="absolute bg-[var(--background)]/95 backdrop-blur-sm border border-[var(--foreground)]/20 rounded-xl shadow-xl z-50 p-2 flex gap-2"
+                style={{
+                  left: clampedLeft,
+                  top: clampedTop,
+                }}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10"/>
-                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                  <path d="M12 17h.01"/>
-                </svg>
-                Explain
-              </button>
-              <button
-                onClick={handleLassoSolve}
-                className="px-3 py-2 text-sm rounded-lg bg-[var(--accent-pink)]/20 hover:bg-[var(--accent-pink)]/30 transition-colors flex items-center gap-2"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M5 22h14"/>
-                  <path d="M5 2h14"/>
-                  <path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/>
-                  <path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/>
-                </svg>
-                Solve
-              </button>
-              <button
-                onClick={handleLassoAsk}
-                className="px-3 py-2 text-sm rounded-lg bg-[var(--accent-cyan)]/10 hover:bg-[var(--accent-cyan)]/20 transition-colors flex items-center gap-2"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15a4 4 0 0 1-4 4H7l-4 4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>
-                </svg>
-                Ask
-              </button>
-              <button
-                onClick={handleLassoRewrite}
-                className="px-3 py-2 text-sm rounded-lg bg-[var(--accent-yellow)]/20 hover:bg-[var(--accent-yellow)]/30 transition-colors flex items-center gap-2"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
-                </svg>
-                Rewrite
-              </button>
-              <button
-                onClick={() => { setLassoSelection(null); setShowLassoMenu(false); }}
-                className="px-3 py-2 text-sm rounded-lg hover:bg-[var(--foreground)]/10 transition-colors"
-              >
-                ✕
-              </button>
-            </div>
-          )}
+                <button
+                  onClick={handleLassoExplain}
+                  className="px-3 py-2 text-sm rounded-lg hover:bg-[var(--foreground)]/10 transition-colors flex items-center gap-2"
+                  disabled={isLoading}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                    <path d="M12 17h.01"/>
+                  </svg>
+                  Explain
+                </button>
+                <button
+                  onClick={handleLassoSolve}
+                  className="px-3 py-2 text-sm rounded-lg hover:bg-[var(--foreground)]/10 transition-colors flex items-center gap-2"
+                  disabled={isLoading}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                  </svg>
+                  Solve
+                </button>
+                <button
+                  onClick={handleLassoAsk}
+                  className="px-3 py-2 text-sm rounded-lg hover:bg-[var(--foreground)]/10 transition-colors flex items-center gap-2"
+                  disabled={isLoading}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  Ask
+                </button>
+                <button
+                  onClick={handleLassoRewrite}
+                  className="px-3 py-2 text-sm rounded-lg hover:bg-[var(--foreground)]/10 transition-colors flex items-center gap-2"
+                  disabled={isLoading}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                  </svg>
+                  Rewrite
+                </button>
+                <button
+                  onClick={() => { setLassoSelection(null); setShowLassoMenu(false); }}
+                  className="px-3 py-2 text-sm rounded-lg hover:bg-[var(--foreground)]/10 transition-colors"
+                  title="Close"
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })()}
         </div>
       </div>
 

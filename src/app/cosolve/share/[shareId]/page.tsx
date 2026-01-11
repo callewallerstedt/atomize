@@ -26,6 +26,7 @@ export default function CoSolveSharePage() {
   const pollRef = useRef<number | null>(null);
   const [status, setStatus] = useState<"connecting" | "waiting" | "live" | "ended" | "error">("connecting");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isPiPActive, setIsPiPActive] = useState(false);
 
   useEffect(() => {
     if (!shareId) {
@@ -145,6 +146,44 @@ export default function CoSolveSharePage() {
     };
   }, [shareId]);
 
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const handleEnterPiP = () => {
+      setIsPiPActive(true);
+    };
+
+    const handleLeavePiP = () => {
+      setIsPiPActive(false);
+    };
+
+    video.addEventListener("enterpictureinpicture", handleEnterPiP);
+    video.addEventListener("leavepictureinpicture", handleLeavePiP);
+
+    return () => {
+      video.removeEventListener("enterpictureinpicture", handleEnterPiP);
+      video.removeEventListener("leavepictureinpicture", handleLeavePiP);
+    };
+  }, []);
+
+  const togglePictureInPicture = async () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        await video.requestPictureInPicture();
+      }
+    } catch (error) {
+      console.error("Picture-in-picture error:", error);
+    }
+  };
+
+  const isPiPSupported = typeof document !== "undefined" && "pictureInPictureEnabled" in document && document.pictureInPictureEnabled;
+
   return (
     <div className="min-h-screen w-full bg-black text-white flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-5xl flex flex-col items-center gap-4">
@@ -156,6 +195,36 @@ export default function CoSolveSharePage() {
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               {status === "connecting" ? "Connecting..." : "Waiting for host..."}
             </div>
+          )}
+          {status === "live" && isPiPSupported && (
+            <button
+              onClick={togglePictureInPicture}
+              className="absolute top-4 right-4 p-2 rounded-lg bg-black/60 hover:bg-black/80 border border-white/20 hover:border-white/40 transition-all backdrop-blur-sm"
+              title={isPiPActive ? "Exit picture-in-picture" : "Enter picture-in-picture"}
+            >
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                width="20" 
+                height="20" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+                className="text-white"
+              >
+                {isPiPActive ? (
+                  <>
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                  </>
+                ) : (
+                  <>
+                    <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+                  </>
+                )}
+              </svg>
+            </button>
           )}
         </div>
         {status === "ended" && (
