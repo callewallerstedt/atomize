@@ -3839,7 +3839,7 @@ DO NOT ADD ANY EXTRA TEXT.`
               <div className="absolute top-full right-0 mt-2 p-3 bg-[var(--background)] border border-[var(--foreground)]/20 rounded-xl shadow-xl z-50 min-w-[200px]">
                 <div className="text-xs text-[var(--foreground)]/60 mb-2 uppercase tracking-wide">Pen Color</div>
                 <div className="flex gap-2 mb-3">
-                  {colorPresets.map((color, index) => (
+                  {colorPresets.map((color: { name: string; value: string }, index: number) => (
                     <button
                       key={`${color.value}-${index}`}
                       onClick={() => setCurrentColor(color.value)}
@@ -4573,7 +4573,7 @@ DO NOT ADD ANY EXTRA TEXT.`
               <div>
                 <label className="block text-sm mb-3">Color Presets</label>
                 <div className="flex gap-2 mb-2">
-                  {colorPresets.map((color, index) => (
+                  {colorPresets.map((color: { name: string; value: string }, index: number) => (
                     <div key={index} className="flex flex-col items-center gap-1">
                       <input
                         type="color"
