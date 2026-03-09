@@ -1733,3 +1733,52 @@ button.upgrade-liquid-btn * {
   background-color: rgba(248, 250, 252, 0.95);
   border-color: rgba(0, 0, 0, 0.1);
 }
+
+@keyframes ghost-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.ghost-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.5rem;
+  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.035), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.ghost-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.02) 22%,
+    rgba(255, 255, 255, 0.12) 50%,
+    rgba(255, 255, 255, 0.02) 78%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: ghost-shimmer 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.ghost-block {
+  position: relative;
+  overflow: hidden;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.06));
+  background-size: 200% 100%;
+  animation: ghost-shimmer 1.6s ease-in-out infinite;
+  opacity: 0.9;
+}

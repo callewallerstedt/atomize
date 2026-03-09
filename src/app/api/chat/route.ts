@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export async function POST(req: Request) {
     const context: string = String(body.context || "").slice(0, 12000);
     const path: string = String(body.path || "");
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient();
 
     const system = [
       "You are Chad, Synapse's AI assistant. Your personality is:",
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
     ];
 
     const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: modelForTask("chatAssistant"),
       temperature: 0.3,
       messages: chatMessages,
       max_tokens: 600,

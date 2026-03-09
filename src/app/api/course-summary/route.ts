@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ export async function POST(req: Request) {
     const fileIds: string[] = Array.isArray(body.fileIds) ? body.fileIds : [];
     const preferredLanguage: string | undefined = body.preferredLanguage ? String(body.preferredLanguage) : undefined;
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient();
     const system = [
       "You are summarizing a course based on the provided materials.",
       "Write a comprehensive course summary in PLAIN TEXT ONLY (2-4 paragraphs).",
@@ -82,7 +83,7 @@ export async function POST(req: Request) {
     }
 
     // Compatibility helper for reading file bytes across SDK variants
-    async function fetchFileBuffer(client: OpenAI, fileId: string): Promise<Buffer> {
+    async function fetchFileBuffer(client: Awaited<ReturnType<typeof getTrackedOpenAIClient>>, fileId: string): Promise<Buffer> {
       const anyClient: any = client;
       if (typeof anyClient.files?.retrieve_content === "function") {
         const r = await anyClient.files.retrieve_content(fileId);
@@ -165,7 +166,7 @@ export async function POST(req: Request) {
     }
 
     const resp = await client.responses.create({
-      model: "gpt-4o-mini",
+      model: modelForTask("courseSummary"),
       instructions: system,
       input: [{ role: "user", content: blocks }],
       temperature: 0,

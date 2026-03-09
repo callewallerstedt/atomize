@@ -14,6 +14,8 @@ interface ElaborateModalProps {
   subject?: string;
   topic?: string;
   languageName?: string;
+  highlightNote?: string;
+  onComplete?: (elaboration: string) => void;
 }
 
 export default function ElaborateModal({
@@ -24,6 +26,8 @@ export default function ElaborateModal({
   subject,
   topic,
   languageName,
+  highlightNote,
+  onComplete,
 }: ElaborateModalProps) {
   const [elaboration, setElaboration] = useState("");
   const [loading, setLoading] = useState(false);
@@ -62,6 +66,7 @@ export default function ElaborateModal({
     setLoading(true);
     setError(null);
     setElaboration("");
+    let completed = false;
 
     try {
       abortControllerRef.current = new AbortController();
@@ -75,6 +80,7 @@ export default function ElaborateModal({
           subject,
           topic,
           languageName,
+          highlightNote,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -112,7 +118,10 @@ export default function ElaborateModal({
             } else if (parsed.type === "error") {
               throw new Error(parsed.error || "Streaming error");
             } else if (parsed.type === "done") {
-              // Streaming complete
+              if (accumulated.trim()) {
+                onComplete?.(accumulated);
+                completed = true;
+              }
             }
           } catch (parseErr) {
             if (!(parseErr instanceof SyntaxError)) {
@@ -120,6 +129,10 @@ export default function ElaborateModal({
             }
           }
         }
+      }
+
+      if (!completed && accumulated.trim()) {
+        onComplete?.(accumulated);
       }
     } catch (err: any) {
       if (err.name === "AbortError") return;

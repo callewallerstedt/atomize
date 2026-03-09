@@ -1,10 +1,33 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { requirePremiumAccess } from "@/lib/premium";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+function normalizeTopicName(value: unknown): string {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/^[\-\u2022*\d.\s]+/, "")
+    .trim();
+}
+
+function dedupeTopics(rawTopics: any[]): Array<{ name: string; summary: string }> {
+  const seen = new Set<string>();
+  const output: Array<{ name: string; summary: string }> = [];
+  for (const topic of rawTopics) {
+    const name = normalizeTopicName(topic?.name);
+    const summary = String(topic?.summary ?? "").replace(/\s+/g, " ").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push({ name, summary });
+  }
+  return output;
+}
 
 export async function POST(req: Request) {
   try {
@@ -22,7 +45,7 @@ export async function POST(req: Request) {
     const fileIds: string[] = Array.isArray(body.fileIds) ? body.fileIds : [];
     const contextText = String(body.contextText || "").slice(0, 200_000);
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient({ userId: premiumCheck.user.id });
 
     // Extract docx text using multiple strategies for robustness
     async function extractDocxText(buffer: Buffer): Promise<{ text: string; method: string }> {
@@ -140,7 +163,7 @@ export async function POST(req: Request) {
           "If uncertain, default to { code: 'en', name: 'English' }.",
         ].join("\n");
         const resp = await client.chat.completions.create({
-          model: "gpt-4o-mini",
+          model: modelForTask("languageDetection"),
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: sys },
@@ -249,7 +272,7 @@ export async function POST(req: Request) {
       ];
       
       const resp = await client.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: modelForTask("topicExtraction"),
         messages: [
           { role: "system", content: system },
           { role: "user", content: inputContent[0].text },
@@ -291,7 +314,7 @@ export async function POST(req: Request) {
     console.log(`[extract-by-ids] Sending ${validFileIds.length} files to OpenAI for extraction`);
 
     const resp = await client.responses.create({
-      model: "gpt-4o-mini",
+      model: modelForTask("topicExtraction"),
       instructions: system,
       input: [ { role: "user", content: inputContent as any } ],
       temperature: 0,
@@ -304,7 +327,9 @@ export async function POST(req: Request) {
       const s = out.indexOf("{"); const e = out.lastIndexOf("}");
       if (s >= 0 && e > s) data = JSON.parse(out.slice(s, e + 1));
     }
-    if (!data || !data.subject) data = { subject, topics: Array.isArray(data?.topics) ? data.topics : [] };
+    const topics = dedupeTopics(Array.isArray(data?.topics) ? data.topics : []);
+    if (!data || !data.subject) data = { subject, topics };
+    else data = { ...data, subject: String(data.subject || subject), topics };
     return NextResponse.json({ ok: true, data, detected_language_code: lang.code, detected_language_name: lang.name, debug: { fileIdsCount: fileIds.length } });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err?.message || "Unknown error" }, { status: 500 });

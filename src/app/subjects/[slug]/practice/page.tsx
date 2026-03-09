@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { LessonBody } from "@/components/LessonBody";
 import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
 import GlowSpinner from "@/components/GlowSpinner";
+import { MVP_FEATURES } from "@/lib/features";
 import {
   loadSubjectData,
   saveSubjectData,
@@ -1016,7 +1017,7 @@ function buildPracticeContext(
   lines.push("Available actions:");
   lines.push("- create_course|name:CourseName|syllabus:Optional description (NOTE: When creating courses, the system uses AUTOCREATE - files are automatically processed and the course is created without opening a modal. If you have files to upload, use FILE_UPLOAD with action:generate_course instead)");
   lines.push("- request_files|message:Tell user what files you need");
-  lines.push("- navigate|path:/subjects/slug or /exam-snipe or /quicklearn");
+  lines.push("- navigate|path:/subjects/slug or /exam-snipe");
   lines.push("- navigate_course|slug:course-slug (navigate to a course page - use the exact slug from the context, e.g., if context shows 'Course: French Revolution (slug: french-revolution)', use 'french-revolution' as the slug)");
   lines.push("- navigate_topic|slug:course-slug|topic:TopicName (navigate to a specific topic - use the EXACT topic name from the Topics list, and the EXACT slug from 'Course: Name (slug: course-slug)')");
   lines.push("- navigate_lesson|slug:course-slug|topic:TopicName|lessonIndex:0 (navigate to a specific lesson, index is 0-based - use EXACT topic name and slug from context)");
@@ -1034,7 +1035,6 @@ function buildPracticeContext(
   lines.push("Site features you should know about:");
   lines.push("- Exam Snipe: Upload old exam PDFs to analyze patterns and create prioritized study plans. Navigate to /exam-snipe");
   lines.push("- Course Creation: Users can upload files (PDFs, DOCX, TXT) to create courses with AI-generated lessons. IMPORTANT: The system uses AUTOCREATE - when files are provided, courses are automatically created and processed without requiring manual steps. Use FILE_UPLOAD with action:generate_course when you have files to upload.");
-  lines.push("- Quick Learn: Generate quick lessons on any topic at /quicklearn");
   lines.push("- Course Structure: Each course has topics, and each topic has lessons with quizzes");
   lines.push("- Routes: /subjects/{slug} for course, /subjects/{slug}/node/{topic} for topic, /subjects/{slug}/node/{topic}/lesson/{index} for lesson");
   lines.push("- Flashcards: Each lesson can have flashcards, and courses have a flashcards modal showing all flashcards");
@@ -1289,6 +1289,7 @@ export default function PracticePage() {
   const params = useParams<{ slug: string }>();
   const slug = params.slug || "";
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [subjectData, setSubjectData] = useState<StoredSubjectData | null>(null);
   const [loadingSubject, setLoadingSubject] = useState(true);
@@ -1334,6 +1335,7 @@ export default function PracticePage() {
   >({});
   const kickoffMessageRef = useRef<string | null>(null);
   const [kickoffPending, setKickoffPending] = useState(false);
+  const appliedLaunchContextRef = useRef(false);
    
   // QR Code feature state
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
@@ -1449,6 +1451,31 @@ export default function PracticePage() {
   const autoTopicSuggestion = useMemo(() => {
     return (suggestedWeakTopics[0] || examSnipeTopics[0] || availablePracticeTopics[0] || "").trim();
   }, [suggestedWeakTopics, examSnipeTopics, availablePracticeTopics]);
+
+  useEffect(() => {
+    if (appliedLaunchContextRef.current) return;
+
+    const requestedTopic = String(searchParams.get("topic") || "").trim();
+    const requestedLessonTitle = String(searchParams.get("lessonTitle") || "").trim();
+    const requestedModeRaw = String(searchParams.get("mode") || "").trim();
+    const requestedMode =
+      requestedModeRaw === "mc" ||
+      requestedModeRaw === "rapid" ||
+      requestedModeRaw === "exam" ||
+      requestedModeRaw === "custom"
+        ? requestedModeRaw
+        : "";
+
+    if (!requestedTopic && !requestedLessonTitle && !requestedMode) return;
+
+    appliedLaunchContextRef.current = true;
+    setPracticeModeChoice((prev) => prev || (requestedMode as "mc" | "rapid" | "exam" | "custom" | null) || "exam");
+    setPracticeTopicChoice((prev) => prev || requestedTopic);
+    setPracticeFocusText((prev) => prev || (requestedLessonTitle ? `Focus on ${requestedLessonTitle}.` : ""));
+    if (!practiceStarted) {
+      setPracticeSetupOpen(true);
+    }
+  }, [practiceStarted, searchParams]);
 
   const applyPracticeLogUpdates = (updates: PracticeLogEntry[]) => {
     if (!updates.length) return;
@@ -3975,7 +4002,7 @@ Respond with ONLY the specific topic name, no explanation.`;
           }}
           className="space-y-2"
         >
-          {qrPollingActive && qrSessionId ? (
+          {MVP_FEATURES.qrCapture && qrPollingActive && qrSessionId ? (
             <div className="mb-2 flex items-center justify-between rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/70 px-3 py-2 text-xs text-[var(--foreground)]/80">
               <div>Phone session active</div>
               <div className="flex items-center gap-2">
@@ -4079,16 +4106,18 @@ Respond with ONLY the specific topic name, no explanation.`;
                     >
                       Upload image
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void createQrSession();
-                        setShowAttachmentMenu(false);
-                      }}
-                      className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors border-t border-[var(--foreground)]/10"
-                    >
-                      Answer with phone
-                    </button>
+                    {MVP_FEATURES.qrCapture && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void createQrSession();
+                          setShowAttachmentMenu(false);
+                        }}
+                        className="w-full px-4 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors border-t border-[var(--foreground)]/10"
+                      >
+                        Answer with phone
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -4187,7 +4216,7 @@ Respond with ONLY the specific topic name, no explanation.`;
       </div>
 
       {/* QR Code Modal */}
-      {showQrModal && (
+      {MVP_FEATURES.qrCapture && showQrModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6"
           onClick={(e) => {

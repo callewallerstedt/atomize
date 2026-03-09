@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,12 +18,13 @@ export async function POST(req: Request) {
     const subject = String(body.subject || "");
     const topic = String(body.topic || "");
     const languageName = String(body.languageName || "");
+    const highlightNote = String(body.highlightNote || "");
 
     if (!selectedText) {
       return NextResponse.json({ ok: false, error: "Missing selectedText" }, { status: 400 });
     }
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient();
 
     const system = [
       "You are an expert educator helping students understand concepts more deeply.",
@@ -56,6 +58,7 @@ export async function POST(req: Request) {
       "## LESSON CONTEXT",
       subject ? `Subject: ${subject}` : "",
       topic ? `Topic: ${topic}` : "",
+      highlightNote ? `Saved note: ${highlightNote}` : "",
       "",
       "### Full Lesson Content:",
       truncatedLesson,
@@ -69,7 +72,7 @@ export async function POST(req: Request) {
     ].filter(Boolean).join("\n");
 
     const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: modelForTask("highlightElaboration"),
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },

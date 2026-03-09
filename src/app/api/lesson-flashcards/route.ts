@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { stripLessonMetadata } from "@/lib/lessonFormat";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Missing lesson content" }, { status: 400 });
     }
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient();
 
     const system = [
       "You create concise, high-quality flashcards to help a student review a single lesson.",

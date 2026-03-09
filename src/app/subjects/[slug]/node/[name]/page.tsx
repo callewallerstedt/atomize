@@ -28,6 +28,7 @@ import HighlightToolbar, { HIGHLIGHT_COLORS } from "@/components/HighlightToolba
 import SelectionToolbar from "@/components/SelectionToolbar";
 import HighlightsModal from "@/components/HighlightsModal";
 import ElaborateModal from "@/components/ElaborateModal";
+import { MVP_FEATURES } from "@/lib/features";
 
 // Regex patterns moved inside component to avoid any global scope issues
 
@@ -145,14 +146,6 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
   const lessonTag = lessonMeta?.tag as string | undefined;
   const lessonDisplayType = lessonTag || lessonMeta?.type || "Lesson Outline";
   
-  // Debug logging for practice problems
-  if (currentLesson) {
-    console.log("[DEBUG] currentLesson practiceProblems check:", {
-      hasPracticeProblems: !!currentLesson.practiceProblems,
-      practiceProblemsLength: currentLesson.practiceProblems?.length || 0,
-      practiceProblems: currentLesson.practiceProblems
-    });
-  }
   const lessonFlashcards: LessonFlashcard[] = currentLesson?.flashcards ?? [];
   const lessonMetadata = currentLesson?.metadata || null;
   const formatMetadataEntry = (value?: string): string => {
@@ -167,7 +160,6 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
     // Quiz questions come from metadata only (not from body with new prompt)
     // First check lesson.quiz (stored directly)
     if (currentLesson?.quiz?.length) {
-      console.log("[DEBUG] lessonQuiz: Found in currentLesson.quiz, length:", currentLesson.quiz.length);
       return currentLesson.quiz;
     }
     // Fallback: check metadata.quiz (in case it wasn't copied to lesson.quiz)
@@ -176,10 +168,8 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
         question: String(item.question || ""),
         answer: item.answer ? String(item.answer) : undefined,
       })).filter((item: any) => item.question.length > 0);
-      console.log("[DEBUG] lessonQuiz: Found in metadata.quiz, length:", quizFromMetadata.length);
       return quizFromMetadata;
     }
-    console.log("[DEBUG] lessonQuiz: No quiz found. currentLesson?.quiz:", currentLesson?.quiz, "metadata?.quiz:", currentLesson?.metadata?.quiz);
     return [];
   }, [currentLesson?.quiz, currentLesson?.metadata?.quiz]);
 
@@ -194,9 +184,9 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
 
   // Helper function to generate practice problems after lesson completion
   async function generatePracticeProblemsForLesson(lessonBody: string, lessonIndex: number) {
+    if (!MVP_FEATURES.lessonInlinePractice) return;
     setGeneratingPracticeProblems(true);
     try {
-      console.log("[DEBUG] Generating practice problems for lesson index:", lessonIndex);
       const practiceRes = await fetch("/api/generate-practice-problems", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -208,32 +198,17 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
         }),
       });
       
-      const practiceJson = await practiceRes.json().catch((e) => {
-        console.error("[DEBUG] Failed to parse practice problems response:", e);
-        return {};
-      });
-      
-      console.log("[DEBUG] Practice problems response:", {
-        ok: practiceRes.ok,
-        status: practiceRes.status,
-        jsonOk: practiceJson?.ok,
-        hasProblems: Array.isArray(practiceJson?.problems),
-        problemsLength: practiceJson?.problems?.length,
-        problems: practiceJson?.problems
-      });
+      const practiceJson = await practiceRes.json().catch(() => ({}));
       
       if (practiceRes.ok && practiceJson?.ok && Array.isArray(practiceJson.problems)) {
         const mappedProblems = practiceJson.problems.map((p: any) => ({
           problem: String(p.question || ""),
           solution: String(p.solution || ""),
         }));
-        
-        console.log("[DEBUG] Mapped practice problems:", mappedProblems);
-        
+
         // Update lesson with practice problems
         setContent((prevContent) => {
           if (!prevContent) {
-            console.warn("[DEBUG] No previous content to update");
             return prevContent;
           }
           const updatedContent = { ...(prevContent as TopicGeneratedContent) };
@@ -246,31 +221,14 @@ const [isShuffleActive, setIsShuffleActive] = useState(false);
               ...updatedContent.lessons[lessonIndex]!,
               practiceProblems: mappedProblems,
             };
-            console.log("[DEBUG] Updated lesson with practice problems:", {
-              lessonIndex,
-              practiceProblemsCount: mappedProblems.length,
-              firstProblem: mappedProblems[0]?.problem?.substring(0, 50)
-            });
-            
+
             // Also save to storage
-            upsertNodeContentAsync(slug, title, updatedContent as any).catch((e) => {
-              console.error("[DEBUG] Failed to save practice problems:", e);
-            });
-          } else {
-            console.warn("[DEBUG] No lesson at index", lessonIndex, "to update. Lessons array length:", updatedContent.lessons.length);
+            upsertNodeContentAsync(slug, title, updatedContent as any).catch(() => {});
           }
           return updatedContent;
         });
-      } else {
-        console.error("[DEBUG] Practice problems response invalid:", {
-          practiceResOk: practiceRes.ok,
-          practiceJsonOk: practiceJson?.ok,
-          isArray: Array.isArray(practiceJson?.problems),
-          error: practiceJson?.error
-        });
       }
     } catch (practiceErr) {
-      console.error("[DEBUG] Failed to generate practice problems:", practiceErr);
       // Don't fail the lesson generation if practice problems fail
     } finally {
       setGeneratingPracticeProblems(false);
@@ -2123,6 +2081,54 @@ function toggleStar(flashcardId: string) {
     window.getSelection()?.removeAllRanges();
   }
 
+  async function persistLessonHighlights(updatedHighlights: LessonHighlight[]) {
+    if (!currentLesson || !content) return;
+
+    const updatedLesson: TopicGeneratedLesson = {
+      ...currentLesson,
+      highlights: updatedHighlights,
+    };
+
+    const updatedLessons = [...(content.lessons || [])];
+    updatedLessons[activeLessonIndex] = updatedLesson;
+
+    const updatedContent: TopicGeneratedContent = {
+      ...content,
+      lessons: updatedLessons,
+    };
+
+    setContent(updatedContent);
+    await upsertNodeContentAsync(slug, title, updatedContent as any);
+  }
+
+  async function persistElaboration(elaboration: string) {
+    const trimmed = String(elaboration || "").trim();
+    if (!trimmed || !currentLesson || !content || !selectedHighlightRange) return;
+
+    const existingHighlight = editingHighlight && lessonHighlights.some((h) => h.id === editingHighlight.id)
+      ? editingHighlight
+      : null;
+
+    const highlight: LessonHighlight = {
+      id: existingHighlight?.id || generateHighlightId(),
+      text: selectedHighlightText,
+      color: existingHighlight?.color || HIGHLIGHT_COLORS[0].value,
+      note: existingHighlight?.note,
+      elaboration: trimmed,
+      startOffset: selectedHighlightRange.start,
+      endOffset: selectedHighlightRange.end,
+      occurrenceIndex: selectedHighlightRange.occurrenceIndex ?? existingHighlight?.occurrenceIndex,
+      createdAt: existingHighlight?.createdAt || Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    const updatedHighlights = lessonHighlights.some((h) => h.id === highlight.id)
+      ? lessonHighlights.map((h) => (h.id === highlight.id ? highlight : h))
+      : [...lessonHighlights, highlight];
+
+    await persistLessonHighlights(updatedHighlights);
+  }
+
   // Save highlight (from HighlightToolbar modal)
   async function handleSaveHighlight(color: string, note: string) {
     if (!selectedHighlightRange || !currentLesson || !content) return;
@@ -2139,78 +2145,32 @@ function toggleStar(flashcardId: string) {
       createdAt: editingHighlight?.createdAt || Date.now(),
       updatedAt: editingHighlight ? Date.now() : undefined,
     };
-    
-    // Update lesson with new/updated highlight
+
     const updatedHighlights = editingHighlight
       ? lessonHighlights.map((h) => (h.id === highlight.id ? highlight : h))
       : [...lessonHighlights, highlight];
-    
-    const updatedLesson: TopicGeneratedLesson = {
-      ...currentLesson,
-      highlights: updatedHighlights,
-    };
-    
-    const updatedLessons = [...(content.lessons || [])];
-    updatedLessons[activeLessonIndex] = updatedLesson;
-    
-    const updatedContent: TopicGeneratedContent = {
-      ...content,
-      lessons: updatedLessons,
-    };
-    
-    setContent(updatedContent);
-    await upsertNodeContentAsync(slug, title, updatedContent as any);
-    
+
+    await persistLessonHighlights(updatedHighlights);
     closeHighlightToolbar();
   }
 
   // Save highlight from HighlightsModal
   async function handleSaveHighlightFromModal(highlight: LessonHighlight) {
-    if (!currentLesson || !content) return;
-    
     const updatedHighlights = lessonHighlights.some(h => h.id === highlight.id)
       ? lessonHighlights.map((h) => (h.id === highlight.id ? highlight : h))
       : [...lessonHighlights, highlight];
-    
-    const updatedLesson: TopicGeneratedLesson = {
-      ...currentLesson,
-      highlights: updatedHighlights,
-    };
-    
-    const updatedLessons = [...(content.lessons || [])];
-    updatedLessons[activeLessonIndex] = updatedLesson;
-    
-    const updatedContent: TopicGeneratedContent = {
-      ...content,
-      lessons: updatedLessons,
-    };
-    
-    setContent(updatedContent);
-    await upsertNodeContentAsync(slug, title, updatedContent as any);
+
+    await persistLessonHighlights(updatedHighlights);
   }
 
   // Delete highlight
   async function handleDeleteHighlight(highlightId?: string) {
     const idToDelete = highlightId || editingHighlight?.id;
-    if (!idToDelete || !currentLesson || !content) return;
+    if (!idToDelete) return;
     
     const updatedHighlights = lessonHighlights.filter((h) => h.id !== idToDelete);
-    
-    const updatedLesson: TopicGeneratedLesson = {
-      ...currentLesson,
-      highlights: updatedHighlights,
-    };
-    
-    const updatedLessons = [...(content.lessons || [])];
-    updatedLessons[activeLessonIndex] = updatedLesson;
-    
-    const updatedContent: TopicGeneratedContent = {
-      ...content,
-      lessons: updatedLessons,
-    };
-    
-    setContent(updatedContent);
-    await upsertNodeContentAsync(slug, title, updatedContent as any);
+
+    await persistLessonHighlights(updatedHighlights);
     
     if (!highlightId) {
       closeHighlightToolbar();
@@ -2230,9 +2190,16 @@ function toggleStar(flashcardId: string) {
   function handleHighlightMarkClick(e: React.MouseEvent, highlight: LessonHighlight) {
     e.preventDefault();
     e.stopPropagation();
-    
-    // Open the highlights modal for editing
-    setShowHighlightsModal(true);
+
+    setSelectedHighlightText(highlight.text);
+    setSelectedHighlightRange({
+      start: highlight.startOffset,
+      end: highlight.endOffset,
+      occurrenceIndex: highlight.occurrenceIndex,
+    });
+    setEditingHighlight(highlight);
+    setShowSelectionToolbar(false);
+    setShowHighlightToolbar(true);
   }
 
   // ========================================
@@ -3387,7 +3354,7 @@ function toggleStar(flashcardId: string) {
                   </button>
 
                   {/* TTS Controls - unified button with dropdown */}
-                  {isAuthenticated && (content.lessons[activeLessonIndex]?.body && content.lessons[activeLessonIndex]?.body.trim().length > 0) && (
+                  {MVP_FEATURES.lessonTts && isAuthenticated && (content.lessons[activeLessonIndex]?.body && content.lessons[activeLessonIndex]?.body.trim().length > 0) && (
                     <div className="ml-auto flex items-center gap-2 relative">
                       {/* When playing/paused, show playback controls */}
                       {(isPlaying || isPaused) ? (
@@ -3628,7 +3595,24 @@ function toggleStar(flashcardId: string) {
                   <>
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-sm text-[var(--foreground)]/70">{content.lessonsMeta?.[activeLessonIndex]?.title}</div>
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            const params = new URLSearchParams();
+                            params.set("topic", title);
+                            params.set("lessonIndex", String(activeLessonIndex));
+                            params.set("lessonTitle", content.lessonsMeta?.[activeLessonIndex]?.title || currentLesson?.title || title);
+                            params.set("mode", "exam");
+                            router.push(`/subjects/${slug}/practice?${params.toString()}`);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent-cyan)]/10 hover:bg-[var(--accent-cyan)]/20 border border-[var(--accent-cyan)]/30 text-[var(--accent-cyan)] hover:text-[var(--accent-cyan)] transition-all text-xs font-medium"
+                          title="Open dedicated practice for this topic"
+                        >
+                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 9l2 2 4-4" />
+                          </svg>
+                          Practice
+                        </button>
                         {lessonHighlights.length > 0 && (
                           <button
                             onClick={() => setShowHighlightsModal(true)}
@@ -4092,9 +4076,8 @@ function toggleStar(flashcardId: string) {
             </div>
 
             
-            {/* Testing features as dropdown list */}
             <div className="mt-6 space-y-3">
-              {/* Practice Problems item */}
+              {MVP_FEATURES.lessonInlinePractice && (
               <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
                 <button
                   onClick={() => setPracticeOpen(!practiceOpen)}
@@ -4289,6 +4272,7 @@ function toggleStar(flashcardId: string) {
                   </div>
                 )}
               </div>
+              )}
 
               {/* Flashcards item */}
               <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
@@ -4558,19 +4542,20 @@ function toggleStar(flashcardId: string) {
                 )}
               </div>
 
-              {/* Lars item */}
-              <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
-                <button
-                  onClick={() => setLarsOpen(true)}
-                    className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors rounded-xl"
-                    title="Open Lars"
-                  >
-                    <span>Explain for Lars</span>
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M19 9l-7 7-7-7"/>
-                    </svg>
-                  </button>
-                </div>
+              {MVP_FEATURES.lessonLars && (
+                <div className="rounded-xl border border-[var(--foreground)]/15 bg-[var(--background)]/60 overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.7)]">
+                  <button
+                    onClick={() => setLarsOpen(true)}
+                      className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--background)]/70 transition-colors rounded-xl"
+                      title="Open Lars"
+                    >
+                      <span>Explain for Lars</span>
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M19 9l-7 7-7-7"/>
+                      </svg>
+                    </button>
+                  </div>
+              )}
             </div>
 
             <div className="flex flex-col items-center gap-4 mt-8">
@@ -5184,7 +5169,7 @@ function toggleStar(flashcardId: string) {
       document.body
     )}
     {/* Bottom utilities: subtle Export PDF */}
-    {content && content.lessons && content.lessons[activeLessonIndex]?.body && (
+    {MVP_FEATURES.lessonExportPdf && content && content.lessons && content.lessons[activeLessonIndex]?.body && (
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 pb-10">
         <div className="grid gap-6 lg:gap-10 lg:grid-cols-[260px_minmax(0,1fr)]">
           <div className="hidden lg:block" aria-hidden />
@@ -5237,7 +5222,7 @@ function toggleStar(flashcardId: string) {
         </div>
       </div>
     )}
-    <LarsCoach open={larsOpen} onClose={() => setLarsOpen(false)} />
+    {MVP_FEATURES.lessonLars && <LarsCoach open={larsOpen} onClose={() => setLarsOpen(false)} />}
     
     {/* Video Modal for finding YouTube videos */}
     <VideoModal
@@ -5269,7 +5254,7 @@ function toggleStar(flashcardId: string) {
     />
     
     {/* Floating TTS Playback Controls */}
-    {(isPlaying || isPaused) && (
+    {MVP_FEATURES.lessonTts && (isPlaying || isPaused) && (
       <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 flex items-center gap-3 bg-[var(--background)]/95 backdrop-blur-sm border border-[var(--foreground)]/20 rounded-full px-4 py-2 shadow-lg">
         <button
           onClick={seekBackward}
@@ -5349,6 +5334,10 @@ function toggleStar(flashcardId: string) {
       selectedText={selectedHighlightText}
       onSave={handleSaveHighlight}
       onDelete={editingHighlight ? () => handleDeleteHighlight() : undefined}
+      onElaborate={editingHighlight ? () => {
+        setShowHighlightToolbar(false);
+        setShowElaborateModal(true);
+      } : undefined}
       onClose={closeHighlightToolbar}
       initialColor={editingHighlight?.color || HIGHLIGHT_COLORS[0].value}
       initialNote={editingHighlight?.note || ""}
@@ -5374,6 +5363,10 @@ function toggleStar(flashcardId: string) {
       subject={subjectData?.subject || slug}
       topic={title}
       languageName={subjectData?.course_language_name || ""}
+      highlightNote={editingHighlight?.note || ""}
+      onComplete={(elaboration) => {
+        void persistElaboration(elaboration);
+      }}
     />
     </>
   );

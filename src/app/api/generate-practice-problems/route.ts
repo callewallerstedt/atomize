@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
 import { requirePremiumAccess } from "@/lib/premium";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,6 +13,7 @@ export async function POST(req: NextRequest) {
     if (!premiumCheck.ok) {
       return NextResponse.json({ ok: false, error: premiumCheck.error }, { status: 403 });
     }
+    const openai = await getTrackedOpenAIClient({ userId: premiumCheck.user.id });
 
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json({ ok: false, error: "Missing OPENAI_API_KEY" }, { status: 500 });

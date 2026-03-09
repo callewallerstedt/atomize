@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import React, { Suspense, useEffect, useState, useRef, useCallback, useMemo, type ChangeEvent, type DragEvent } from "react";
+import React, { Suspense, useEffect, useState, useRef, useCallback, useMemo, useTransition, type ChangeEvent, type DragEvent } from "react";
 import { flushSync } from "react-dom";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import GlowSpinner from "@/components/GlowSpinner";
@@ -13,6 +13,7 @@ import { saveSubjectData, StoredSubjectData, loadSubjectData } from "@/utils/sto
 import { changelog } from "../../CHANGELOG";
 import { LessonBody } from "@/components/LessonBody";
 import { sanitizeLessonBody } from "@/lib/sanitizeLesson";
+import { MVP_FEATURES } from "@/lib/features";
 
 type Subject = { name: string; slug: string; sharedByUsername?: string | null };
 
@@ -491,7 +492,17 @@ function HomepageFileUploadArea({
   );
 }
 
-function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn }: { tutorialSignal: number; setTutorialSignal: (updater: (prev: number) => number) => void; onQuickLearn?: (query: string) => void }) {
+function WelcomeMessage({
+  tutorialSignal,
+  setTutorialSignal,
+  onQuickLearn,
+  onCreateCourse,
+}: {
+  tutorialSignal: number;
+  setTutorialSignal: (updater: (prev: number) => number) => void;
+  onQuickLearn?: (query: string) => void;
+  onCreateCourse?: () => void;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const [welcomeText, setWelcomeText] = useState("");
@@ -510,6 +521,8 @@ function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn }: { t
   const [uploadedFiles, setUploadedFiles] = useState<Record<string, File[]>>({});
   const [uploadStatus, setUploadStatus] = useState<Record<string, 'idle' | 'ready' | 'processing' | 'success'>>({});
   const [isCreatingCourse, setIsCreatingCourse] = useState(false);
+  const [examSnipeLaunchPending, setExamSnipeLaunchPending] = useState(false);
+  const [, startExamSnipeTransition] = useTransition();
   const hasStreamed = useRef(false);
   const thinkingRef = useRef(false);
   const courseCreationInProgress = useRef(false);
@@ -517,6 +530,13 @@ function WelcomeMessage({ tutorialSignal, setTutorialSignal, onQuickLearn }: { t
 
   const [subscriptionLevel, setSubscriptionLevel] = useState<string | null>(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(true); // Start as true to prevent flash
+  const welcomeFallbacks = useRef([
+    "Welcome back to Synapse. Let's get this over with.",
+    "Welcome back to Synapse. How about we get straight into it.",
+    "Welcome back to Synapse. I'm ready. Are you?",
+    "Welcome back to Synapse. Let's keep it moving.",
+    "Welcome back to Synapse. Let's make this count.",
+  ]);
 
   const hasPremiumAccess =
     subscriptionLevel === "Tester" ||
@@ -739,9 +759,32 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       setShowAttachmentMenu(false);
     }
   }, [homepageSending, isTutorialActive]);
+
+  useEffect(() => {
+    if (!hasPremiumAccess) return;
+    router.prefetch("/exam-snipe");
+  }, [hasPremiumAccess, router]);
+
   const focusChatInput = () => {
     chatInputRef.current?.focus();
   };
+
+  const pickFallbackWelcome = useCallback(() => {
+    const options = welcomeFallbacks.current;
+    return options[Math.floor(Math.random() * options.length)] || options[0];
+  }, []);
+
+  const commitWelcomeMessage = useCallback((text: string) => {
+    const finalText = text.trim() || pickFallbackWelcome();
+    setWelcomeText(finalText);
+    setIsStreaming(false);
+    setHomepageMessages((prev) => {
+      if (prev.length === 0 || prev[0].role !== 'assistant') {
+        return [{ role: 'assistant', content: finalText, isLoading: false }];
+      }
+      return [{ ...prev[0], content: finalText, isLoading: false }, ...prev.slice(1)];
+    });
+  }, [pickFallbackWelcome]);
 
   const resetHomepageChat = useCallback(() => {
     tutorialPlaybackRef.current = false;
@@ -888,25 +931,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
           const decoder = new TextDecoder();
           if (reader) {
             let fullText = "";
-            let name = "";
-
-            let lastUpdateTime = 0;
-            const updateThrottle = 16; // ~60fps (16ms)
-            
-            const updateWelcomeText = (text: string) => {
-              const now = Date.now();
-              if (now - lastUpdateTime >= updateThrottle) {
-                lastUpdateTime = now;
-                // Update both welcomeText (for isWelcomeMessage check) and messages array
-                setWelcomeText(text);
-                setHomepageMessages((prev) => {
-                  if (prev.length === 0 || prev[0].role !== 'assistant') {
-                    return [{ role: 'assistant', content: text, isLoading: false }];
-                  }
-                  return [{ ...prev[0], content: text, isLoading: false }, ...prev.slice(1)];
-                });
-              }
-            };
+            let didCommitWelcome = false;
 
             while (true) {
               const { done, value } = await reader.read();
@@ -920,50 +945,27 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                 try {
                   const obj = JSON.parse(payload);
                   if (obj.type === "name" && obj.content) {
-                    name = obj.content;
                     setAiName(obj.content);
                   } else if (obj.type === "text" && obj.content) {
                     fullText += obj.content;
-                    // Throttled update to prevent stuttering
-                    updateWelcomeText(fullText);
                   } else if (obj.type === "done") {
-                    // Ensure final update happens
-                    setWelcomeText(fullText);
-                    setIsStreaming(false);
-                    setHomepageMessages((prev) => {
-                      if (prev.length === 0 || prev[0].role !== 'assistant') {
-                        return [{ role: 'assistant', content: fullText, isLoading: false }];
-                      }
-                      return [{ ...prev[0], content: fullText, isLoading: false }, ...prev.slice(1)];
-                    });
+                    didCommitWelcome = true;
+                    commitWelcomeMessage(fullText);
                   }
                 } catch {}
               });
             }
 
-            // Final update if we have text
-            if (fullText.length > 0) {
-              setWelcomeText(fullText);
-              setIsStreaming(false);
-              setHomepageMessages((prev) => {
-                if (prev.length === 0 || prev[0].role !== 'assistant') {
-                  return [{ role: 'assistant', content: fullText, isLoading: false }];
-                }
-                return [{ ...prev[0], content: fullText, isLoading: false }, ...prev.slice(1)];
-              });
-            } else {
-              setIsStreaming(false);
-              setHomepageMessages((prev) => {
-                if (prev.length > 0 && prev[0].role === 'assistant') {
-                  return [{ ...prev[0], isLoading: false }, ...prev.slice(1)];
-                }
-                return prev;
-              });
+            if (!didCommitWelcome && fullText.length > 0) {
+              commitWelcomeMessage(fullText);
+            } else if (!didCommitWelcome) {
+              commitWelcomeMessage("");
             }
+          } else {
+            commitWelcomeMessage("");
           }
         } catch (e: any) {
-          setWelcomeText("Welcome back!");
-          setIsStreaming(false);
+          commitWelcomeMessage("");
         }
       };
 
@@ -2388,6 +2390,29 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     }
   };
 
+  const handleOpenCreateCourse = useCallback(() => {
+    if (homepageSending || isTutorialActive) return;
+    onCreateCourse?.();
+  }, [homepageSending, isTutorialActive, onCreateCourse]);
+
+  const handleOpenExamSnipe = useCallback(() => {
+    if (!hasPremiumAccess) {
+      if (typeof document !== "undefined") {
+        document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
+      }
+      return;
+    }
+    if (homepageSending || isTutorialActive || examSnipeLaunchPending) return;
+
+    flushSync(() => {
+      setExamSnipeLaunchPending(true);
+    });
+
+    startExamSnipeTransition(() => {
+      router.push("/exam-snipe");
+    });
+  }, [examSnipeLaunchPending, hasPremiumAccess, homepageSending, isTutorialActive, router]);
+
   const isImageAttachment = (attachment: ChatAttachment) => {
     if (attachment.type === "image") return true;
     // Backwards compatibility for older messages that only stored data URLs
@@ -2967,7 +2992,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                     Premium features locked
                   </p>
                   <p className="text-xs text-[var(--foreground)]/65">
-                    Unlock Quick Learn, Exam Snipe and more with a Tester or Premium subscription.
+                    Unlock Exam Snipe, Surge, and premium study workflows with a Tester or Premium subscription.
                   </p>
                 </div>
                 <button
@@ -3010,11 +3035,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                 position: 'relative'
               }}>
                 <button
-                  onClick={() => {
-                    if (!homepageSending && !isTutorialActive) {
-                      handleSendMessage("Create Course");
-                    }
-                  }}
+                  onClick={handleOpenCreateCourse}
                   disabled={homepageSending || isTutorialActive}
                   className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
                   style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
@@ -3022,94 +3043,12 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                   Create Course
                 </button>
                 <button
-                  onClick={() => {
-                    if (!hasPremiumAccess) {
-                      if (typeof document !== "undefined") {
-                        document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
-                      }
-                      return;
-                    }
-                    if (!homepageSending && !isTutorialActive) {
-                      setInputValue("Please create a quick learn on the subject: ");
-                      chatInputRef.current?.focus();
-                    }
-                  }}
-                  disabled={homepageSending || isTutorialActive}
+                  onClick={handleOpenExamSnipe}
+                  disabled={homepageSending || isTutorialActive || examSnipeLaunchPending}
                   className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
                   style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
                 >
-                  Quick Learn
-                  {!hasPremiumAccess && (
-                    <span className="ml-1 inline-flex items-center rounded-full bg-[var(--foreground)]/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--foreground)]/60">
-                      Pro
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => {
-                    if (!hasPremiumAccess) {
-                      if (typeof document !== "undefined") {
-                        document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
-                      }
-                      return;
-                    }
-                    if (!homepageSending && !isTutorialActive) {
-                      handleSendMessage("Do an exam snipe please.");
-                    }
-                  }}
-                  disabled={homepageSending || isTutorialActive}
-                  className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
-                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
-                >
-                  Exam Snipe
-                  {!hasPremiumAccess && (
-                    <span className="ml-1 inline-flex items-center rounded-full bg-[var(--foreground)]/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--foreground)]/60">
-                      Pro
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => {
-                    if (!hasPremiumAccess) {
-                      if (typeof document !== "undefined") {
-                        document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
-                      }
-                      return;
-                    }
-                    if (!homepageSending && !isTutorialActive) {
-                      router.push('/lab-assist');
-                    }
-                  }}
-                  disabled={homepageSending || isTutorialActive}
-                  className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
-                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
-                  title="Upload lab instructions and get a simple, step by step version"
-                >
-                  Lab Assist
-                  {!hasPremiumAccess && (
-                    <span className="ml-1 inline-flex items-center rounded-full bg-[var(--foreground)]/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--foreground)]/60">
-                      Pro
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => {
-                    if (!hasPremiumAccess) {
-                      if (typeof document !== "undefined") {
-                        document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
-                      }
-                      return;
-                    }
-                    if (!homepageSending && !isTutorialActive) {
-                      router.push("/cosolve");
-                    }
-                  }}
-                  disabled={homepageSending || isTutorialActive}
-                  className="pill-button px-3 py-1 rounded-full border border-[var(--foreground)]/10 text-xs text-[var(--foreground)]/80 hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
-                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
-                  title="Draw and solve problems with AI"
-                >
-                  CoSolve
+                  {examSnipeLaunchPending ? "Opening Exam Snipe..." : "Exam Snipe"}
                   {!hasPremiumAccess && (
                     <span className="ml-1 inline-flex items-center rounded-full bg-[var(--foreground)]/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--foreground)]/60">
                       Pro
@@ -3267,11 +3206,7 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                 position: 'relative'
               }}>
                 <button
-                  onClick={() => {
-                    if (!homepageSending && !isTutorialActive) {
-                      handleSendMessage("Create Course");
-                    }
-                  }}
+                  onClick={handleOpenCreateCourse}
                   disabled={homepageSending || isTutorialActive}
                   className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
                   style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
@@ -3279,77 +3214,12 @@ Surge is for those who want to minimize friction and get results fast. I will pr
                   Create Course
                 </button>
                 <button
-                  onClick={() => {
-                    if (!homepageSending && !isTutorialActive) {
-                      setInputValue("Please create a quick learn on the subject: ");
-                      chatInputRef.current?.focus();
-                    }
-                  }}
-                  disabled={homepageSending || isTutorialActive}
+                  onClick={handleOpenExamSnipe}
+                  disabled={homepageSending || isTutorialActive || examSnipeLaunchPending}
                   className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
                   style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
                 >
-                  Quick Learn
-                </button>
-                <button
-                  onClick={() => {
-                    if (!homepageSending && !isTutorialActive) {
-                      handleSendMessage("Do an exam snipe please.");
-                    }
-                  }}
-                  disabled={homepageSending || isTutorialActive}
-                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
-                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
-                >
-                  Exam Snipe
-                </button>
-                <button
-                  onClick={() => {
-                    if (!hasPremiumAccess) {
-                      if (typeof document !== "undefined") {
-                        document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
-                      }
-                      return;
-                    }
-                    if (!homepageSending && !isTutorialActive) {
-                      router.push('/lab-assist');
-                    }
-                  }}
-                  disabled={homepageSending || isTutorialActive}
-                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
-                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
-                  title="Upload lab instructions and get a simple, step by step version"
-                >
-                  Lab Assist
-                  {!hasPremiumAccess && (
-                    <span className="ml-1 inline-flex items-center rounded-full bg-white/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/60">
-                      Pro
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => {
-                    if (!hasPremiumAccess) {
-                      if (typeof document !== "undefined") {
-                        document.dispatchEvent(new CustomEvent("synapse:open-subscription"));
-                      }
-                      return;
-                    }
-                    if (!homepageSending && !isTutorialActive) {
-                      router.push("/cosolve");
-                    }
-                  }}
-                  disabled={homepageSending || isTutorialActive}
-                  className="px-3 py-1 rounded-full bg-[rgba(229,231,235,0.08)] border border-white/5 text-xs text-white/80 hover:text-white hover:bg-[rgba(229,231,235,0.12)] transition-colors disabled:opacity-50"
-                  style={{ flexShrink: 0, whiteSpace: 'nowrap', minWidth: 'fit-content' }}
-                  title="Draw and solve problems with AI"
-                >
-                  CoSolve
-                  {!hasPremiumAccess && (
-                    <span className="ml-1 inline-flex items-center rounded-full bg-white/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/60">
-                      Pro
-                    </span>
-                  )}
+                  {examSnipeLaunchPending ? "Opening Exam Snipe..." : "Exam Snipe"}
                 </button>
                 <button
                   onClick={() => {
@@ -3414,6 +3284,7 @@ function Home() {
   const settingsFileInputRef = useRef<HTMLInputElement>(null);
   const settingsNameSavedRef = useRef('');
   const autoCreateFileInputRef = useRef<HTMLInputElement>(null);
+  const autoCreateConfirmFileInputRef = useRef<HTMLInputElement>(null);
   const [calendarOpenFor, setCalendarOpenFor] = useState<string | null>(null); // slug of course for which calendar is open
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<Date | null>(null);
   const [calendarCurrentMonth, setCalendarCurrentMonth] = useState<Date>(() => {
@@ -3431,6 +3302,9 @@ function Home() {
   const [labAssistModalOpen, setLabAssistModalOpen] = useState(false);
   const [detectedLabFiles, setDetectedLabFiles] = useState<File[]>([]);
   const [examSnipeCourseSlug, setExamSnipeCourseSlug] = useState<string | null>(null);
+  const [autoCreateConfirmOpen, setAutoCreateConfirmOpen] = useState(false);
+  const [pendingAutoCreateFiles, setPendingAutoCreateFiles] = useState<File[]>([]);
+  const [autoCreateConfirmDragging, setAutoCreateConfirmDragging] = useState(false);
   
   const [subscriptionLevel, setSubscriptionLevel] = useState<string | null>(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
@@ -3439,6 +3313,26 @@ function Home() {
     subscriptionLevel === "Tester" ||
     subscriptionLevel === "Paid" ||
     subscriptionLevel === "mylittlepwettybebe";
+
+  const mergeFiles = useCallback((existing: File[], incoming: File[]) => {
+    const merged = [...existing];
+    const seen = new Set(
+      existing.map((file) => `${file.name}:${file.size}:${file.lastModified}`)
+    );
+    for (const file of incoming) {
+      const key = `${file.name}:${file.size}:${file.lastModified}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(file);
+    }
+    return merged;
+  }, []);
+
+  const queueAutoCreateFiles = useCallback((incoming: File[]) => {
+    if (incoming.length === 0) return;
+    setPendingAutoCreateFiles((prev) => mergeFiles(prev, incoming));
+    setAutoCreateConfirmOpen(true);
+  }, [mergeFiles]);
 
   // Listen for onboarding trigger event from DevTools
   useEffect(() => {
@@ -4819,7 +4713,7 @@ function Home() {
         const labFileNames = new Set(detectJson.labFiles.map((name: string) => name));
         const labFiles = files.filter(file => labFileNames.has(file.name));
 
-        if (labFiles.length > 0) {
+        if (labFiles.length > 0 && MVP_FEATURES.labAssist) {
           // Show modal asking user if they want to use Lab Assist
           // Clear preparing state since user will choose
           setPreparingSlug(null);
@@ -4983,23 +4877,28 @@ function Home() {
 
   return (
     <>
-      <OnboardingModal
-        open={onboardingOpen}
-        onComplete={async (userType) => {
-          try {
-            const res = await fetch("/api/user/onboarding", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              credentials: "include",
-              body: JSON.stringify({ userType }),
-            });
-            const data = await res.json();
-            if (data.ok) {
-              setOnboardingOpen(false);
-            } else {
-              console.error("Failed to save onboarding:", data.error);
-              // Still close the modal even if save fails
-              setOnboardingOpen(false);
+        <OnboardingModal
+          open={onboardingOpen}
+          onComplete={async ({ userType, onboardingPath }) => {
+            try {
+              const res = await fetch("/api/user/onboarding", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ userType, onboardingPath }),
+              });
+              const data = await res.json();
+              if (data.ok) {
+                setOnboardingOpen(false);
+                if (onboardingPath === "upload_course") {
+                  setCreateOpen(true);
+                } else if (onboardingPath === "exam_snipe") {
+                  router.push("/exam-snipe");
+                }
+              } else {
+                console.error("Failed to save onboarding:", data.error);
+                // Still close the modal even if save fails
+                setOnboardingOpen(false);
             }
           } catch (err) {
             console.error("Error saving onboarding:", err);
@@ -5035,6 +4934,9 @@ function Home() {
           onQuickLearn={(query) => {
             setQuickLearnQuery(query);
             handleQuickLearn();
+          }}
+          onCreateCourse={() => {
+            setCreateOpen(true);
           }}
         />
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
@@ -5311,50 +5213,51 @@ function Home() {
                 >
                   Info
                 </button>
-                <button
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    setMenuOpenFor(null);
-                    try {
-                      const me = await fetch("/api/me", { credentials: "include" }).then(r => r.json().catch(() => ({})));
-                      if (!me?.user) {
-                        alert("Please log in to share courses");
-                        return;
-                      }
-
-                      // Best-effort: ensure the most recent local edits are synced before snapshotting.
+                {MVP_FEATURES.shareCourses && (
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      setMenuOpenFor(null);
                       try {
-                        const local = loadSubjectData(s.slug);
-                        if (local) {
-                          const { syncSubjectDataToServer } = await import("@/utils/storage");
-                          await syncSubjectDataToServer(s.slug, local);
+                        const me = await fetch("/api/me", { credentials: "include" }).then(r => r.json().catch(() => ({})));
+                        if (!me?.user) {
+                          alert("Please log in to share courses");
+                          return;
                         }
-                      } catch {}
 
-                      const response = await fetch("/api/courses/share", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        credentials: "include",
-                        body: JSON.stringify({ slug: s.slug }),
-                      });
-                      const result = await response.json();
-                      if (result.ok && result.shareUrl) {
-                        setShareUrl(result.shareUrl);
-                        setShareTruncated(result.truncated && typeof result.truncated === "object" ? result.truncated : null);
-                        setShareModalOpen(true);
-                        setCopiedToClipboard(false);
-                      } else {
-                        alert("Failed to create share link: " + (result.error || "Unknown error"));
+                        try {
+                          const local = loadSubjectData(s.slug);
+                          if (local) {
+                            const { syncSubjectDataToServer } = await import("@/utils/storage");
+                            await syncSubjectDataToServer(s.slug, local);
+                          }
+                        } catch {}
+
+                        const response = await fetch("/api/courses/share", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          credentials: "include",
+                          body: JSON.stringify({ slug: s.slug }),
+                        });
+                        const result = await response.json();
+                        if (result.ok && result.shareUrl) {
+                          setShareUrl(result.shareUrl);
+                          setShareTruncated(result.truncated && typeof result.truncated === "object" ? result.truncated : null);
+                          setShareModalOpen(true);
+                          setCopiedToClipboard(false);
+                        } else {
+                          alert("Failed to create share link: " + (result.error || "Unknown error"));
+                        }
+                      } catch (err) {
+                        console.error("Error sharing course:", err);
+                        alert("Failed to create share link");
                       }
-                    } catch (err) {
-                      console.error("Error sharing course:", err);
-                      alert("Failed to create share link");
-                    }
-                  }}
-                  className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
-                >
-                  Share
-                </button>
+                    }}
+                    className="block w-full rounded-lg px-3 py-1.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
+                  >
+                    Share
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -5379,7 +5282,7 @@ function Home() {
                 e.preventDefault();
                 setIsDragging(false);
                 const files = Array.from(e.dataTransfer?.files || []);
-                createCourseFromFiles(files);
+                queueAutoCreateFiles(files);
               }}
               className={`drop-files-area relative rounded-2xl border-2 border-dashed p-8 text-center transition-all duration-200 min-h-[120px] flex flex-col items-center justify-center gap-2 cursor-pointer ${
                 isDragging
@@ -5405,7 +5308,7 @@ function Home() {
               onChange={(e) => {
                 const files = Array.from(e.target.files || []);
                 if (files.length > 0) {
-                  createCourseFromFiles(files);
+                  queueAutoCreateFiles(files);
                   // Reset input so same file can be selected again
                   e.target.value = '';
                 }
@@ -5417,7 +5320,7 @@ function Home() {
       </div>
       
       {/* Quick Learn button - under subjects container */}
-      {hasPremiumAccess && (
+      {MVP_FEATURES.quickLearn && hasPremiumAccess && (
         <div className="mx-auto mt-6 w-full max-w-5xl">
           <div
             onClick={() => router.push('/quicklearn')}
@@ -5468,7 +5371,139 @@ function Home() {
         }}
       />
 
+      <Modal
+        open={autoCreateConfirmOpen}
+        onClose={() => {
+          setAutoCreateConfirmOpen(false);
+          setPendingAutoCreateFiles([]);
+          setAutoCreateConfirmDragging(false);
+        }}
+        title="Create course from files"
+        className="!max-w-2xl"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={() => {
+                setAutoCreateConfirmOpen(false);
+                setPendingAutoCreateFiles([]);
+                setAutoCreateConfirmDragging(false);
+              }}
+              className="inline-flex h-10 items-center rounded-full border border-[var(--foreground)]/15 px-5 text-sm text-[var(--foreground)]/80 hover:bg-[var(--foreground)]/5 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                const files = pendingAutoCreateFiles;
+                setAutoCreateConfirmOpen(false);
+                setPendingAutoCreateFiles([]);
+                setAutoCreateConfirmDragging(false);
+                await createCourseFromFiles(files);
+              }}
+              disabled={pendingAutoCreateFiles.length === 0}
+              className="synapse-style inline-flex h-10 items-center rounded-full px-6 text-sm font-medium text-white disabled:opacity-60 transition-opacity"
+              style={{ color: 'white', zIndex: 100, position: 'relative' }}
+            >
+              <span style={{ color: '#ffffff', zIndex: 101, position: 'relative', opacity: 1, textShadow: 'none' }}>
+                Continue
+              </span>
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-[var(--foreground)]/12 bg-[var(--background)]/70 px-4 py-4 text-sm text-[var(--foreground)]/78">
+            <div className="font-semibold text-[var(--foreground)]">Are these all of your course files?</div>
+            <p className="mt-2 leading-relaxed">
+              If you have past exams, upload them too. That helps Synapse build a better course structure and gives you a stronger Exam Snipe analysis.
+            </p>
+          </div>
+
+          <div
+            onClick={() => autoCreateConfirmFileInputRef.current?.click()}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              setAutoCreateConfirmDragging(true);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setAutoCreateConfirmDragging(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setAutoCreateConfirmDragging(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setAutoCreateConfirmDragging(false);
+              const files = Array.from(e.dataTransfer?.files || []);
+              queueAutoCreateFiles(files);
+            }}
+            className={`rounded-2xl border-2 border-dashed p-6 text-center transition-all duration-200 cursor-pointer ${
+              autoCreateConfirmDragging
+                ? 'border-[var(--foreground)]/30 shadow-[0_4px_12px_rgba(0,0,0,0.8)]'
+                : 'border-[var(--foreground)]/20 hover:border-[var(--foreground)]/30'
+            }`}
+            style={{ boxShadow: 'none' }}
+          >
+            <div className="flex flex-col items-center justify-center gap-1">
+              <span className="text-sm font-medium text-[var(--foreground)]/72">Add more files</span>
+              <span className="text-xs text-[var(--foreground)]/48">Drop more files here or click to browse</span>
+            </div>
+          </div>
+
+          <input
+            ref={autoCreateConfirmFileInputRef}
+            type="file"
+            multiple
+            accept=".pdf,.txt,.md,.docx,application/pdf,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            className="hidden"
+            onChange={(e) => {
+              const files = Array.from(e.target.files || []);
+              if (files.length > 0) {
+                queueAutoCreateFiles(files);
+                e.target.value = '';
+              }
+            }}
+          />
+
+          <div className="rounded-2xl border border-[var(--foreground)]/10 bg-[var(--background)]/55 p-4">
+            <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--foreground)]/55">
+              Files to use
+            </div>
+            {pendingAutoCreateFiles.length > 0 ? (
+              <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                {pendingAutoCreateFiles.map((file, index) => (
+                  <div
+                    key={`${file.name}:${file.size}:${file.lastModified}:${index}`}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-[var(--foreground)]/8 bg-[var(--background)]/65 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm text-[var(--foreground)]">{file.name}</div>
+                      <div className="text-xs text-[var(--foreground)]/45">
+                        {(file.size / 1024 / 1024).toFixed(file.size > 1024 * 1024 ? 1 : 2)} MB
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setPendingAutoCreateFiles((prev) => prev.filter((_, fileIndex) => fileIndex !== index));
+                      }}
+                      className="inline-flex h-8 items-center rounded-full border border-[var(--foreground)]/12 px-3 text-xs text-[var(--foreground)]/65 hover:bg-[var(--foreground)]/6 transition-colors"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-[var(--foreground)]/55">No files selected yet.</div>
+            )}
+          </div>
+        </div>
+      </Modal>
+
       {/* Share Modal */}
+      {MVP_FEATURES.shareCourses && (
       <Modal
         open={shareModalOpen}
         onClose={() => {
@@ -5531,6 +5566,7 @@ function Home() {
           </div>
         </div>
       </Modal>
+      )}
       
       {/* Exam Snipe Detection Modal */}
       <Modal
@@ -5606,6 +5642,7 @@ function Home() {
       </Modal>
 
       {/* Lab Assist Detection Modal */}
+      {MVP_FEATURES.labAssist && (
       <Modal
         open={labAssistModalOpen}
         onClose={() => {
@@ -5675,8 +5712,10 @@ function Home() {
           </div>
         </div>
       </Modal>
+      )}
 
       {/* Lab Assist Detection Modal */}
+      {MVP_FEATURES.labAssist && (
       <Modal
         open={labAssistModalOpen}
         onClose={() => {
@@ -5746,9 +5785,10 @@ function Home() {
           </div>
         </div>
       </Modal>
+      )}
 
       {/* Quick Lesson Modal */}
-      {quickLearnOpen && (
+      {MVP_FEATURES.quickLearn && quickLearnOpen && (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={() => setInfoModalOpen(null)}

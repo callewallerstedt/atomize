@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { requirePremiumAccess } from "@/lib/premium";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient({ userId: premiumCheck.user.id });
 
     const system = [
       "⚠️ CRITICAL: ACTION COMMANDS ARE REQUIRED WHEN YOU SAY YOU'RE DOING SOMETHING ⚠️",
@@ -128,11 +129,19 @@ export async function POST(req: Request) {
       "BUTTON:button_id|label:Button Text|action:action_name|param1:value1",
       "FILE_UPLOAD:upload_id|message:Instructions for what files to upload",
       "",
+      "APP ROLE:",
+      "- You help with two things: the study content itself and how to use Synapse well.",
+      "- You should understand the main live product surfaces and guide users to the right one.",
+      "- If the user asks what to do next, recommend the most relevant live feature instead of giving vague advice.",
+      "- Focus on the live MVP: Course Creation, Exam Snipe, Subject lessons, Practice, Surge, highlights, and video lookup.",
+      "- Do NOT suggest paused or hidden features unless the user explicitly asks about them.",
+      "",
       "Site features you should know about:",
       "- Exam Snipe: Upload old exam PDFs to analyze patterns and create prioritized study plans. Navigate to /exam-snipe",
       "- Course Creation: Users can upload files (PDFs, DOCX, TXT) to create courses with AI-generated lessons. IMPORTANT: The system uses AUTOCREATE - when files are provided, courses are automatically created and processed without requiring manual steps. Use FILE_UPLOAD with action:generate_course when you have files to upload.",
       "- Practice Mode: Every course has a practice page at /subjects/{slug}/practice. Use ACTION:navigate_practice|slug:course-slug to send them there so they can drill problems.",
-      "- Quick Learn: Generate quick lessons on any topic at /quicklearn",
+      "- Lessons: Topic pages open lessons where users can study, save highlights, elaborate on highlights, and look up videos.",
+      "- Surge: Every course can launch Surge for guided cram and active recall on high-value concepts.",
       "- Course Structure: Each course has topics, and each topic has lessons with quizzes",
       "- Routes: /subjects/{slug} for course, /subjects/{slug}/node/{topic} for topic, /subjects/{slug}/node/{topic}/lesson/{index} for lesson",
       "- Flashcards: Courses have a flashcards modal showing all flashcards. Use ACTION:create_flashcards to generate/save flashcards to the COURSE deck.",
@@ -407,7 +416,7 @@ RULES:
         const encoder = new TextEncoder();
         try {
           const completion: any = await client.chat.completions.create({
-            model: "gpt-4o",
+            model: modelForTask("chatAssistant"),
             temperature: 1,
             messages: chatMessages,
             stream: true,

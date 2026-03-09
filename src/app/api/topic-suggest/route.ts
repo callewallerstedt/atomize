@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { requirePremiumAccess } from "@/lib/premium";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ export async function POST(req: Request) {
     const tree: { subject: string; topics: TreeNode[] } = body.tree || { subject, topics: [] };
     const fileIds: string[] = Array.isArray(body.fileIds) ? body.fileIds : [];
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient({ userId: premiumCheck.user.id });
 
     const system = [
       "You add a new topic node to a course topic tree.",
@@ -59,7 +60,7 @@ export async function POST(req: Request) {
     ];
 
     const resp = await client.responses.create({
-      model: "gpt-4o-mini",
+      model: modelForTask("topicSuggestion"),
       instructions: system + "\n\nCRITICAL: Return STRICT JSON only with ALL required fields: { name: string; overview: string; insertPath: string[] }. The 'name' field is MANDATORY and must never be empty.",
       input: [ { role: "user", content: blocks } ],
       temperature: 0.3,

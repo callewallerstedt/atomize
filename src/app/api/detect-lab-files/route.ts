@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { modelForTask } from "@/lib/ai-models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +26,7 @@ export async function POST(req: NextRequest) {
       .join('\n\n---\n\n');
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: modelForTask("fileDetection"),
       messages: [
         {
           role: 'system',

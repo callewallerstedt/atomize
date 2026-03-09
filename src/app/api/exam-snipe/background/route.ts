@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth';
 import { prisma } from '@/lib/db';
-import OpenAI from 'openai';
 import { requirePremiumAccess } from "@/lib/premium";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
+import { modelForTask } from '@/lib/ai-models';
+import { extractJsonObject, normalizeExamSnipeResult } from '@/lib/exam-snipe';
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +16,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: premiumCheck.error }, { status: 403 });
     }
     const user = premiumCheck.user;
+    const openai = await getTrackedOpenAIClient({ userId: user.id });
 
     const body = await req.json();
     const examsText = Array.isArray(body?.examsText) ? body.examsText : [];
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
 
         // Use the same prompt as exam-snipe/route.ts
         const completion = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: modelForTask("examSnipeAnalysis"),
           messages: [
             {
               role: 'system',
@@ -133,30 +133,16 @@ Ensure arrays contain meaningful content (no placeholders). Focus on efficiency:
         const responseText = completion.choices[0]?.message?.content || '';
         
         // Parse JSON response
-        let analysisData;
-        try {
-          analysisData = JSON.parse(responseText);
-        } catch {
-          const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-          if (jsonMatch) {
-            analysisData = JSON.parse(jsonMatch[1]);
-          } else {
-            const objectMatch = responseText.match(/\{[\s\S]*\}/);
-            if (objectMatch) {
-              analysisData = JSON.parse(objectMatch[0]);
-            } else {
-              throw new Error('No valid JSON found in response');
-            }
-          }
-        }
+        const analysisData = normalizeExamSnipeResult(extractJsonObject(responseText));
 
         const examData = {
           totalExams: numExams,
           courseName: analysisData.courseName || courseName || null,
           gradeInfo: analysisData.gradeInfo || null,
           patternAnalysis: analysisData.patternAnalysis || null,
-          commonQuestions: Array.isArray(analysisData.commonQuestions) ? analysisData.commonQuestions : [],
-          concepts: analysisData.concepts || [],
+          commonQuestions: analysisData.commonQuestions,
+          concepts: analysisData.concepts,
+          detectedLanguage: analysisData.detectedLanguage,
         };
 
         // Save to history directly using prisma

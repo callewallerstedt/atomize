@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { requirePremiumAccess } from "@/lib/premium";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 type PlanItem = {
   id: string;
@@ -125,9 +126,9 @@ Rules:
 - Reference the recommended practice approach when suggesting activities or practice in the summaries.
 `;
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
+    const client = await getTrackedOpenAIClient({ userId: user.id });
     const completion = await client.chat.completions.create({
-      model: "gpt-4o",
+      model: modelForTask("examSnipePlan"),
       messages: [
         { role: "system", content: "You design structured study plans for exam prep." },
         { role: "user", content: prompt },

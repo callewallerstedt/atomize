@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
-import OpenAI from 'openai';
 import { requirePremiumAccess } from "@/lib/premium";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
+import { modelForTask } from "@/lib/ai-models";
+import { extractJsonObject, normalizeExamSnipeResult } from "@/lib/exam-snipe";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export async function POST(req: NextRequest) {
   // Check premium access
@@ -13,6 +13,7 @@ export async function POST(req: NextRequest) {
       headers: { 'Content-Type': 'application/json' },
     });
   }
+  const openai = await getTrackedOpenAIClient({ userId: premiumCheck.user.id });
 
   const encoder = new TextEncoder();
 
@@ -224,7 +225,7 @@ export async function POST(req: NextRequest) {
             "If uncertain, default to { code: 'en', name: 'English' }.",
           ].join("\n");
           const langResponse = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: modelForTask("languageDetection"),
             response_format: { type: 'json_object' },
             messages: [
               { role: 'system', content: langPrompt },
@@ -248,7 +249,7 @@ export async function POST(req: NextRequest) {
         // Create streaming chat completion
         console.log('Creating OpenAI streaming completion...');
         const completion = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: modelForTask("examSnipeAnalysisStream"),
           messages: [
             {
               role: 'system',
@@ -372,20 +373,7 @@ Ensure arrays contain meaningful content (no placeholders). Focus on efficiency:
         console.log('Finished streaming, parsing response...');
 
         // Parse JSON response
-        let analysisData;
-        try {
-          analysisData = JSON.parse(fullResponse);
-        } catch {
-          const jsonMatch = fullResponse.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-          if (jsonMatch) {
-            analysisData = JSON.parse(jsonMatch[1]);
-          } else {
-            const objectMatch = fullResponse.match(/\{[\s\S]*\}/);
-            if (objectMatch) {
-              analysisData = JSON.parse(objectMatch[0]);
-            }
-          }
-        }
+        const analysisData = normalizeExamSnipeResult(extractJsonObject(fullResponse), detectedLanguage);
 
         // Send final results
         controller.enqueue(
@@ -393,12 +381,12 @@ Ensure arrays contain meaningful content (no placeholders). Focus on efficiency:
             type: 'done',
             data: {
               totalExams: numExams,
-              courseName: analysisData?.courseName || null,
-              gradeInfo: analysisData?.gradeInfo || null,
-              patternAnalysis: analysisData?.patternAnalysis || null,
-              commonQuestions: Array.isArray(analysisData?.commonQuestions) ? analysisData.commonQuestions : [],
-              concepts: analysisData?.concepts || [],
-              detectedLanguage: detectedLanguage,
+              courseName: analysisData.courseName,
+              gradeInfo: analysisData.gradeInfo,
+              patternAnalysis: analysisData.patternAnalysis,
+              commonQuestions: analysisData.commonQuestions,
+              concepts: analysisData.concepts,
+              detectedLanguage: analysisData.detectedLanguage || detectedLanguage,
             }
           })}\n\n`)
         );

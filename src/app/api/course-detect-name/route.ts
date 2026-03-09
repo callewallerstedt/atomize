@@ -1,11 +1,15 @@
 import { NextRequest } from "next/server";
-import OpenAI from "openai";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+export const runtime = "nodejs";
 
-export const runtime = "edge";
-
-async function generateNameFromText(text: string, fallbackTitle?: string, preferredLanguage?: string) {
+async function generateNameFromText(
+  client: Awaited<ReturnType<typeof getTrackedOpenAIClient>>,
+  text: string,
+  fallbackTitle?: string,
+  preferredLanguage?: string
+) {
   const trimmed = text.trim();
   if (!trimmed) {
     return null;
@@ -32,7 +36,7 @@ ${trimmed.slice(0, 8000)}
 Course name:`;
 
   const completion = await client.responses.create({
-    model: "gpt-4o-mini",
+    model: modelForTask("titleDetection"),
     input: prompt,
     max_output_tokens: 32,
     temperature: 0.4,
@@ -46,6 +50,7 @@ Course name:`;
 
 export async function POST(req: NextRequest) {
   try {
+    const client = await getTrackedOpenAIClient();
     const contentType = req.headers.get("content-type") || "";
 
     let combinedText = "";
@@ -88,7 +93,7 @@ export async function POST(req: NextRequest) {
       return new Response(JSON.stringify({ ok: false, error: "Unsupported content type" }), { status: 400 });
     }
 
-    const cleanName = await generateNameFromText(combinedText, fallbackTitle, preferredLanguage);
+    const cleanName = await generateNameFromText(client, combinedText, fallbackTitle, preferredLanguage);
 
     if (!cleanName) {
       return new Response(JSON.stringify({ ok: false, error: "Failed to generate course name" }), { status: 500 });

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Description is required" }, { status: 400 });
     }
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient();
 
     // First, generate a comprehensive course context from the description
     const contextSystem = [
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
     const contextPrompt = `Create a comprehensive course based on this description:\n\n${description}\n\n${courseName ? `Suggested course name: ${courseName}` : ""}\n\nGenerate a detailed course outline with topics, summaries, and a comprehensive course context that can be used to create lessons.`;
 
     const contextResponse = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: modelForTask("courseFromText"),
       messages: [
         { role: "system", content: contextSystem },
         { role: "user", content: contextPrompt },

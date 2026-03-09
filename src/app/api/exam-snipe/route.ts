@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
 import { requirePremiumAccess } from "@/lib/premium";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
+import { modelForTask } from "@/lib/ai-models";
+import { extractJsonObject, normalizeExamSnipeResult } from "@/lib/exam-snipe";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,6 +11,7 @@ export async function POST(req: NextRequest) {
     if (!premiumCheck.ok) {
       return NextResponse.json({ ok: false, error: premiumCheck.error }, { status: 403 });
     }
+    const openai = await getTrackedOpenAIClient({ userId: premiumCheck.user.id });
 
     const formData = await req.formData();
     const examFiles = formData.getAll('exams') as File[];
@@ -134,7 +135,7 @@ export async function POST(req: NextRequest) {
 
     // Create chat completion
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: modelForTask("examSnipeAnalysis"),
       messages: [
         {
           role: 'system',
@@ -230,35 +231,17 @@ Ensure arrays contain meaningful content (no placeholders). Focus on efficiency:
     const responseText = completion.choices[0]?.message?.content || '';
 
     // Parse JSON response
-    let analysisData;
-    try {
-      // Try direct parse first
-      analysisData = JSON.parse(responseText);
-    } catch {
-      // Try to find JSON in markdown code blocks
-      const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-      if (jsonMatch) {
-        analysisData = JSON.parse(jsonMatch[1]);
-      } else {
-        // Try to find any JSON object
-        const objectMatch = responseText.match(/\{[\s\S]*\}/);
-        if (objectMatch) {
-          analysisData = JSON.parse(objectMatch[0]);
-        } else {
-          throw new Error('No valid JSON found in response');
-        }
-      }
-    }
+    const analysisData = normalizeExamSnipeResult(extractJsonObject(responseText));
 
     return NextResponse.json({
       ok: true,
       data: {
         totalExams: numExams,
-        courseName: analysisData.courseName || null,
-        gradeInfo: analysisData.gradeInfo || null,
-        patternAnalysis: analysisData.patternAnalysis || null,
-        commonQuestions: Array.isArray(analysisData.commonQuestions) ? analysisData.commonQuestions : [],
-        concepts: analysisData.concepts || [],
+        courseName: analysisData.courseName,
+        gradeInfo: analysisData.gradeInfo,
+        patternAnalysis: analysisData.patternAnalysis,
+        commonQuestions: analysisData.commonQuestions,
+        concepts: analysisData.concepts,
       },
     });
   } catch (error: any) {

@@ -1,12 +1,11 @@
 import { NextRequest } from "next/server";
-import OpenAI from "openai";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-export const runtime = "edge";
+export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
+    const client = await getTrackedOpenAIClient();
     const body = await req.json().catch(() => null) as { context?: string; preferredLanguage?: string } | null;
     const context = body?.context?.trim();
     const preferredLanguage = body?.preferredLanguage?.trim();

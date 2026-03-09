@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { requirePremiumAccess } from "@/lib/premium";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
     const combined = texts.map((t) => `# ${t.name}\n\n${t.text}`).join("\n\n\n");
     console.log(`[extract] Combined text length: ${combined.length} characters`);
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient({ userId: premiumCheck.user.id });
 
     async function detectLanguage(sample: string): Promise<{ code: string; name: string }> {
       try {

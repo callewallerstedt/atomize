@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import OpenAI from 'openai';
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 const MAX_HISTORY_ITEMS = 20;
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
 
 export async function GET(req: Request) {
   try {
@@ -353,6 +352,7 @@ async function matchExamSnipeToCourse(
   fileNames: string[]
 ): Promise<void> {
   try {
+    const openai = await getTrackedOpenAIClient({ userId });
     console.log("[EXAM SNIPE] Starting automatic course matching for exam snipe:", examSnipeSlug);
     console.log("[EXAM SNIPE] Course name:", examSnipeCourseName);
     

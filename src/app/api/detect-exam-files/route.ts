@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,6 +12,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+    const openai = await getTrackedOpenAIClient();
     const fileSnippets = Array.isArray(body?.fileSnippets) ? body.fileSnippets : [];
 
     if (fileSnippets.length === 0) {
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
       .join('\n\n---\n\n');
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: modelForTask("fileDetection"),
       messages: [
         {
           role: 'system',

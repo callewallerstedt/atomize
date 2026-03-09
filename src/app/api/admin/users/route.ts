@@ -18,20 +18,66 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
     }
 
-    const users = await prisma.user.findMany({
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        subscriptionLevel: true,
-        subscriptionStart: true,
-        subscriptionEnd: true,
-        promoCodeUsed: true,
-        lastLoginAt: true,
-        createdAt: true,
-      },
-    });
+    let users;
+    try {
+      users = await prisma.user.findMany({
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          subscriptionLevel: true,
+          subscriptionStart: true,
+          subscriptionEnd: true,
+          promoCodeUsed: true,
+          lastLoginAt: true,
+          createdAt: true,
+          usageStats: {
+            select: {
+              aiInputTokens: true,
+              aiOutputTokens: true,
+              aiCachedInputTokens: true,
+              aiRequestCount: true,
+              estimatedAiCostUsd: true,
+              apiCalls: true,
+              coursesCreated: true,
+              lessonsGenerated: true,
+            },
+          },
+          modelUsageStats: {
+            orderBy: [
+              { estimatedCostUsd: "desc" },
+              { requestCount: "desc" },
+            ],
+            select: {
+              model: true,
+              inputTokens: true,
+              outputTokens: true,
+              cachedInputTokens: true,
+              requestCount: true,
+              estimatedCostUsd: true,
+              lastUsedAt: true,
+            },
+          },
+        },
+      });
+    } catch (usageErr) {
+      console.warn("[admin/users] Falling back to legacy user select:", usageErr);
+      users = await prisma.user.findMany({
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          subscriptionLevel: true,
+          subscriptionStart: true,
+          subscriptionEnd: true,
+          promoCodeUsed: true,
+          lastLoginAt: true,
+          createdAt: true,
+        },
+      });
+    }
 
     return NextResponse.json({ ok: true, users });
   } catch (err: any) {

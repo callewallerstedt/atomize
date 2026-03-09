@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
 import { requirePremiumAccess } from "@/lib/premium";
+import { modelForTask } from '@/lib/ai-models';
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
 
 interface VideoResult {
   videoId: string;
@@ -171,6 +170,7 @@ export async function POST(req: NextRequest) {
     if (!premiumCheck.ok) {
       return NextResponse.json({ ok: false, error: premiumCheck.error }, { status: 403 });
     }
+    const openai = await getTrackedOpenAIClient({ userId: premiumCheck.user.id });
 
     const body = await req.json();
     const { lessonTitle, lessonSummary, lessonBody, courseName, courseContext } = body;
@@ -185,7 +185,7 @@ export async function POST(req: NextRequest) {
       const languageSample = [lessonTitle, lessonSummary, lessonBody?.substring(0, 500)].filter(Boolean).join(' ');
       if (languageSample.trim()) {
         const langResponse = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
+          model: modelForTask("languageDetection"),
           response_format: { type: 'json_object' },
           messages: [
             { 
@@ -265,7 +265,7 @@ Return 2-3 natural, well-crafted queries in the SAME LANGUAGE as the lesson. Onl
     let queriesOriginal: string[] = [];
     try {
       const completionOriginal = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: modelForTask("videoSearch"),
         messages: [
           { role: "system", content: systemPromptOriginal },
           { 
@@ -312,7 +312,7 @@ Return your response as a JSON object with this structure:
 Return 2-3 natural, well-crafted queries in ENGLISH. Only return the JSON object, nothing else.`;
 
         const completionEnglish = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
+          model: modelForTask("videoSearch"),
           messages: [
             { role: "system", content: systemPromptEnglish },
             { 

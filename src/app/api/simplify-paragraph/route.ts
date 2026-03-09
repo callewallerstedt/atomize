@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { stripLessonMetadata } from "@/lib/lessonFormat";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No paragraph provided" }, { status: 400 });
     }
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient();
 
     const system = [
       "You are an expert educator who simplifies complex academic or technical text for students.",
@@ -62,7 +63,7 @@ export async function POST(req: Request) {
     ].filter(Boolean).join("\n");
 
     const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: modelForTask("paragraphSimplify"),
       messages: [
         { role: "system", content: system },
         { role: "user", content: user }

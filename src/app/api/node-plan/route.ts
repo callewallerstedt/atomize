@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ export async function POST(req: Request) {
     const languageName = String(body.languageName || "");
     if (!topic) return NextResponse.json({ ok: false, error: "Missing topic" }, { status: 400 });
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient();
     const system = [
       "You design an optimal lesson sequence for teaching ONE topic that builds deep, lasting understanding.",
       "Return STRICT JSON (no markdown, no code fences) with:",
@@ -48,7 +49,7 @@ export async function POST(req: Request) {
     ].filter(Boolean).join("\n\n");
 
     const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: modelForTask("nodePlan"),
       response_format: {
         type: "json_schema",
         json_schema: {

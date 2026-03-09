@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { extractLessonMetadata, extractQuizSection, extractPracticeProblems } from "@/lib/lessonFormat";
 import type { LessonMetadata } from "@/types/lesson";
 import { requirePremiumAccess } from "@/lib/premium";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,7 +43,7 @@ export async function POST(req: Request) {
 
     const target = lessonsMeta[lessonIndex] || { type: "Full Lesson", title: `Lesson ${lessonIndex + 1}` };
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient({ userId: premiumCheck.user.id });
 
     // ---- System prompt: strict, adaptive, in-depth, render-safe Markdown ----
     const system = [
@@ -119,7 +120,7 @@ export async function POST(req: Request) {
     ].filter(Boolean).join("\n\n");
 
     const completion = await client.chat.completions.create({
-      model: "gpt-4o",
+      model: modelForTask("nodeLesson"),
       messages: [
         { role: "system", content: system },
         { role: "user", content: context }

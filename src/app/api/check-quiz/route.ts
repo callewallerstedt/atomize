@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { stripLessonMetadata } from "@/lib/lessonFormat";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No answers provided" }, { status: 400 });
     }
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient();
 
     // Prepare the answers for checking
     const answersText = answers.map((a: any, i: number) =>
@@ -75,7 +76,7 @@ ${answersText}
 Please evaluate each answer and return the JSON results.`;
 
     const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: modelForTask("quizCheck"),
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: system },

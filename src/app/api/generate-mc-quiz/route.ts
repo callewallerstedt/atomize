@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { stripLessonMetadata } from "@/lib/lessonFormat";
 import { requirePremiumAccess } from "@/lib/premium";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,7 +36,7 @@ export async function POST(req: Request) {
     }
     const normalizedLessonContent = stripLessonMetadata(String(lessonContent));
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient({ userId: premiumCheck.user.id });
 
     const system = [
       "You are an expert educator creating multiple choice quiz questions.",
@@ -84,7 +85,7 @@ export async function POST(req: Request) {
     ].filter(Boolean).join("\n");
 
     const completion = await client.chat.completions.create({
-      model: "gpt-4o",
+      model: modelForTask("mcQuiz"),
       messages: [
         { role: "system", content: system },
         { role: "user", content: user }

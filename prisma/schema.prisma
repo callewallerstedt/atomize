@@ -35,6 +35,7 @@ model User {
   examSnipes           ExamSnipeHistory[]
   promoCodeRedemptions PromoCodeRedemption[]
   usageStats           UsageStats?
+  modelUsageStats      ModelUsageStat[]
   feedback             Feedback[]
   sharedCourses        SharedCourse[]
   coSolveHistory       CoSolveHistory[]
@@ -130,13 +131,34 @@ model PromoCodeRedemption {
 }
 
 model UsageStats {
-  id               String   @id @default(cuid())
-  userId           String   @unique
-  coursesCreated   Int      @default(0)
-  lessonsGenerated Int      @default(0)
-  apiCalls         Int      @default(0)
-  lastResetAt      DateTime @default(now())
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  coursesCreated      Int      @default(0)
+  lessonsGenerated    Int      @default(0)
+  apiCalls            Int      @default(0)
+  aiInputTokens       Int      @default(0)
+  aiOutputTokens      Int      @default(0)
+  aiCachedInputTokens Int      @default(0)
+  aiRequestCount      Int      @default(0)
+  estimatedAiCostUsd  Float    @default(0)
+  lastResetAt         DateTime @default(now())
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ModelUsageStat {
+  id                  String   @id @default(cuid())
+  userId              String
+  model               String
+  inputTokens         Int      @default(0)
+  outputTokens        Int      @default(0)
+  cachedInputTokens   Int      @default(0)
+  requestCount        Int      @default(0)
+  estimatedCostUsd    Float    @default(0)
+  lastUsedAt          DateTime @default(now())
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, model])
+  @@index([userId, estimatedCostUsd])
 }
 
 model ExamSnipeHistory {

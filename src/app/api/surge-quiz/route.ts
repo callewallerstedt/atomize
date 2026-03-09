@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { buildQuizJsonInstruction } from "@/utils/surgeQuizPrompts";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,7 +86,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient();
     const instructions = buildQuizJsonInstruction(stage, courseName, topicName, mcQuestions, debugInstruction);
     let trimmedContext = context.slice(0, 50000);
     if (stage && trimmedContext.includes("COURSE CONTEXT - CRITICAL")) {
@@ -101,7 +102,7 @@ export async function POST(req: Request) {
     }
 
     const response = await client.responses.create({
-      model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+      model: modelForTask("surgeQuiz"),
       instructions,
       input: [
         {

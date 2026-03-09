@@ -31,8 +31,8 @@ export default function CourseCreateModal({ open, onClose, onCreate }: { open: b
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
-    onCreate(name.trim(), syllabus, files, preferredLanguage.trim() || undefined);
+    if (!name.trim() && !syllabus.trim() && files.length === 0) return;
+    onCreate(name.trim() || "New Course", syllabus, files, preferredLanguage.trim() || undefined);
     // Reset form
     setName("");
     setSyllabus("");
@@ -45,17 +45,17 @@ export default function CourseCreateModal({ open, onClose, onCreate }: { open: b
     <Modal
       open={open}
       onClose={onClose}
-      title="Add course"
+      title="Create course"
       footer={
         <div className="flex items-center justify-end gap-2">
           <button onClick={onClose} className="inline-flex h-9 items-center rounded-full px-4 text-sm" style={{ backgroundColor: '#141923', color: 'white' }}>Cancel</button>
-          <button onClick={(e) => submit(e as any)} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium !text-white synapse-style">Create</button>
+          <button onClick={(e) => submit(e as any)} className="inline-flex h-9 items-center rounded-full px-4 text-sm font-medium !text-white synapse-style">Create course</button>
         </div>
       }
     >
       <form onSubmit={submit} className="space-y-4">
         <div>
-          <label className="mb-1 block text-xs text-[#A7AFBE]">Course name</label>
+          <label className="mb-1 block text-xs text-[#A7AFBE]">Course title (optional)</label>
           <div className="w-full chat-input-container rounded-xl border border-[#222731] px-3 py-2">
             <input
               value={name}
@@ -72,6 +72,7 @@ export default function CourseCreateModal({ open, onClose, onCreate }: { open: b
               style={{ WebkitUserSelect: 'text', WebkitTouchCallout: 'none', WebkitAppearance: 'none' }}
             />
           </div>
+          <div className="mt-1 text-[10px] text-[#9AA3B2]">Leave this empty if you want Synapse to infer the title from your files or description.</div>
         </div>
         <div>
           <label className="mb-1 block text-xs text-[#A7AFBE]">Preferred language (optional)</label>

@@ -36,6 +36,38 @@ function generateDots(count: number) {
   });
 }
 
+function formatTokenCount(value: number | null | undefined) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount)) return "0";
+  if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(2)}M`;
+  if (amount >= 1_000) return `${(amount / 1_000).toFixed(1)}K`;
+  return `${Math.round(amount)}`;
+}
+
+function formatUsd(value: number | null | undefined) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount)) return "$0.00";
+  return amount.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: amount >= 100 ? 0 : amount >= 10 ? 2 : 4,
+  });
+}
+
+function getUsageStatsForUser(user: any) {
+  return user?.usageStats || {
+    aiInputTokens: 0,
+    aiOutputTokens: 0,
+    aiCachedInputTokens: 0,
+    aiRequestCount: 0,
+    estimatedAiCostUsd: 0,
+    apiCalls: 0,
+    coursesCreated: 0,
+    lessonsGenerated: 0,
+  };
+}
+
 // Loading Screen Component
 function LoadingScreen({ onComplete }: { onComplete: () => void }) {
   const [isFadingOut, setIsFadingOut] = useState(false);
@@ -969,6 +1001,8 @@ function PromoCodeModal({
                 <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
                   {filteredAndSortedUsers.map((user) => {
                     const isExpanded = expandedUsers.has(user.id);
+                    const usageStats = getUsageStatsForUser(user);
+                    const modelUsageStats = Array.isArray(user.modelUsageStats) ? user.modelUsageStats : [];
                     return (
                       <div
                         key={user.id}
@@ -1000,6 +1034,20 @@ function PromoCodeModal({
                                 </div>
                                 <div className="text-xs text-[var(--foreground)]/50 truncate">
                                   {user.email || 'No email'}
+                                </div>
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                  <span className="text-[11px] px-2 py-1 rounded-full bg-[var(--accent-pink)]/10 text-[var(--accent-pink)]">
+                                    AI {formatUsd(usageStats.estimatedAiCostUsd)}
+                                  </span>
+                                  <span className="text-[11px] px-2 py-1 rounded-full bg-[var(--foreground)]/10 text-[var(--foreground)]/70">
+                                    In {formatTokenCount(usageStats.aiInputTokens)}
+                                  </span>
+                                  <span className="text-[11px] px-2 py-1 rounded-full bg-[var(--foreground)]/10 text-[var(--foreground)]/70">
+                                    Out {formatTokenCount(usageStats.aiOutputTokens)}
+                                  </span>
+                                  <span className="text-[11px] px-2 py-1 rounded-full bg-[var(--foreground)]/10 text-[var(--foreground)]/70">
+                                    {formatTokenCount(usageStats.aiRequestCount)} req
+                                  </span>
                                 </div>
                               </div>
                             </div>
@@ -1051,6 +1099,84 @@ function PromoCodeModal({
                               <div className="space-y-2">
                                 <div className="text-xs font-medium text-[var(--foreground)]/70">Created</div>
                                 <div className="text-xs text-[var(--foreground)]/90">{new Date(user.createdAt).toLocaleString()}</div>
+                              </div>
+                            </div>
+
+                            <div className="pt-2 border-t border-[var(--foreground)]/10 space-y-3">
+                              <div className="text-xs font-medium text-[var(--foreground)]/70">AI Usage</div>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                <div className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/60 p-3">
+                                  <div className="text-[11px] text-[var(--foreground)]/50 mb-1">Estimated Spend</div>
+                                  <div className="text-sm font-semibold text-[var(--accent-pink)]">{formatUsd(usageStats.estimatedAiCostUsd)}</div>
+                                </div>
+                                <div className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/60 p-3">
+                                  <div className="text-[11px] text-[var(--foreground)]/50 mb-1">Input Tokens</div>
+                                  <div className="text-sm font-semibold text-[var(--foreground)]">{formatTokenCount(usageStats.aiInputTokens)}</div>
+                                </div>
+                                <div className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/60 p-3">
+                                  <div className="text-[11px] text-[var(--foreground)]/50 mb-1">Output Tokens</div>
+                                  <div className="text-sm font-semibold text-[var(--foreground)]">{formatTokenCount(usageStats.aiOutputTokens)}</div>
+                                </div>
+                                <div className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/60 p-3">
+                                  <div className="text-[11px] text-[var(--foreground)]/50 mb-1">Requests</div>
+                                  <div className="text-sm font-semibold text-[var(--foreground)]">{formatTokenCount(usageStats.aiRequestCount)}</div>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                <div className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/60 p-3">
+                                  <div className="text-[11px] text-[var(--foreground)]/50 mb-1">Cached Input</div>
+                                  <div className="text-sm font-semibold text-[var(--foreground)]">{formatTokenCount(usageStats.aiCachedInputTokens)}</div>
+                                </div>
+                                <div className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/60 p-3">
+                                  <div className="text-[11px] text-[var(--foreground)]/50 mb-1">API Calls</div>
+                                  <div className="text-sm font-semibold text-[var(--foreground)]">{formatTokenCount(usageStats.apiCalls)}</div>
+                                </div>
+                                <div className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/60 p-3">
+                                  <div className="text-[11px] text-[var(--foreground)]/50 mb-1">Courses</div>
+                                  <div className="text-sm font-semibold text-[var(--foreground)]">{formatTokenCount(usageStats.coursesCreated)}</div>
+                                </div>
+                                <div className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/60 p-3">
+                                  <div className="text-[11px] text-[var(--foreground)]/50 mb-1">Lessons</div>
+                                  <div className="text-sm font-semibold text-[var(--foreground)]">{formatTokenCount(usageStats.lessonsGenerated)}</div>
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                <div className="text-[11px] font-medium text-[var(--foreground)]/60 uppercase tracking-[0.16em]">By Model</div>
+                                {modelUsageStats.length === 0 ? (
+                                  <div className="text-xs text-[var(--foreground)]/50">No tracked AI usage yet.</div>
+                                ) : (
+                                  <div className="space-y-2">
+                                    {modelUsageStats.map((entry: any) => (
+                                      <div
+                                        key={`${user.id}-${entry.model}`}
+                                        className="rounded-lg border border-[var(--foreground)]/10 bg-[var(--background)]/60 px-3 py-2"
+                                      >
+                                        <div className="flex items-center justify-between gap-3">
+                                          <div>
+                                            <div className="text-xs font-semibold text-[var(--foreground)]">{entry.model}</div>
+                                            <div className="text-[11px] text-[var(--foreground)]/50">
+                                              {formatTokenCount(entry.requestCount)} req • last {entry.lastUsedAt ? new Date(entry.lastUsedAt).toLocaleString() : "unknown"}
+                                            </div>
+                                          </div>
+                                          <div className="text-xs font-semibold text-[var(--accent-pink)]">
+                                            {formatUsd(entry.estimatedCostUsd)}
+                                          </div>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 mt-2">
+                                          <span className="text-[11px] px-2 py-1 rounded-full bg-[var(--foreground)]/10 text-[var(--foreground)]/70">
+                                            In {formatTokenCount(entry.inputTokens)}
+                                          </span>
+                                          <span className="text-[11px] px-2 py-1 rounded-full bg-[var(--foreground)]/10 text-[var(--foreground)]/70">
+                                            Out {formatTokenCount(entry.outputTokens)}
+                                          </span>
+                                          <span className="text-[11px] px-2 py-1 rounded-full bg-[var(--foreground)]/10 text-[var(--foreground)]/70">
+                                            Cached {formatTokenCount(entry.cachedInputTokens)}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             </div>
                             
@@ -1854,6 +1980,41 @@ type ChatHistory = {
   timestamp: number;
 };
 
+const APP_ASSISTANT_CONTEXT = [
+  "SYNAPSE APP OVERVIEW:",
+  "- Home: create a course from files, pasted text, or a course description.",
+  "- Exam Snipe: upload past exams, analyze repeated concepts and questions, then turn the results into lessons.",
+  "- Subject pages: browse topics, open lessons, launch Practice, launch Surge, and review exam info.",
+  "- Lesson pages: study generated lessons, save highlights, elaborate on highlights, find videos, and jump into Practice.",
+  "- Practice: dedicated active-recall and question drilling for the current course.",
+  "- Surge: guided cram mode that focuses on the highest-value concepts quickly.",
+  "- Your job is not only to explain study content. You should also help the user use Synapse well, navigate the app, and choose the right feature for the task.",
+  "- Focus recommendations on the live MVP surface: course creation, Exam Snipe, lessons, Practice, Surge, highlights, and video lookup.",
+  "- Do not recommend paused or hidden features unless the user explicitly asks about them.",
+].join("\n");
+
+function isWelcomeChatMessage(content: string): boolean {
+  if (!content) return false;
+  return (
+    content.includes("Welcome Back to Synapse") ||
+    content.includes("Welcome to Synapse") ||
+    content.includes("Chad here.") ||
+    /It's a \w+ (morning|afternoon|evening|night)/.test(content)
+  );
+}
+
+function getRouteAssistantLabel(pathname: string | null): string {
+  if (!pathname) return "Synapse";
+  if (pathname === "/") return "Home";
+  if (pathname === "/exam-snipe") return "Exam Snipe";
+  if (pathname.includes("/practice")) return "Practice";
+  if (pathname.includes("/surge")) return "Surge";
+  if (pathname.includes("/examsnipe")) return "Subject Exam Snipe";
+  if (pathname.includes("/node/")) return "Lesson";
+  if (pathname.includes("/subjects/")) return "Subject";
+  return "Synapse";
+}
+
 // File upload component
 function FileUploadArea({ 
   uploadId, 
@@ -2010,6 +2171,8 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
   const pathname = usePathname();
+  const routeLabel = getRouteAssistantLabel(pathname);
+  const shouldHideFloatingChat = pathname === "/";
   const [preferredAddress, setPreferredAddress] = useState<string | null>(null);
   const homeResetRef = useRef(false);
   const insertedWelcomeRef = useRef(false);
@@ -2090,21 +2253,42 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
     return `Welcome Back to Synapse, ${honorific}! It's a ${weekday.toLowerCase()} ${timeOfDay} (${timeStamp}) — ${vibeMap[timeOfDay]}`;
   }, [preferredAddress]);
 
+  const buildChatWelcomeMessage = useCallback(() => {
+    const honorific = preferredAddress?.trim().replace(/\s+/g, " ");
+    const address = honorific ? `, ${honorific}` : "";
+    return `Chad here${address}. I can explain this page, navigate Synapse, and help you use the right tool.`;
+  }, [preferredAddress]);
+
+  const openDrawer = useCallback(() => {
+    if (shouldHideFloatingChat) return;
+    setOpen(true);
+    setShowFullChat(true);
+    requestAnimationFrame(() => {
+      chatInputRef.current?.focus();
+    });
+  }, [shouldHideFloatingChat]);
+
+  const closeDrawer = useCallback(() => {
+    setShowFullChat(false);
+    setOpen(false);
+  }, []);
+
   const resetHomepageChat = useCallback(() => {
     insertedWelcomeRef.current = true;
     lastSavedRef.current = '';
     setCurrentChatId(null);
-    setMessages([{ role: 'assistant', content: buildWelcomeMessage() }]);
+    setMessages([{ role: 'assistant', content: buildChatWelcomeMessage() }]);
     setInput("");
     setChatHistory([]);
     try {
       localStorage.removeItem('chatHistory');
     } catch {}
-  }, [buildWelcomeMessage]);
+  }, [buildChatWelcomeMessage]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (pathname === '/') {
+      closeDrawer();
       if (!homeResetRef.current) {
         homeResetRef.current = true;
         resetHomepageChat();
@@ -2113,19 +2297,19 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
       homeResetRef.current = false;
       insertedWelcomeRef.current = false;
     }
-  }, [pathname, resetHomepageChat]);
+  }, [pathname, resetHomepageChat, closeDrawer]);
 
   useEffect(() => {
     if (pathname !== '/' || !insertedWelcomeRef.current) return;
     setMessages((prev) => {
       if (prev.length === 1 && prev[0]?.role === 'assistant') {
-        const welcome = buildWelcomeMessage();
+        const welcome = buildChatWelcomeMessage();
         if (prev[0].content === welcome) return prev;
         return [{ ...prev[0], content: welcome }];
       }
       return prev;
     });
-  }, [pathname, buildWelcomeMessage]);
+  }, [pathname, buildChatWelcomeMessage]);
 
   useEffect(() => {
     if (insertedWelcomeRef.current && messages.some((m) => m.role === 'user')) {
@@ -2138,52 +2322,28 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
       // Clear welcome messages when opening chat modal (not on homepage)
       if (pathname !== '/') {
         setMessages(prev => {
-          const filtered = prev.filter(msg => {
-            if (msg.role === 'assistant' && msg.content) {
-              const isWelcomeMessage = msg.content.includes('Welcome Back to Synapse') || 
-                                       msg.content.includes('Welcome to Synapse') ||
-                                       msg.content.match(/It's a \w+ (morning|afternoon|evening|night)/);
-              return !isWelcomeMessage;
-            }
-            return true;
-          });
-          return filtered;
+          return prev.filter(msg => !(msg.role === 'assistant' && isWelcomeChatMessage(msg.content)));
         });
       }
-      setOpen(true);
-      requestAnimationFrame(() => {
-        chatInputRef.current?.focus();
-      });
+      openDrawer();
     };
 
     const handleToggleChat = () => {
-      setOpen(prev => {
-        const newState = !prev;
-        if (newState) {
-          // Clear welcome messages when opening chat modal (not on homepage)
-          if (pathname !== '/') {
-            setMessages(prevMessages => {
-              const filtered = prevMessages.filter(msg => {
-                if (msg.role === 'assistant' && msg.content) {
-                  const isWelcomeMessage = msg.content.includes('Welcome Back to Synapse') || 
-                                           msg.content.includes('Welcome to Synapse') ||
-                                           msg.content.match(/It's a \w+ (morning|afternoon|evening|night)/);
-                  return !isWelcomeMessage;
-                }
-                return true;
-              });
-              return filtered;
-            });
-          }
-          requestAnimationFrame(() => {
-            chatInputRef.current?.focus();
-          });
-        }
-        return newState;
-      });
+      if (pathname === '/') return;
+      if (showFullChat) {
+        closeDrawer();
+        return;
+      }
+      if (pathname !== '/') {
+        setMessages(prevMessages =>
+          prevMessages.filter(msg => !(msg.role === 'assistant' && isWelcomeChatMessage(msg.content)))
+        );
+      }
+      openDrawer();
     };
 
     const handleOpenChatWithMessage = (e: Event) => {
+      if (pathname === '/') return;
       const customEvent = e as CustomEvent;
       const { welcomeMessage, welcomeName, userMessage } = customEvent.detail || {};
       
@@ -2193,15 +2353,12 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
           { role: 'user', content: userMessage }
         ]);
         insertedWelcomeRef.current = false;
-        setOpen(true);
+        openDrawer();
         // Store for processing in next effect
         pendingWelcomeMessageRef.current = { welcomeMessage: '', userMessage };
       } else {
-        setOpen(true);
+        openDrawer();
       }
-      requestAnimationFrame(() => {
-        chatInputRef.current?.focus();
-      });
     };
 
     document.addEventListener('synapse:open-chat', handleOpenChat as EventListener);
@@ -2212,7 +2369,7 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
       document.removeEventListener('synapse:toggle-chat', handleToggleChat as EventListener);
       document.removeEventListener('synapse:open-chat-with-message', handleOpenChatWithMessage as EventListener);
     };
-  }, []); // Remove 'open' from dependencies to prevent re-registration
+  }, [pathname, showFullChat, openDrawer, closeDrawer]); // Remove 'open' from dependencies to prevent re-registration
 
   // ESC key handler - always active when chat is open
   useEffect(() => {
@@ -2222,7 +2379,7 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        setOpen(false);
+        closeDrawer();
       }
     };
 
@@ -2261,9 +2418,9 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
 
       // If it's a printable character, show pill under header (not full chat)
       if (e.key.length === 1 && !e.key.match(/[^\x20-\x7E]/)) {
-        if (!open && !showFullChat) {
+        if (!open && !showFullChat && pathname !== '/') {
           setOpen(true);
-          setShowFullChat(false); // Show pill, not full chat
+          setShowFullChat(true);
           requestAnimationFrame(() => {
             chatInputRef.current?.focus();
             // Set the typed character in the input
@@ -2295,13 +2452,7 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
     if (messages.length > 0 && !sending && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content) {
       // Filter out welcome messages before saving
       const filteredMessages = messages.filter(msg => {
-        if (msg.role === 'assistant' && msg.content) {
-          const isWelcomeMessage = msg.content.includes('Welcome Back to Synapse') || 
-                                   msg.content.includes('Welcome to Synapse') ||
-                                   msg.content.match(/It's a \w+ (morning|afternoon|evening|night)/);
-          return !isWelcomeMessage;
-        }
-        return true;
+        return !(msg.role === 'assistant' && isWelcomeChatMessage(msg.content));
       });
       
       // Don't save if all messages were filtered out (only welcome messages)
@@ -2448,14 +2599,7 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
     insertedWelcomeRef.current = false;
     // Filter out welcome messages when loading chat history
     const filteredMessages = chat.messages.filter(msg => {
-      if (msg.role === 'assistant' && msg.content) {
-        // Check if it's a welcome message pattern
-        const isWelcomeMessage = msg.content.includes('Welcome Back to Synapse') || 
-                                 msg.content.includes('Welcome to Synapse') ||
-                                 msg.content.match(/It's a \w+ (morning|afternoon|evening|night)/);
-        return !isWelcomeMessage;
-      }
-      return true;
+      return !(msg.role === 'assistant' && isWelcomeChatMessage(msg.content));
     });
     setMessages(filteredMessages);
     setCurrentChatId(chat.id);
@@ -2495,6 +2639,41 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
     
     return () => clearInterval(interval);
   }, [open, sending, messages.length]);
+
+  function getPageAssistantContext(): string {
+    if (typeof window === 'undefined') return '';
+    try {
+      const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
+        .map((el) => el.textContent?.trim() || '')
+        .filter(Boolean)
+        .slice(0, 8);
+      const buttons = Array.from(document.querySelectorAll('button'))
+        .map((el) => el.textContent?.replace(/\s+/g, ' ').trim() || '')
+        .filter(Boolean)
+        .filter((label) => label.length <= 50)
+        .slice(0, 16);
+      const links = Array.from(document.querySelectorAll('a[href]'))
+        .map((el) => {
+          const label = el.textContent?.replace(/\s+/g, ' ').trim() || '';
+          const href = (el as HTMLAnchorElement).getAttribute('href') || '';
+          return label && href ? `${label} -> ${href}` : '';
+        })
+        .filter(Boolean)
+        .slice(0, 12);
+
+      return [
+        `CURRENT APP AREA: ${routeLabel}`,
+        `CURRENT PATH: ${pathname || '/'}`,
+        headings.length ? `VISIBLE HEADINGS: ${headings.join(' | ')}` : '',
+        buttons.length ? `VISIBLE BUTTONS: ${buttons.join(' | ')}` : '',
+        links.length ? `VISIBLE LINKS: ${links.join(' | ')}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+    } catch {
+      return [`CURRENT APP AREA: ${routeLabel}`, `CURRENT PATH: ${pathname || '/'}`].join('\n');
+    }
+  }
 
   // Function to compress course/subject data for context (including exam snipe)
   async function getCompressedCourseContext(): Promise<string> {
@@ -3870,6 +4049,8 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
       setSending(true);
       document.dispatchEvent(new CustomEvent('synapse:chat-sending', { detail: { sending: true } }));
       const courseContext = await getCompressedCourseContext();
+      const appContext = APP_ASSISTANT_CONTEXT;
+      const routeContext = getPageAssistantContext();
       
       // Gather page context (lesson content or visible text)
       let pageContext = '';
@@ -3884,7 +4065,10 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
       const systemContext = systemMessages.join('\n\n---\n\n');
       
       // Combine contexts (system context first, then course context, then page context)
-      const fullContext = [systemContext, courseContext, pageContext].filter(Boolean).join('\n\n---\n\n').slice(0, 12000);
+      const fullContext = [appContext, routeContext, systemContext, courseContext, pageContext]
+        .filter(Boolean)
+        .join('\n\n---\n\n')
+        .slice(0, 20000);
       
       // Filter out system messages and loading messages from messages sent to API (they're in context now)
       // Hidden messages are still sent to API (they trigger responses) but won't be displayed
@@ -4041,6 +4225,8 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
       setSending(true);
       document.dispatchEvent(new CustomEvent('synapse:chat-sending', { detail: { sending: true } }));
       const courseContext = await getCompressedCourseContext();
+      const appContext = APP_ASSISTANT_CONTEXT;
+      const routeContext = getPageAssistantContext();
       
       // Gather page context (lesson content or visible text)
       let pageContext = '';
@@ -4108,7 +4294,10 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
       const systemContext = systemMessages.join('\n\n---\n\n');
       
       // Combine contexts (system context first, then course context, then page context)
-      const fullContext = [systemContext, courseContext, pageContext].filter(Boolean).join('\n\n---\n\n').slice(0, 12000);
+      const fullContext = [appContext, routeContext, systemContext, courseContext, pageContext]
+        .filter(Boolean)
+        .join('\n\n---\n\n')
+        .slice(0, 20000);
       
       // Filter out system messages from messages sent to API (they're in context now)
       const messagesForAPI = messages.filter(m => m.role !== 'system' && !m.isLoading);
@@ -4293,9 +4482,7 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
       ) {
         return;
       }
-      // Close if clicking outside
-      setOpen(false);
-      setShowFullChat(false);
+      closeDrawer();
     }
     
     // Use a small delay to let button clicks process first
@@ -4307,7 +4494,7 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
       clearTimeout(timeoutId);
       document.removeEventListener('mousedown', handleClickOutside, true);
     };
-  }, [open, showFullChat]);
+  }, [open, showFullChat, closeDrawer]);
 
   // Resize handlers (bottom-left grip)
   useEffect(() => {
@@ -4334,7 +4521,9 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
     <>
       <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0 p-4">
         {messages.length === 0 && (
-          <div className="text-xs text-[var(--foreground)]/60">Ask a question about this page. I'll use the current page content as context.</div>
+          <div className="text-xs text-[var(--foreground)]/60">
+            Ask about this page, your courses, Exam Snipe, Practice, or Surge. I can also navigate and help you use Synapse.
+          </div>
         )}
         {messages.map((m, i) => {
           // Skip system messages and hidden messages in display (they're context only)
@@ -4463,7 +4652,7 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Type a message..."
+            placeholder="Ask Chad to explain, navigate, or use a tool..."
             className="flex-1 px-4 py-2 rounded-xl border border-[var(--foreground)]/20 bg-[var(--background)]/80 text-[var(--foreground)] placeholder:text-[var(--foreground)]/40 focus:outline-none focus:ring-1 focus:ring-[var(--accent-cyan)]/30"
             disabled={sending}
           />
@@ -4535,7 +4724,7 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
                   sendMessage();
                 }
               }}
-              placeholder="Chat with Chad..."
+              placeholder="Ask Chad to explain, navigate, or use a tool..."
               disabled={sending}
               className="flex-1 bg-transparent border-none outline-none text-base text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden"
               style={{ 
@@ -4603,75 +4792,93 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
         document.body
       ) : null}
       {/* Floating chat button in bottom right */}
-      {typeof document !== 'undefined' && !showFullChat ? createPortal(
+      {!shouldHideFloatingChat && typeof document !== 'undefined' && !showFullChat ? createPortal(
         <button
           onClick={(e) => {
             e.stopPropagation();
-            setOpen(true);
-            setShowFullChat(true);
-            requestAnimationFrame(() => {
-              chatInputRef.current?.focus();
-            });
+            openDrawer();
           }}
-          className="unified-button fixed bottom-6 right-6 z-50 inline-flex items-center justify-center w-12 h-12 rounded-full transition-all duration-300 ease-out"
+          className="fixed z-[9997] inline-flex items-center gap-2 rounded-full border border-[var(--foreground)]/12 bg-[var(--background)]/92 px-3 py-2 text-sm text-[var(--foreground)] backdrop-blur-md transition-all duration-200 hover:border-[var(--foreground)]/22 hover:bg-[var(--background)]"
           style={{ 
-            boxShadow: 'none',
+            right: 'max(0.85rem, calc(env(safe-area-inset-right, 0px) + 0.25rem))',
+            bottom: 'max(0.85rem, calc(env(safe-area-inset-bottom, 0px) + 0.25rem))',
+            boxShadow: '0 14px 34px rgba(0, 0, 0, 0.42)',
           }}
-          aria-label="Open chat"
-          title="Open chat"
+          aria-label="Open Chad"
+          title="Open Chad"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--foreground)]/10 bg-[var(--foreground)]/6">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-[var(--foreground)]">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" stroke="currentColor" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+          </span>
+          <span className="hidden min-w-0 text-left sm:block">
+            <span className="block text-[10px] uppercase tracking-[0.22em] text-[var(--foreground)]/45">Assistant</span>
+            <span className="block font-medium leading-tight">Chad</span>
+          </span>
         </button>,
         document.body
       ) : null}
       {/* Full chat dropdown */}
       {typeof document !== 'undefined' && showFullChat ? createPortal(
         <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50"
-          style={{ paddingLeft: '1rem', paddingRight: '1rem', paddingTop: '0.25rem', paddingBottom: '0.25rem' }}
-          onClick={() => {
-            setShowFullChat(false);
-            setOpen(false);
-          }}
+          className="fixed inset-0 z-[9999] bg-black/45"
+          onClick={closeDrawer}
         >
           <div 
             ref={chatDropdownRef}
             data-chat-dropdown
-            className="relative w-full rounded-2xl border border-[var(--foreground)]/20 bg-[var(--background)]/95 backdrop-blur-md shadow-2xl flex flex-col"
+            className="relative flex w-full flex-col overflow-hidden rounded-[28px] border border-[var(--foreground)]/14 bg-[var(--background)]/96 backdrop-blur-xl"
             style={{
-              maxWidth: 'min(1000px, calc(100vw - 2rem))',
-              maxHeight: 'calc(100vh - 0.5rem)',
-              height: 'calc(100vh - 0.5rem)',
-              width: '100%',
+              width: 'min(32rem, calc(100vw - 1rem))',
+              height: 'min(44rem, calc(100vh - 1rem))',
+              maxHeight: 'calc(100vh - 1rem)',
+              position: 'fixed',
+              right: 'max(0.5rem, calc(env(safe-area-inset-right, 0px) + 0.25rem))',
+              bottom: 'max(0.5rem, calc(env(safe-area-inset-bottom, 0px) + 0.25rem))',
+              boxShadow: '0 26px 60px rgba(0, 0, 0, 0.54)',
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 border-b border-[var(--foreground)]/10" style={{ paddingTop: '0.5rem', paddingBottom: '0.5rem' }}>
-              <div className="flex items-center gap-2">
-                <div className="synapse-style h-6 w-6 rounded-full" />
-                <div className="font-semibold text-[var(--foreground)]" style={{ fontSize: '1.05rem' }}>Chad</div>
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-24 opacity-90" style={{ background: 'radial-gradient(circle at top left, rgba(0,229,255,0.12), transparent 44%), radial-gradient(circle at top right, rgba(255,45,150,0.12), transparent 40%)' }} />
+            <div className="relative flex items-center justify-between border-b border-[var(--foreground)]/10 px-5 py-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-3">
+                  <div className="synapse-style h-9 w-9 rounded-full" />
+                  <div className="min-w-0">
+                    <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--foreground)]/48">Assistant</div>
+                    <div className="truncate text-base font-semibold text-[var(--foreground)]">Chad</div>
+                  </div>
+                </div>
+                <div className="mt-2 text-xs text-[var(--foreground)]/58">
+                  {routeLabel}. Chad can explain this page, navigate, and use Synapse tools.
+                </div>
               </div>
-              <button
-                onClick={() => {
-                  setShowFullChat(false);
-                  setOpen(false);
-                }}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--foreground)]/60 hover:text-[var(--foreground)] hover:bg-[var(--foreground)]/10 transition-colors"
-                aria-label="Close"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
+              <div className="flex items-start gap-2 pl-3">
+                <button
+                  onClick={startNewChat}
+                  className="inline-flex h-9 items-center rounded-full border border-[var(--foreground)]/10 px-3 text-xs font-medium text-[var(--foreground)]/72 hover:border-[var(--foreground)]/18 hover:text-[var(--foreground)] transition-colors"
+                >
+                  New chat
+                </button>
+                <button
+                  onClick={closeDrawer}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-[var(--foreground)]/60 hover:text-[var(--foreground)] hover:bg-[var(--foreground)]/8 transition-colors"
+                  aria-label="Close"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
             </div>
             
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-6 space-y-4 min-h-0" style={{ paddingTop: '0.5rem', paddingBottom: '0.5rem' }}>
               {messages.length === 0 && (
-                <div className="text-[var(--foreground)]/60" style={{ fontSize: '0.9rem' }}>Ask a question about this page. I'll use the current page content as context.</div>
+                <div className="text-[var(--foreground)]/60" style={{ fontSize: '0.9rem' }}>
+                  Ask about this page, your courses, Exam Snipe, Practice, or Surge. Chad can also navigate and help you use Synapse.
+                </div>
               )}
               {messages.map((m, i) => {
                 if (m.role === 'system' || m.hidden) return null;
@@ -4753,7 +4960,7 @@ function ChatDropdown({ fullscreen = false, hasPremiumAccess = true }: { fullscr
                       sendMessage();
                     }
                   }}
-                  placeholder="Chat with Chad..."
+                  placeholder="Ask Chad to explain, navigate, or use a tool..."
                   disabled={sending}
                   className="flex-1 bg-transparent border-none outline-none text-[var(--foreground)] placeholder:text-[var(--foreground)]/60 focus:outline-none resize-none overflow-hidden"
                   style={{ 
@@ -5709,11 +5916,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         )}
-        {/* Chat button positioned just below header */}
-        {authChecked && isAuthenticated && !isMobile && hasPremiumAccess && (
-          <div className="fixed left-1/2 transform -translate-x-1/2 z-40" style={{ top: 'calc(3.5rem + max(3px, calc(env(safe-area-inset-top, 0px) / 2)) - 0.2rem)' }}>
-            <ChatDropdown hasPremiumAccess={hasPremiumAccess} />
-          </div>
+        {authChecked && isAuthenticated && hasPremiumAccess && (
+          <ChatDropdown hasPremiumAccess={hasPremiumAccess} />
         )}
         <main className="flex-1">{children}</main>
       </div>

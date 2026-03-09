@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import Modal from "@/components/Modal";
 import GlowSpinner from "@/components/GlowSpinner";
+import { MVP_FEATURES } from "@/lib/features";
  
 // Tree view replaced by a simple topic list with actions
 
@@ -3178,6 +3179,7 @@ export default function SubjectPage() {
           </div>
         </Modal>
 
+        {MVP_FEATURES.quickLearn && (
         <Modal open={quickLearnOpen} onClose={() => setQuickLearnOpen(false)}>
           <div className="relative space-y-4">
             {quickLearnLoading && (
@@ -3228,6 +3230,7 @@ export default function SubjectPage() {
             </div>
           </div>
         </Modal>
+        )}
       </div>
       {loading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">

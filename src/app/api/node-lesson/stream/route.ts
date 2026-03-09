@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { requirePremiumAccess } from "@/lib/premium";
+import { modelForTask } from "@/lib/ai-models";
+import { getTrackedOpenAIClient } from "@/lib/openai-tracking";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +54,7 @@ export async function POST(req: Request) {
 
     const target = effectiveLessonsMeta[lessonIndex] || { type: "Full Lesson", title: `Lesson ${lessonIndex + 1}` };
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const client = await getTrackedOpenAIClient({ userId: premiumCheck.user.id });
 
     // Same system prompt as non-streaming version
     const system = [
@@ -137,7 +138,7 @@ export async function POST(req: Request) {
     ].filter(Boolean).join("\n\n");
 
     const stream = await client.chat.completions.create({
-      model: "gpt-4o",
+      model: modelForTask("nodeLessonStream"),
       messages: [
         { role: "system", content: system },
         { role: "user", content: context }
