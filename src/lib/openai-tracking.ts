@@ -121,7 +121,7 @@ export function createTrackedOpenAI({
 
     if (request?.stream) {
       return withStreamUsage(
-        response as AsyncIterable<any>,
+        response as unknown as AsyncIterable<any>,
         (event) => {
           if (!event?.usage) return null;
           return usageFromChat(String(event?.model || model), event.usage);
@@ -141,7 +141,7 @@ export function createTrackedOpenAI({
 
     if (request?.stream) {
       return withStreamUsage(
-        response as AsyncIterable<any>,
+        response as unknown as AsyncIterable<any>,
         (event) => {
           const usage = event?.response?.usage || event?.usage;
           if (!usage) return null;

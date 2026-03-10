@@ -121,11 +121,11 @@ Examples of acceptable sentence 2:
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
+        const write = (obj: WelcomeEvent) =>
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
         try {
           // Simple name - just use "Synapse"
           const aiName = "Chad";
-          const write = (obj: WelcomeEvent) =>
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
 
           // Send the name first
           write({ type: "name", content: aiName });

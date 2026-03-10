@@ -2108,13 +2108,9 @@ Surge is for those who want to minimize friction and get results fast. I will pr
     const isManualSend = !messageOverride;
     const hasAttachments = isManualSend && chatAttachments.length > 0;
     if ((!text && !hasAttachments) || !welcomeText || homepageSending || isTutorialActive) return;
-    
-    // If this is the first message, add the welcome message as the first assistant message
-    const isFirstMessage = homepageMessages.length === 0;
-    if (isFirstMessage) {
-      setHomepageMessages([{ role: 'assistant', content: welcomeText }]);
-    }
-    
+
+    const shouldSeedWelcome = homepageMessages.length === 0;
+
     // Add user message
     const attachmentsForMessage = hasAttachments ? [...chatAttachments] : [];
     const userMessage: HomepageMessage = {
@@ -2122,7 +2118,6 @@ Surge is for those who want to minimize friction and get results fast. I will pr
       content: text,
       ...(attachmentsForMessage.length ? { attachments: attachmentsForMessage } : {})
     };
-    setHomepageMessages(prev => [...prev, userMessage]);
     if (isManualSend) {
       setInputValue("");
       setChatAttachments([]);
@@ -2142,9 +2137,13 @@ Surge is for those who want to minimize friction and get results fast. I will pr
 
     if (!hasAttachments && text.toLowerCase() === 'create course') {
       const uploadId = `create-course-${Date.now()}`;
-      setHomepageMessages(prev => [
-        ...prev,
-        {
+      setHomepageMessages(prev => {
+        const next = [...prev];
+        if (shouldSeedWelcome && next.length === 0) {
+          next.push({ role: 'assistant', content: welcomeText });
+        }
+        next.push(userMessage);
+        next.push({
           role: 'assistant',
           content: "Drop your course files below or type a detailed description of the course and I'll build it for you. If you don't have files, just describe the course and I'll handle the rest.",
           uiElements: [
@@ -2158,13 +2157,24 @@ Surge is for those who want to minimize friction and get results fast. I will pr
               }
             }
           ]
-        }
-      ]);
+        });
+        return next;
+      });
       setHomepageSending(false);
       setShowThinking(false);
       thinkingRef.current = false;
       return;
     }
+
+    setHomepageMessages(prev => {
+      const next = [...prev];
+      if (shouldSeedWelcome && next.length === 0) {
+        next.push({ role: 'assistant', content: welcomeText });
+      }
+      next.push(userMessage);
+      next.push({ role: 'assistant', content: '', uiElements: [], isLoading: true });
+      return next;
+    });
 
     try {
       // Get course context
